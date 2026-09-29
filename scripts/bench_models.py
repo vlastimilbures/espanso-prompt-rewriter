@@ -272,18 +272,11 @@ def run_one(
     # A --system-prompt-file candidate gets the same token filling as a shipped profile.
     sys_prompt = render(PROFILES["default"] if sys_prompt is None else sys_prompt, cfg.persona)
 
+    # Identity of this run, shared by every Result it can produce.
+    who = {"model": model, "draft": draft_name, "run": run, "pin": pin, "effort": effort}
     if budget.exhausted():
         return Result(
-            model,
-            draft_name,
-            run,
-            0.0,
-            0,
-            0,
-            pin=pin,
-            effort=effort,
-            skipped=True,
-            error="budget exhausted",
+            **who, seconds=0.0, out_tokens=0, in_tokens=0, skipped=True, error="budget exhausted"
         )
 
     started = time.monotonic()
@@ -300,16 +293,7 @@ def run_one(
                 continue
             elapsed = time.monotonic() - started
             return Result(
-                model,
-                draft_name,
-                run,
-                elapsed,
-                0,
-                0,
-                pin=pin,
-                effort=effort,
-                retried=retried,
-                error=message,
+                **who, seconds=elapsed, out_tokens=0, in_tokens=0, retried=retried, error=message
             )
     elapsed = time.monotonic() - started
 
@@ -334,16 +318,12 @@ def run_one(
     slug = spec.replace("/", "_").replace("@", "__at__").replace("~", "__effort__")
     (outdir / f"{slug}__{draft_name}__{run}.txt").write_text(text, encoding="utf-8")
     return Result(
-        model=model,
-        draft=draft_name,
-        run=run,
+        **who,
         seconds=elapsed,
         out_tokens=int(usage.get("completion_tokens", 0)),
         in_tokens=int(usage.get("prompt_tokens", 0)),
         cost=cost,
         backend=str(body.get("provider", "")),
-        pin=pin,
-        effort=effort,
         reasoning_tokens=reasoning_tokens,
         finish_reason=finish_reason,
         retried=retried,

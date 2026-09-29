@@ -1,14 +1,24 @@
+import pyperclip
 import pytest
 from typer.testing import CliRunner
 
+import prompt_workflow.cli as cli
 from prompt_workflow.cli import _read_input, app
 from prompt_workflow.providers.base import ProviderError
 
 runner = CliRunner()
 
 
+def improve(*args, input=None):
+    return runner.invoke(app, ["improve", *args], input=input)
+
+
+def _no_clipboard(*args):
+    raise pyperclip.PyperclipException("no clipboard mechanism")
+
+
 # _read_input reads from the requested source, and rejects unknown sources.
-def test_read_input_stdin_and_argument():
+def test_read_input_argument():
     assert _read_input("argument", "hello") == "hello"
 
 
@@ -19,267 +29,129 @@ def test_read_input_invalid_source():
 
 # _read_input surfaces a pyperclip failure as a ProviderError (regression test for 1.1).
 def test_read_input_clipboard_unavailable(monkeypatch):
-    import pyperclip
-
-    import prompt_workflow.cli as mod
-
-    def _boom():
-        raise pyperclip.PyperclipException("no clipboard mechanism")
-
-    monkeypatch.setattr(mod.pyperclip, "paste", _boom)
+    monkeypatch.setattr(cli.pyperclip, "paste", _no_clipboard)
     with pytest.raises(ProviderError, match="Clipboard unavailable"):
         _read_input("clipboard", None)
 
 
 # A clipboard failure at the CLI level surfaces inline instead of a traceback.
 def test_cli_clipboard_unavailable_reports_inline(monkeypatch):
-    import pyperclip
-
-    import prompt_workflow.cli as mod
-
-    def _boom():
-        raise pyperclip.PyperclipException("no clipboard mechanism")
-
-    monkeypatch.setattr(mod.pyperclip, "paste", _boom)
-    result = runner.invoke(app, ["improve", "--provider", "ollama", "--source", "clipboard"])
+    monkeypatch.setattr(cli.pyperclip, "paste", _no_clipboard)
+    result = improve("--provider", "ollama", "--source", "clipboard")
     assert "[prompt-workflow: Clipboard unavailable" in result.stdout
     assert result.exit_code == 0
 
 
-# OpenRouter call is blocked when the draft matches the redaction gate.
-def test_cloud_blocked_on_sensitive_content(monkeypatch):
+# Each cloud call is blocked when the draft matches the redaction gate.
+@pytest.mark.parametrize("provider", ["openrouter", "anthropic"])
+def test_cloud_blocked_on_sensitive_content(monkeypatch, provider):
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
-    monkeypatch.delenv("ALLOW_CLOUD_OVERRIDE", raising=False)
-    result = runner.invoke(
-        app,
-        [
-            "improve",
-            "--provider",
-            "openrouter",
-            "--source",
-            "argument",
-            "--text",
-            "customer data 4111 1111 1111 1111",
-        ],
-    )
-    assert "Blocked cloud call" in result.stdout
-
-
-# Anthropic call is also blocked when the draft matches the redaction gate.
-def test_anthropic_cloud_blocked_on_sensitive_content(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    monkeypatch.delenv("ALLOW_CLOUD_OVERRIDE", raising=False)
-    result = runner.invoke(
-        app,
-        [
-            "improve",
-            "--provider",
-            "anthropic",
-            "--source",
-            "argument",
-            "--text",
-            "customer data 4111 1111 1111 1111",
-        ],
-    )
+    draft = "customer data 4111 1111 1111 1111"
+    result = improve("--provider", provider, "--source", "argument", "--text", draft)
     assert "Blocked cloud call" in result.stdout
 
 
 # ALLOW_CLOUD_OVERRIDE=true lets sensitive content through to the cloud provider.
-def test_anthropic_cloud_override_allows_sensitive_content(monkeypatch):
-    import prompt_workflow.cli as mod
-
-    class _Stub:
-        def generate(self, prompt, system_prompt, model=None):
-            return "improved"
-
+def test_anthropic_cloud_override_allows_sensitive_content(monkeypatch, stub_provider):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("ALLOW_CLOUD_OVERRIDE", "true")
-    monkeypatch.setattr(mod, "make_provider", lambda name, cfg: _Stub())
-    result = runner.invoke(
-        app,
-        [
-            "improve",
-            "--provider",
-            "anthropic",
-            "--source",
-            "argument",
-            "--text",
-            "customer data 4111 1111 1111 1111",
-        ],
-    )
+    draft = "customer data 4111 1111 1111 1111"
+    result = improve("--provider", "anthropic", "--source", "argument", "--text", draft)
     assert result.stdout == "improved"
 
 
 # Blank input surfaces as an inline message instead of a blank expansion.
 def test_empty_input_reports_inline():
-    result = runner.invoke(
-        app, ["improve", "--provider", "ollama", "--source", "argument", "--text", "   "]
-    )
+    result = improve("--provider", "ollama", "--source", "argument", "--text", "   ")
     assert "Input is empty" in result.stdout
 
 
+# An oversized draft (an accidental copy of a log or document) is refused inline.
+def test_too_long_input_reports_inline():
+    result = improve("--provider", "ollama", "--source", "stdin", input="x" * 50_001)
+    assert result.exit_code == 0
+    assert result.stdout == "[prompt-workflow: Input is too long (50001 chars, max 50000)]"
+
+
 # CLI output has no trailing newline, since Espanso inserts stdout verbatim.
-def test_output_has_no_trailing_newline(monkeypatch):
-    import prompt_workflow.cli as mod
-
-    class _Stub:
-        def generate(self, prompt, system_prompt, model=None):
-            return "clean output"
-
-    monkeypatch.setattr(mod, "make_provider", lambda name, cfg: _Stub())
-    result = runner.invoke(
-        app, ["improve", "--provider", "ollama", "--source", "argument", "--text", "draft"]
-    )
+def test_output_has_no_trailing_newline(stub_provider):
+    stub_provider.result = "clean output"
+    result = improve("--provider", "ollama", "--source", "argument", "--text", "draft")
     assert result.stdout == "clean output"
-
-
-class _Stub:
-    def generate(self, prompt, system_prompt, model=None):
-        return "improved"
 
 
 # An unknown --provider still yields an inline marker with exit 0, not a Typer usage
 # error on stderr (why the options are plain strings rather than Enum choices).
 def test_unknown_provider_reports_inline():
-    result = runner.invoke(
-        app, ["improve", "--provider", "bogus", "--source", "argument", "--text", "draft"]
-    )
+    result = improve("--provider", "bogus", "--source", "argument", "--text", "draft")
     assert result.exit_code == 0
     assert result.stdout.startswith("[prompt-workflow: Unknown provider 'bogus'")
 
 
 # An unknown profile is a ValueError, reported inline without the "unexpected" prefix.
-def test_unknown_profile_reports_inline(monkeypatch):
-    import prompt_workflow.cli as mod
-
-    monkeypatch.setattr(mod, "make_provider", lambda name, cfg: _Stub())
-    result = runner.invoke(
-        app, ["improve", "--profile", "nope", "--source", "argument", "--text", "draft"]
-    )
+def test_unknown_profile_reports_inline(stub_provider):
+    result = improve("--profile", "nope", "--source", "argument", "--text", "draft")
     assert result.exit_code == 0
     assert result.stdout.startswith("[prompt-workflow: Unknown profile: nope")
 
 
 # Any other exception is still caught and marked as unexpected, never a traceback.
-def test_unexpected_error_reports_inline(monkeypatch):
-    import prompt_workflow.cli as mod
-
-    class _Boom:
-        def generate(self, prompt, system_prompt, model=None):
-            raise KeyError("kaboom")
-
-    monkeypatch.setattr(mod, "make_provider", lambda name, cfg: _Boom())
-    result = runner.invoke(app, ["improve", "--source", "argument", "--text", "draft"])
+def test_unexpected_error_reports_inline(stub_provider):
+    stub_provider.exc = KeyError("kaboom")
+    result = improve("--source", "argument", "--text", "draft")
     assert result.exit_code == 0
     assert result.stdout == "[prompt-workflow: unexpected error: 'kaboom']"
 
 
 # --copy writes the result to the clipboard and still prints it.
-def test_copy_writes_clipboard(monkeypatch):
-    import prompt_workflow.cli as mod
-
+def test_copy_writes_clipboard(monkeypatch, stub_provider):
     copied = []
-    monkeypatch.setattr(mod, "make_provider", lambda name, cfg: _Stub())
-    monkeypatch.setattr(mod.pyperclip, "copy", copied.append)
-    result = runner.invoke(app, ["improve", "--copy", "--source", "argument", "--text", "draft"])
+    monkeypatch.setattr(cli.pyperclip, "copy", copied.append)
+    result = improve("--copy", "--source", "argument", "--text", "draft")
     assert result.stdout == "improved"
     assert copied == ["improved"]
 
 
 # A clipboard failure on --copy surfaces inline instead of a traceback.
-def test_copy_clipboard_unavailable_reports_inline(monkeypatch):
-    import pyperclip
-
-    import prompt_workflow.cli as mod
-
-    def _boom(text):
-        raise pyperclip.PyperclipException("no clipboard mechanism")
-
-    monkeypatch.setattr(mod, "make_provider", lambda name, cfg: _Stub())
-    monkeypatch.setattr(mod.pyperclip, "copy", _boom)
-    result = runner.invoke(app, ["improve", "--copy", "--source", "argument", "--text", "draft"])
+def test_copy_clipboard_unavailable_reports_inline(monkeypatch, stub_provider):
+    monkeypatch.setattr(cli.pyperclip, "copy", _no_clipboard)
+    result = improve("--copy", "--source", "argument", "--text", "draft")
     assert result.stdout.startswith("[prompt-workflow: Clipboard unavailable")
 
 
 # --source stdin reads the draft from standard input.
-def test_stdin_source(monkeypatch):
-    import prompt_workflow.cli as mod
-
-    seen = []
-
-    class _Echo:
-        def generate(self, prompt, system_prompt, model=None):
-            seen.append(prompt)
-            return "ok"
-
-    monkeypatch.setattr(mod, "make_provider", lambda name, cfg: _Echo())
-    result = runner.invoke(app, ["improve", "--source", "stdin"], input="from stdin")
-    assert result.stdout == "ok"
-    assert seen == ["from stdin"]
+def test_stdin_source(stub_provider):
+    result = improve("--source", "stdin", input="from stdin")
+    assert result.stdout == "improved"
+    assert stub_provider.calls[0]["prompt"] == "from stdin"
 
 
 # improve builds the system prompt with the configured persona.
-def test_improve_passes_persona(monkeypatch):
-    import prompt_workflow.cli as mod
-
-    seen = []
-
-    class _Capture:
-        def generate(self, prompt, system_prompt, model=None):
-            seen.append(system_prompt)
-            return "ok"
-
+def test_improve_passes_persona(monkeypatch, stub_provider):
     monkeypatch.setenv("PROMPT_PERSONA", "I am a tester.")
-    monkeypatch.setattr(mod, "make_provider", lambda name, cfg: _Capture())
-    runner.invoke(app, ["improve", "--profile", "default", "--source", "argument", "--text", "d"])
-    assert 'open with "I am a tester."' in seen[0]
+    improve("--profile", "default", "--source", "argument", "--text", "d")
+    assert 'open with "I am a tester."' in stub_provider.calls[0]["system_prompt"]
 
 
 # --tier pro hands make_provider the OPENROUTER_PRO_* settings.
-def test_improve_pro_tier(monkeypatch):
-    import prompt_workflow.cli as mod
-
-    seen = []
-
-    class _Echo:
-        def generate(self, prompt, system_prompt, model=None):
-            return "ok"
-
-    def fake(name, cfg):
-        seen.append(cfg)
-        return _Echo()
-
-    monkeypatch.setattr(mod, "make_provider", fake)
-    args = ["improve", "--tier", "pro", "--source", "argument", "--text", "d"]
-    assert runner.invoke(app, args).stdout == "ok"
-    assert seen[0].openrouter_model == seen[0].openrouter_pro_model
-    assert seen[0].openrouter_reasoning_effort == seen[0].openrouter_pro_reasoning_effort
+def test_improve_pro_tier(stub_provider):
+    assert improve("--tier", "pro", "--source", "argument", "--text", "d").stdout == "improved"
+    _, cfg = stub_provider.built[0]
+    assert cfg.openrouter_model == cfg.openrouter_pro_model
+    assert cfg.openrouter_reasoning_effort == cfg.openrouter_pro_reasoning_effort
 
 
 # The -if- popup's options reach make_provider as settings, and the model slug
 # (without its @endpoint) reaches generate().
-def test_improve_per_call_overrides(monkeypatch):
-    import prompt_workflow.cli as mod
-
-    seen = []
-
-    class _Echo:
-        def generate(self, prompt, system_prompt, model=None):
-            seen.append(model)
-            return "ok"
-
-    def fake(name, cfg):
-        seen.append(cfg)
-        return _Echo()
-
-    monkeypatch.setattr(mod, "make_provider", fake)
+def test_improve_per_call_overrides(stub_provider):
     args = [
-        "improve", "--tier", "pro", "--model", "x/m@auto", "--effort", "high",
+        "--tier", "pro", "--model", "x/m@auto", "--effort", "high",
         "--max-tokens", "8000", "--timeout", "default", "--source", "argument", "--text", "d",
     ]  # fmt: skip
-    assert runner.invoke(app, args).stdout == "ok"
-    cfg, model = seen
-    assert model == "x/m"
+    assert improve(*args).stdout == "improved"
+    _, cfg = stub_provider.built[0]
+    assert stub_provider.calls[0]["model"] == "x/m"
     assert (cfg.openrouter_provider, cfg.openrouter_reasoning_effort) == ("", "high")
     assert cfg.openrouter_max_tokens == 8000
     assert cfg.timeout == cfg.pro_timeout
@@ -287,16 +159,14 @@ def test_improve_per_call_overrides(monkeypatch):
 
 # A bad popup value is reported inline with exit code 0, like any other bad option.
 def test_improve_bad_effort_reports_inline():
-    args = ["improve", "--effort", "extreme", "--source", "argument", "--text", "d"]
-    result = runner.invoke(app, args)
+    result = improve("--effort", "extreme", "--source", "argument", "--text", "d")
     assert result.exit_code == 0
     assert result.stdout.startswith("[prompt-workflow: --effort must be one of")
 
 
 # An unknown tier is reported inline, like any other bad option, with exit code 0.
 def test_improve_unknown_tier():
-    args = ["improve", "--tier", "ultra", "--source", "argument", "--text", "d"]
-    result = runner.invoke(app, args)
+    result = improve("--tier", "ultra", "--source", "argument", "--text", "d")
     assert result.exit_code == 0
     assert result.stdout.startswith("[prompt-workflow: Unknown tier: ultra")
 
@@ -321,12 +191,3 @@ def test_persona_command_placeholder_on_config_error(monkeypatch):
     result = runner.invoke(app, ["persona"])
     assert result.exit_code == 0
     assert result.stdout == "I am working as [role] in [company]."
-
-
-# An oversized draft (an accidental copy of a log or document) is refused inline.
-def test_too_long_input_reports_inline():
-    result = runner.invoke(
-        app, ["improve", "--provider", "ollama", "--source", "stdin"], input="x" * 50_001
-    )
-    assert result.exit_code == 0
-    assert result.stdout == "[prompt-workflow: Input is too long (50001 chars, max 50000)]"
