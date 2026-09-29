@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 from collections.abc import Callable
 from urllib.parse import urlsplit
 
@@ -46,15 +47,38 @@ def _require(value: str | None, env_name: str) -> str:
     return value
 
 
-_LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "::1")
+def _is_loopback(url: str) -> bool:
+    """Whether the URL's host is this machine: localhost, 127.0.0.0/8 or ::1."""
+    host = urlsplit(url).hostname or ""
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 def _require_https(url: str, env_name: str) -> str:
     """Refuse to send an API key over plaintext HTTP; a loopback proxy is the exception."""
-    parts = urlsplit(url)
-    if parts.scheme == "https" or (parts.scheme == "http" and parts.hostname in _LOOPBACK_HOSTS):
+    scheme = urlsplit(url).scheme
+    if scheme == "https" or (scheme == "http" and _is_loopback(url)):
         return url
     raise ProviderError(f"{env_name} must be an https:// URL")
+
+
+def _is_ollama_cloud(model: str) -> bool:
+    """Ollama forwards models tagged `cloud` or `*-cloud` (e.g. gpt-oss:120b-cloud) to
+    ollama.com instead of running them locally."""
+    tag = model.partition(":")[2]
+    return tag == "cloud" or tag.endswith("-cloud")
+
+
+def _gate(inner: Provider, cfg: Settings) -> GatedProvider:
+    return GatedProvider(
+        inner,
+        allow_override=cfg.allow_cloud_override,
+        extra_patterns=compile_extra(cfg.extra_patterns),
+    )
 
 
 def make_provider(
@@ -65,50 +89,59 @@ def make_provider(
     on_response: Callable[[dict[str, object]], None] | None = None,
     title: str = APP_TITLE,
 ) -> Provider:
-    """Build the named provider from settings. Cloud providers come wrapped in the
-    data-protection gate, so nothing built here can skip it.
+    """Build the named provider from settings. Anything that can send the draft off this
+    machine comes wrapped in the data-protection gate: the cloud providers always, and
+    Ollama or LM Studio when the base URL is not loopback or (Ollama) the model is a cloud
+    model. Nothing built here can skip it.
 
     ``extra_body``, ``on_response`` and ``title`` only apply to OpenRouter; they let
     scripts/bench_models.py request usage/cost data through the same construction path.
     """
     if name == "ollama":
-        return OllamaProvider(cfg.ollama_base_url, cfg.ollama_model, cfg.timeout, cfg.ollama_think)
+        ollama = OllamaProvider(
+            base_url=cfg.ollama_base_url,
+            model=cfg.ollama_model,
+            timeout=cfg.timeout,
+            think=cfg.ollama_think,
+            temperature=cfg.temperature,
+        )
+        local = _is_loopback(cfg.ollama_base_url) and not _is_ollama_cloud(cfg.ollama_model)
+        return ollama if local else _gate(ollama, cfg)
     if name == "lmstudio":
-        return OpenAICompatibleProvider(
+        lmstudio = OpenAICompatibleProvider(
             base_url=cfg.lmstudio_base_url,
-            default_model=cfg.lmstudio_model,
+            model=cfg.lmstudio_model,
             timeout=cfg.timeout,
             temperature=cfg.temperature,
             label="LM Studio",
         )
-
-    inner: Provider
+        return lmstudio if _is_loopback(cfg.lmstudio_base_url) else _gate(lmstudio, cfg)
     if name == "openrouter":
-        inner = OpenAICompatibleProvider(
-            base_url=_require_https(cfg.openrouter_base_url, "OPENROUTER_BASE_URL"),
-            default_model=cfg.openrouter_model,
-            api_key=_require(cfg.openrouter_api_key, "OPENROUTER_API_KEY"),
-            timeout=cfg.timeout,
-            max_tokens=cfg.openrouter_max_tokens,
-            temperature=cfg.temperature,
-            extra_headers={"X-Title": title},
-            label="OpenRouter",
-            extra_body={**openrouter_body(cfg), **(extra_body or {})},
-            on_response=on_response,
+        return _gate(
+            OpenAICompatibleProvider(
+                base_url=_require_https(cfg.openrouter_base_url, "OPENROUTER_BASE_URL"),
+                model=cfg.openrouter_model,
+                api_key=_require(cfg.openrouter_api_key, "OPENROUTER_API_KEY"),
+                timeout=cfg.timeout,
+                max_tokens=cfg.openrouter_max_tokens,
+                temperature=cfg.temperature,
+                extra_headers={"X-Title": title},
+                label="OpenRouter",
+                extra_body={**openrouter_body(cfg), **(extra_body or {})},
+                on_response=on_response,
+            ),
+            cfg,
         )
-    elif name == "anthropic":
-        inner = AnthropicProvider(
-            base_url=_require_https(cfg.anthropic_base_url, "ANTHROPIC_BASE_URL"),
-            default_model=cfg.anthropic_model,
-            api_key=_require(cfg.anthropic_api_key, "ANTHROPIC_API_KEY"),
-            timeout=cfg.timeout,
-            max_tokens=cfg.anthropic_max_tokens,
-            temperature=cfg.temperature,
+    if name == "anthropic":
+        return _gate(
+            AnthropicProvider(
+                base_url=_require_https(cfg.anthropic_base_url, "ANTHROPIC_BASE_URL"),
+                model=cfg.anthropic_model,
+                api_key=_require(cfg.anthropic_api_key, "ANTHROPIC_API_KEY"),
+                timeout=cfg.timeout,
+                max_tokens=cfg.anthropic_max_tokens,
+                temperature=cfg.temperature,
+            ),
+            cfg,
         )
-    else:
-        raise ProviderError(f"Unknown provider '{name}'. Use {', '.join(PROVIDER_NAMES)}.")
-    return GatedProvider(
-        inner,
-        allow_override=cfg.allow_cloud_override,
-        extra_patterns=compile_extra(cfg.extra_patterns),
-    )
+    raise ProviderError(f"Unknown provider '{name}'. Use {', '.join(PROVIDER_NAMES)}.")

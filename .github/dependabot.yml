@@ -1,10 +1,14 @@
-# Actions are pinned to commit SHAs; Dependabot keeps the pins and the uv.lock current.
+# Actions and pre-commit hooks are pinned to commit SHAs; Dependabot keeps those pins and
+# uv.lock current. The cooldown skips releases younger than a week, the window in which a
+# hijacked package is usually caught and yanked; security updates are not delayed by it.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       actions:
         patterns: ["*"]
@@ -12,6 +16,17 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       python:
+        patterns: ["*"]
+  - package-ecosystem: pre-commit
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      pre-commit:
         patterns: ["*"]

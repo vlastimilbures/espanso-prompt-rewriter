@@ -1,3 +1,7 @@
+import os
+import subprocess
+import sys
+
 import pyperclip
 import pytest
 from typer.testing import CliRunner
@@ -27,7 +31,7 @@ def test_read_input_invalid_source():
         _read_input("bogus", None)
 
 
-# _read_input surfaces a pyperclip failure as a ProviderError (regression test for 1.1).
+# _read_input surfaces a pyperclip failure as a ProviderError.
 def test_read_input_clipboard_unavailable(monkeypatch):
     monkeypatch.setattr(cli.pyperclip, "paste", _no_clipboard)
     with pytest.raises(ProviderError, match="Clipboard unavailable"):
@@ -142,8 +146,8 @@ def test_improve_pro_tier(stub_provider):
     assert cfg.openrouter_reasoning_effort == cfg.openrouter_pro_reasoning_effort
 
 
-# The -if- popup's options reach make_provider as settings, and the model slug
-# (without its @endpoint) reaches generate().
+# The -if- popup's options reach make_provider as settings: the model slug without its
+# @endpoint, the endpoint as the pin (@auto: none), effort, max tokens and timeout.
 def test_improve_per_call_overrides(stub_provider):
     args = [
         "--tier", "pro", "--model", "x/m@auto", "--effort", "high",
@@ -151,7 +155,7 @@ def test_improve_per_call_overrides(stub_provider):
     ]  # fmt: skip
     assert improve(*args).stdout == "improved"
     _, cfg = stub_provider.built[0]
-    assert stub_provider.calls[0]["model"] == "x/m"
+    assert cfg.openrouter_model == "x/m"
     assert (cfg.openrouter_provider, cfg.openrouter_reasoning_effort) == ("", "high")
     assert cfg.openrouter_max_tokens == 8000
     assert cfg.timeout == cfg.pro_timeout
@@ -191,3 +195,54 @@ def test_persona_command_placeholder_on_config_error(monkeypatch):
     result = runner.invoke(app, ["persona"])
     assert result.exit_code == 0
     assert result.stdout == "I am working as [role] in [company]."
+
+
+# --model applies to whichever provider runs, not only OpenRouter.
+def test_model_override_reaches_local_provider(stub_provider):
+    improve("--provider", "ollama", "--model", "llama4:8b", "--source", "argument", "--text", "d")
+    name, cfg = stub_provider.built[0]
+    assert (name, cfg.ollama_model) == ("ollama", "llama4:8b")
+
+
+# Characters that could hijack the app Espanso types into (an escape sequence ending a
+# terminal's bracketed paste, bidi overrides, invisible tag characters) never reach stdout.
+# Tabs and newlines survive.
+def test_output_strips_unsafe_characters(stub_provider):
+    stub_provider.result = "a\x1b[201~b\u202ec\U000e0041d\r\n\te\x07"
+    result = improve("--source", "argument", "--text", "draft")
+    assert result.stdout == "a[201~bcd\n\te"
+
+
+# The same characters are stripped from the draft before the gate and the model see it.
+def test_draft_strips_unsafe_characters(stub_provider):
+    improve("--source", "argument", "--text", "sum\x1bmarize \U000e0049\U000e0047this")
+    assert stub_provider.calls[0]["prompt"] == "summarize this"
+
+
+# Error markers go through the same sink.
+def test_error_marker_strips_unsafe_characters(stub_provider):
+    stub_provider.exc = ProviderError("bad\x1b[0m thing")
+    assert (
+        improve("--source", "argument", "--text", "d").stdout == "[prompt-workflow: bad[0m thing]"
+    )
+
+
+# Output is UTF-8 whatever the locale: on Windows a piped stdout defaults to the ANSI code
+# page, where printing a Czech or Vietnamese rewrite used to crash into a blank expansion.
+def test_output_is_utf8_under_legacy_code_page(tmp_path):
+    persona = "Jsem ř — người dùng"
+    env = {
+        **os.environ,
+        "PYTHONIOENCODING": "cp1252",
+        "PROMPT_PERSONA": persona,
+        "PROMPT_WORKFLOW_ENV": str(tmp_path / ".env"),
+    }
+    proc = subprocess.run(
+        [sys.executable, "-m", "prompt_workflow.cli", "persona"],
+        capture_output=True,
+        env=env,
+        timeout=60,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.decode("utf-8") == persona

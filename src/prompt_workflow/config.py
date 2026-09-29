@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 import re
 from collections.abc import Callable
@@ -75,17 +76,20 @@ def _load_dotenv() -> None:
             return
 
 
-def _env(name: str, default: str, parse: Callable[[str], Any] = str) -> Any:
-    """A dataclass field read from env var `name` when Settings() is instantiated."""
+def _env(
+    name: str, default: str, parse: Callable[[str], Any] = str, *, secret: bool = False
+) -> Any:
+    """A dataclass field read from env var `name` when Settings() is instantiated. A
+    ``secret`` stays out of repr(), so a traceback or test failure cannot print it."""
 
     def read() -> Any:
         raw = os.getenv(name, default)
         try:
             return parse(raw)
         except ValueError as exc:
-            raise ValueError(f"{name} must be a number, got {raw!r}") from exc
+            raise ValueError(f"{name} must be {exc}, got {raw!r}") from None
 
-    return field(default_factory=read, metadata={"env": name})
+    return field(default_factory=read, repr=not secret, metadata={"env": name})
 
 
 def env_names() -> tuple[str, ...]:
@@ -93,8 +97,34 @@ def env_names() -> tuple[str, ...]:
     return tuple(f.metadata["env"] for f in fields(Settings))
 
 
-def _is_true(raw: str) -> bool:
+# Parsers raise ValueError(what the value must be); _env and _override name the setting.
+def _bool(raw: str) -> bool:
+    # Strict, so a typo such as OLLAMA_THINK=1 is reported instead of silently meaning false.
+    if raw.lower() not in ("true", "false"):
+        raise ValueError("true or false")
     return raw.lower() == "true"
+
+
+def _number(
+    cast: Callable[[str], float], expected: str, ok: Callable[[float], bool]
+) -> Callable[[str], float]:
+    """Parser for a finite number that passes ``ok``: an `inf` timeout would hang Espanso."""
+
+    def parse(raw: str) -> float:
+        try:
+            value = cast(raw)
+        except ValueError:
+            value = math.nan
+        if not (math.isfinite(value) and ok(value)):
+            raise ValueError(expected)
+        return value
+
+    return parse
+
+
+_positive_int = _number(int, "a whole number above 0", lambda v: v > 0)
+_positive_float = _number(float, "a number above 0", lambda v: v > 0)
+_non_negative_float = _number(float, "a number of 0 or more", lambda v: v >= 0)
 
 
 TIERS = ("standard", "pro")
@@ -128,7 +158,7 @@ def _override[T](raw: str | None, option: str, parse: Callable[[str], T]) -> T |
     try:
         return parse(raw)
     except ValueError as exc:
-        raise ValueError(f"{option} must be a number or {KEEP}, got {raw!r}") from exc
+        raise ValueError(f"{option} must be {exc} or {KEEP}, got {raw!r}") from None
 
 
 @dataclass(frozen=True)
@@ -140,16 +170,16 @@ class Settings:
     # Opening sentence of the default profile's CONTEXT and of the -p- snippet, e.g.
     # "I am working as a Head of Data at Example Corp." Empty: no fixed persona.
     persona: str = _env("PROMPT_PERSONA", "")
-    timeout: float = _env("PROMPT_TIMEOUT_SECONDS", "30", float)
+    timeout: float = _env("PROMPT_TIMEOUT_SECONDS", "30", _positive_float)
     # Low by default: the rewrite must reproduce fixed template wordings verbatim.
-    temperature: float = _env("PROMPT_TEMPERATURE", "0.2", float)
+    temperature: float = _env("PROMPT_TEMPERATURE", "0.2", _non_negative_float)
     ollama_base_url: str = _env("OLLAMA_BASE_URL", "http://localhost:11434")
     ollama_model: str = _env("OLLAMA_MODEL", "qwen3:8b")
-    ollama_think: bool = _env("OLLAMA_THINK", "false", _is_true)
+    ollama_think: bool = _env("OLLAMA_THINK", "false", _bool)
     openrouter_base_url: str = _env("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
     openrouter_model: str = _env("OPENROUTER_MODEL", "google/gemini-3.5-flash-lite")
-    openrouter_api_key: str = _env("OPENROUTER_API_KEY", "")
-    openrouter_max_tokens: int = _env("OPENROUTER_MAX_TOKENS", "2400", int)
+    openrouter_api_key: str = _env("OPENROUTER_API_KEY", "", secret=True)
+    openrouter_max_tokens: int = _env("OPENROUTER_MAX_TOKENS", "2400", _positive_int)
     # OpenRouter routes one model slug across many hosts, and the host drives latency,
     # cost and template fidelity (see the benchmark section in README.md). Pin one
     # endpoint tag; empty string restores OpenRouter's own blended routing.
@@ -160,20 +190,20 @@ class Settings:
     openrouter_reasoning_effort: str = _env("OPENROUTER_REASONING_EFFORT", "minimal")
     # Preference, not constraint: a pinned endpoint can be down, and in Espanso that
     # surfaces as an error marker pasted into the editor. Set false for a hard pin.
-    openrouter_allow_fallbacks: bool = _env("OPENROUTER_ALLOW_FALLBACKS", "true", _is_true)
+    openrouter_allow_fallbacks: bool = _env("OPENROUTER_ALLOW_FALLBACKS", "true", _bool)
     # The `pro` tier (-ip-): a reasoning model for hard, multi-part drafts. It
     # swaps in these OpenRouter settings; everything else is shared with the default tier.
     openrouter_pro_model: str = _env("OPENROUTER_PRO_MODEL", "openai/gpt-6-luna")
     openrouter_pro_provider: str = _env("OPENROUTER_PRO_PROVIDER", "openai")
     openrouter_pro_reasoning_effort: str = _env("OPENROUTER_PRO_REASONING_EFFORT", "low")
-    pro_timeout: float = _env("PROMPT_PRO_TIMEOUT_SECONDS", "60", float)
+    pro_timeout: float = _env("PROMPT_PRO_TIMEOUT_SECONDS", "60", _positive_float)
     lmstudio_base_url: str = _env("LMSTUDIO_BASE_URL", "http://localhost:1234/v1")
     lmstudio_model: str = _env("LMSTUDIO_MODEL", "local-model")
     anthropic_base_url: str = _env("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
     anthropic_model: str = _env("ANTHROPIC_MODEL", "claude-sonnet-5")
-    anthropic_api_key: str = _env("ANTHROPIC_API_KEY", "")
-    anthropic_max_tokens: int = _env("ANTHROPIC_MAX_TOKENS", "2400", int)
-    allow_cloud_override: bool = _env("ALLOW_CLOUD_OVERRIDE", "false", _is_true)
+    anthropic_api_key: str = _env("ANTHROPIC_API_KEY", "", secret=True)
+    anthropic_max_tokens: int = _env("ANTHROPIC_MAX_TOKENS", "2400", _positive_int)
+    allow_cloud_override: bool = _env("ALLOW_CLOUD_OVERRIDE", "false", _bool)
     # Extra `;`-separated regexes the data-protection gate blocks on, e.g. internal project
     # code names or customer-ID formats. Compiled by redaction.compile_extra().
     extra_patterns: str = _env("PROMPT_EXTRA_PATTERNS", "")
@@ -202,19 +232,24 @@ class Settings:
     def with_overrides(
         self,
         *,
-        endpoint: str | None = None,
+        model: str | None = None,
         effort: str | None = None,
         max_tokens: str | None = None,
         timeout: str | None = None,
     ) -> Settings:
-        """Per-call overrides from the CLI (the -if- popup). Values arrive as
-        strings; None or `default` keeps the setting. Bad values raise ValueError, which
+        """Per-call overrides from the CLI (the -if- popup). Values arrive as strings; None
+        or `default` keeps the setting. ``model`` applies to whichever provider runs, and its
+        `slug@endpoint` form also sets the OpenRouter pin. Bad values raise ValueError, which
         the CLI prints inline."""
         if effort not in (None, KEEP, *EFFORTS):
             raise ValueError(f"--effort must be one of {', '.join((KEEP, *EFFORTS))}")
-        tokens = _override(max_tokens, "--max-tokens", int)
-        seconds = _override(timeout, "--timeout", float)
+        slug, endpoint = split_model_spec(model)
+        tokens = _override(max_tokens, "--max-tokens", _positive_int)
+        seconds = _override(timeout, "--timeout", _positive_float)
         changes: dict[str, Any] = {}
+        if slug:
+            models = ("ollama_model", "lmstudio_model", "openrouter_model", "anthropic_model")
+            changes |= dict.fromkeys(models, slug)
         if endpoint is not None:
             changes["openrouter_provider"] = endpoint
         if effort not in (None, KEEP):

@@ -75,20 +75,40 @@ def test_with_overrides():
     settings = Settings()
     assert settings.with_overrides() is settings
     assert settings.with_overrides(effort="default", max_tokens="default") is settings
-    custom = settings.with_overrides(endpoint="", effort="high", max_tokens="8000", timeout="120")
-    assert custom.openrouter_provider == ""
+    custom = settings.with_overrides(effort="high", max_tokens="8000", timeout="120")
+    assert custom.openrouter_provider == settings.openrouter_provider
     assert custom.openrouter_reasoning_effort == "high"
     assert (custom.openrouter_max_tokens, custom.anthropic_max_tokens) == (8000, 8000)
     assert custom.timeout == 120.0
     assert custom.openrouter_model == settings.openrouter_model
 
 
+# --model sets every provider's model, so it applies to whichever one runs; its @endpoint
+# part pins OpenRouter (@auto: no pin), and a bare slug keeps the configured pin.
+def test_with_overrides_model():
+    settings = Settings()
+    pinned = settings.with_overrides(model="x/m@auto")
+    models = (
+        pinned.ollama_model,
+        pinned.lmstudio_model,
+        pinned.openrouter_model,
+        pinned.anthropic_model,
+    )
+    assert models == ("x/m",) * 4
+    assert pinned.openrouter_provider == ""
+    assert settings.with_overrides(model="x/m").openrouter_provider == settings.openrouter_provider
+    with pytest.raises(ValueError, match="slug@endpoint"):
+        settings.with_overrides(model="x/m@")
+
+
 @pytest.mark.parametrize(
-    "kwargs,message",
+    ("kwargs", "message"),
     [
         ({"effort": "extreme"}, "--effort must be one of"),
-        ({"max_tokens": "lots"}, "--max-tokens must be a number"),
-        ({"timeout": "soon"}, "--timeout must be a number"),
+        ({"max_tokens": "lots"}, "--max-tokens must be a whole number above 0 or default"),
+        ({"max_tokens": "0"}, "--max-tokens must be a whole number above 0"),
+        ({"timeout": "soon"}, "--timeout must be a number above 0 or default"),
+        ({"timeout": "-5"}, "--timeout must be a number above 0"),
     ],
 )
 def test_with_overrides_rejects_bad_values(kwargs, message):
@@ -96,22 +116,42 @@ def test_with_overrides_rejects_bad_values(kwargs, message):
         Settings().with_overrides(**kwargs)
 
 
-# A non-numeric timeout/temperature/max-tokens env var raises a clear ValueError
-# instead of the CLI leaking Python's opaque "could not convert string to float" message.
+# A bad numeric env var raises a ValueError naming the setting and what it must be,
+# instead of Python's opaque "could not convert string to float". Infinite, NaN, zero and
+# negative values are refused too: an `inf` timeout would hang Espanso.
 @pytest.mark.parametrize(
-    "env_name,attr",
+    ("env_name", "expected"),
     [
-        ("PROMPT_TIMEOUT_SECONDS", "timeout"),
-        ("PROMPT_PRO_TIMEOUT_SECONDS", "pro_timeout"),
-        ("PROMPT_TEMPERATURE", "temperature"),
-        ("OPENROUTER_MAX_TOKENS", "openrouter_max_tokens"),
-        ("ANTHROPIC_MAX_TOKENS", "anthropic_max_tokens"),
+        ("PROMPT_TIMEOUT_SECONDS", "a number above 0"),
+        ("PROMPT_PRO_TIMEOUT_SECONDS", "a number above 0"),
+        ("PROMPT_TEMPERATURE", "a number of 0 or more"),
+        ("OPENROUTER_MAX_TOKENS", "a whole number above 0"),
+        ("ANTHROPIC_MAX_TOKENS", "a whole number above 0"),
     ],
 )
-def test_bad_numeric_env_var_raises(monkeypatch, env_name, attr):
-    monkeypatch.setenv(env_name, "not-a-number")
-    with pytest.raises(ValueError, match=env_name):
-        getattr(Settings(), attr)
+@pytest.mark.parametrize("raw", ["not-a-number", "inf", "nan", "-1"])
+def test_bad_numeric_env_var_raises(monkeypatch, env_name, expected, raw):
+    monkeypatch.setenv(env_name, raw)
+    with pytest.raises(ValueError, match=f"^{env_name} must be {expected}, got '{raw}'$"):
+        Settings()
+
+
+# Zero is refused where it makes no sense, and allowed for temperature.
+def test_zero_values(monkeypatch):
+    monkeypatch.setenv("PROMPT_TEMPERATURE", "0")
+    assert Settings().temperature == 0.0
+    monkeypatch.setenv("OPENROUTER_MAX_TOKENS", "0")
+    with pytest.raises(ValueError, match="OPENROUTER_MAX_TOKENS must be a whole number above 0"):
+        Settings()
+
+
+# API keys never appear in repr(), so a traceback or a failing assertion cannot print them.
+def test_repr_hides_api_keys(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or-secret-value")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "ant-secret-value")
+    text = repr(Settings())
+    assert "secret-value" not in text
+    assert "openrouter_model=" in text
 
 
 # PROMPT_WORKFLOW_ENV names the .env to load; real env vars still win over it.
@@ -197,10 +237,8 @@ def test_load_dotenv_parses_lines(tmp_path, monkeypatch):
     assert os.environ["LMSTUDIO_MODEL"] == "local-model"
 
 
-# Booleans are case-insensitive "true"; anything else (including empty) is false.
-@pytest.mark.parametrize(
-    "raw,expected", [("TRUE", True), ("true", True), ("false", False), ("", False), ("yes", False)]
-)
+# Booleans are "true" or "false" in any case.
+@pytest.mark.parametrize(("raw", "expected"), [("TRUE", True), ("true", True), ("False", False)])
 def test_bool_parsing(monkeypatch, raw, expected):
     monkeypatch.setenv("ALLOW_CLOUD_OVERRIDE", raw)
     monkeypatch.setenv("OLLAMA_THINK", raw)
@@ -209,6 +247,14 @@ def test_bool_parsing(monkeypatch, raw, expected):
     assert settings.allow_cloud_override is expected
     assert settings.ollama_think is expected
     assert settings.openrouter_allow_fallbacks is expected
+
+
+# Anything else is an error, not a silent false: OLLAMA_THINK=1 must not mean "off".
+@pytest.mark.parametrize("raw", ["1", "yes", ""])
+def test_bool_parsing_rejects_other_values(monkeypatch, raw):
+    monkeypatch.setenv("OLLAMA_THINK", raw)
+    with pytest.raises(ValueError, match=f"^OLLAMA_THINK must be true or false, got '{raw}'$"):
+        Settings()
 
 
 # An empty key in .env (as in .env.example) counts as unset for the provider check.

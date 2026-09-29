@@ -21,9 +21,11 @@ that nothing reaches a cloud provider without passing the data-protection gate.
 
 Report privately:
 
-- any way to make a cloud provider call **without** the gate running (a gate bypass)
+- any way to send a draft off the machine **without** the gate running (a gate bypass), through
+  a cloud provider or a local one
 - anything that exposes API keys, for example in output, logs or error messages
 - command injection through the install scripts or the Espanso match files
+- control or escape characters from a model response reaching the pasted output
 
 Report as a normal issue:
 

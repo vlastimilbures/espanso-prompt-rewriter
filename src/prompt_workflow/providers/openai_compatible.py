@@ -15,8 +15,8 @@ class OpenAICompatibleProvider:
     """
 
     base_url: str
-    default_model: str
-    api_key: str | None = None
+    model: str
+    api_key: str | None = field(default=None, repr=False)
     timeout: float = 30
     max_tokens: int | None = None
     temperature: float | None = None
@@ -30,12 +30,12 @@ class OpenAICompatibleProvider:
     def __post_init__(self) -> None:
         self.base_url = self.base_url.rstrip("/")
 
-    def generate(self, prompt: str, system_prompt: str, model: str | None = None) -> str:
+    def generate(self, prompt: str, system_prompt: str) -> str:
         headers = {"Content-Type": "application/json", **self.extra_headers}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         payload: dict[str, object] = {
-            "model": model or self.default_model,
+            "model": self.model,
             "messages": chat_messages(system_prompt, prompt),
         }
         if self.max_tokens:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .base import ProviderError, finalize_content, post_json
 
@@ -17,8 +17,8 @@ class AnthropicProvider:
     """
 
     base_url: str
-    default_model: str
-    api_key: str
+    model: str
+    api_key: str = field(repr=False)
     timeout: float = 30
     max_tokens: int = 1200
     temperature: float | None = None
@@ -26,14 +26,14 @@ class AnthropicProvider:
     def __post_init__(self) -> None:
         self.base_url = self.base_url.rstrip("/")
 
-    def generate(self, prompt: str, system_prompt: str, model: str | None = None) -> str:
+    def generate(self, prompt: str, system_prompt: str) -> str:
         headers = {
             "x-api-key": self.api_key,
             "anthropic-version": ANTHROPIC_VERSION,
             "content-type": "application/json",
         }
         payload: dict[str, object] = {
-            "model": model or self.default_model,
+            "model": self.model,
             "max_tokens": self.max_tokens,
             "system": system_prompt,
             "messages": [{"role": "user", "content": prompt}],

@@ -46,10 +46,13 @@ ALL = pytest.mark.parametrize("name", list(PROVIDERS))
 # --- Wire format: the exact request each provider sends. --------------------------------
 
 
-# Ollama speaks /api/chat with system+user messages, no streaming, and the think flag.
+# Ollama speaks /api/chat with system+user messages, no streaming, the think flag and
+# the temperature as an option.
 def test_ollama_request_shape(fake_http):
     fake_http.reply(_ollama_body("ok"))
-    OllamaProvider("http://x/", "m", timeout=7, think=True).generate("draft", "sys")
+    OllamaProvider("http://x/", "m", timeout=7, think=True, temperature=0.2).generate(
+        "draft", "sys"
+    )
     assert fake_http.client_kwargs == [{"timeout": 7}]
     assert fake_http.calls == [
         {
@@ -62,6 +65,7 @@ def test_ollama_request_shape(fake_http):
                 ],
                 "stream": False,
                 "think": True,
+                "options": {"temperature": 0.2},
             },
             "headers": None,
         }
@@ -80,12 +84,12 @@ def test_openai_compatible_request_shape(fake_http):
         temperature=0.2,
         extra_headers={"X-Title": "t"},
         extra_body={"provider": {"order": ["p"]}},
-    ).generate("draft", "sys", model="override")
+    ).generate("draft", "sys")
     assert fake_http.calls == [
         {
             "url": "http://x/v1/chat/completions",
             "json": {
-                "model": "override",
+                "model": "m",
                 "messages": [
                     {"role": "system", "content": "sys"},
                     {"role": "user", "content": "draft"},
@@ -182,7 +186,7 @@ def test_success_strips_thinking(fake_http, name):
 
 
 @pytest.mark.parametrize(
-    "exc,message",
+    ("exc", "message"),
     [
         (httpx.TimeoutException("slow"), "timed out after 1s"),
         (httpx.ConnectError("refused"), "request failed"),
@@ -215,7 +219,7 @@ def test_invalid_json(fake_http, name):
 
 
 @pytest.mark.parametrize(
-    "name,body",
+    ("name", "body"),
     [
         ("ollama", {"unexpected": True}),
         ("openai_compatible", {"choices": []}),
@@ -297,3 +301,9 @@ def test_truncated_without_text_asks_for_more_tokens(fake_http, name, text):
     fake_http.reply(body)
     with pytest.raises(ProviderError, match=f"^{label} used the whole max-tokens budget"):
         build().generate("d", "s")
+
+
+# API keys never appear in a provider's repr().
+def test_provider_repr_hides_api_key():
+    assert "sekret" not in repr(OpenAICompatibleProvider("http://x", "m", api_key="sekret"))
+    assert "sekret" not in repr(AnthropicProvider("http://x", "m", "sekret"))

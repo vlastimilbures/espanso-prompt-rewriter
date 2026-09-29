@@ -12,7 +12,7 @@ class ProviderError(RuntimeError):
 
 
 class Provider(Protocol):
-    def generate(self, prompt: str, system_prompt: str, model: str | None = None) -> str: ...
+    def generate(self, prompt: str, system_prompt: str) -> str: ...
 
 
 def chat_messages(system_prompt: str, prompt: str) -> list[dict[str, str]]:

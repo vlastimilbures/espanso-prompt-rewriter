@@ -20,7 +20,6 @@ def isolated_env(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     # Point the loader at a per-test file so the developer's real repo .env never loads.
     monkeypatch.setenv("PROMPT_WORKFLOW_ENV", str(tmp_path / ".env"))
-    yield
 
 
 class FakeResponse:
@@ -93,8 +92,8 @@ class StubProvider:
         self.built.append((name, cfg))
         return self
 
-    def generate(self, prompt, system_prompt, model=None):
-        self.calls.append({"prompt": prompt, "system_prompt": system_prompt, "model": model})
+    def generate(self, prompt, system_prompt):
+        self.calls.append({"prompt": prompt, "system_prompt": system_prompt})
         if self.exc:
             raise self.exc
         return self.result

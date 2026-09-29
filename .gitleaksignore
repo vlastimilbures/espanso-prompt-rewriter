@@ -1,0 +1,4 @@
+# Fake test values from the first commit, before tests built them at runtime. Listed by
+# fingerprint (commit:file:rule:line) so nothing else in that file is ever allowlisted.
+25159879f4801b12dc85240394365d47179f0995:tests/test_redaction.py:generic-api-key:123
+25159879f4801b12dc85240394365d47179f0995:tests/test_redaction.py:jwt:54

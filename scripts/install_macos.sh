@@ -73,10 +73,11 @@ fi
 
 # Deploy match files, substituting the absolute CLI path placeholder.
 # Uses python's str.replace (not sed -e) since cli_path may contain
-# characters like '|' or '&' that break a sed substitution.
+# characters like '|' or '&' that break a sed substitution. uv provides the interpreter:
+# a fresh macOS has no python3 until the Command Line Tools are installed.
 for f in espanso/match/*.yml; do
   target="$espanso_dir/match/$(basename "$f")"
-  python3 -c '
+  uv run --no-project --quiet python -c '
 import sys
 text = open(sys.argv[1], encoding="utf-8").read()
 text = text.replace("__PROMPT_WORKFLOW__", sys.argv[2])
@@ -94,6 +95,11 @@ if [ "$with_config" = true ]; then
     cp "$f" "$target.tmp"
     install_file "$target.tmp" "$target"
   done
+fi
+
+# The .env holds API keys: keep it readable by this user only.
+if [ -f "$repo_dir/.env" ]; then
+  chmod 600 "$repo_dir/.env"
 fi
 
 espanso restart || espanso start
