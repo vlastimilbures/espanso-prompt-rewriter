@@ -48,7 +48,8 @@ uv run pytest -m live
 - **Cross-platform.** Everything must work on macOS and Windows. Use `pathlib` and explicit
   timeouts.
 - **Tests.** Unit tests never touch the network; use the `fake_http` fixture in
-  `tests/conftest.py`, which records requests and replays responses. Add a test for every
+  `tests/conftest.py`, which records requests and replays responses, or `stub_provider` to
+  replace the provider behind a CLI test. Add a test for every
   behaviour change, and a regression test for every bug fix.
 - **Triggers.** Keep existing trigger names working. Tests enforce the `-name-` shape, uniqueness
   and no prefix collisions.
@@ -85,6 +86,12 @@ Quote nothing else: `cmd.exe` mangles a command line holding more than one quote
 
 `tests/test_yaml.py` checks the placeholder and quoting, and that the profile and provider exist.
 
+### Add a setting
+
+Add a field to `Settings` in `src/prompt_workflow/config.py` with `_env("NAME", "default")`, then
+document it in the README configuration table and in `.env.example`. `tests/test_docs.py` fails
+until both are done.
+
 ### Add a static snippet or form
 
 Snippets that need no model go in `espanso/match/prompts-core.yml`, as plain Espanso matches
@@ -111,13 +118,16 @@ literal lands in the repo. Patterns specific to one organisation belong in the u
 ### Change the default prompt
 
 Template wording is scored by `scripts/bench_models.py`, and `tests/test_bench.py` checks the
-scored phrases still exist in `prompts/default.md`. A/B a change before proposing it on both the
-standard and pro defaults, and include the before/after pass rates in the pull request:
+scored phrases still exist in `prompts/default.md` and in the static `-p-` template
+(`espanso/match/prompts-template.yml`), so change all three together. A/B a change on both the
+standard and pro defaults before proposing it, and include the before/after pass rates in the
+pull request:
 
 ```bash
-MODELS="google/gemini-3.5-flash-lite@google-ai-studio/flex~minimal openai/gpt-6-luna@openai~low"
-uv run python scripts/bench_models.py --models $MODELS --runs 3
-uv run python scripts/bench_models.py --models $MODELS --runs 3 --system-prompt-file candidate.md
+uv run python scripts/bench_models.py --runs 3 --models \
+  google/gemini-3.5-flash-lite@google-ai-studio/flex~minimal openai/gpt-6-luna@openai~low
+uv run python scripts/bench_models.py --runs 3 --system-prompt-file candidate.md --models \
+  google/gemini-3.5-flash-lite@google-ai-studio/flex~minimal openai/gpt-6-luna@openai~low
 ```
 
 Small models such as flash-lite need an explicit trigger for *each* variant of a branching step.

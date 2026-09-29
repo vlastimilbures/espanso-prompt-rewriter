@@ -6,6 +6,36 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Security
+- The redaction gate scans in linear time. An 80,000-character clipboard used to take
+  15 s and freeze Espanso before any request timeout applied.
+- The gate also scans a Unicode-normalised copy of the draft, so no-break or zero-width
+  spaces, soft hyphens and fullwidth digits no longer hide a card number or API key.
+- Drafts over 50,000 characters are refused.
+
+### Fixed
+- The installers no longer overwrite Espanso's own `match/base.yml`. The `-p-` template
+  now ships as `prompts-template.yml`. A `base.yml` deployed by an earlier version is
+  backed up and removed, and any match or config file whose content differs is backed
+  up to `.bak-<timestamp>` before it is replaced.
+- Windows installer: match files are read as UTF-8 (Windows PowerShell 5.1 turned the
+  em dashes into mojibake), a failing `uv` or `espanso` command stops the script, and
+  `espanso start` is used when Espanso is not running.
+- A rewrite cut off at the max-tokens cap ends with
+  `[prompt-workflow: output truncated at max tokens]` instead of passing as complete.
+  A reasoning model that spent the whole budget thinking asks for a larger
+  `--max-tokens`.
+- A `<think>` block left open by truncation is dropped instead of pasted.
+- Anthropic: an unexpected content block is reported as a malformed response.
+- The `-p-` template's independent-review step matches the `default` profile word for
+  word.
+- `.env`: an inline ` # comment` after an unquoted value is no longer part of the value.
+- `bench_models.py`: `model@auto` means OpenRouter's own routing, as in `--model`.
+
+### Changed
+- CI: checkout no longer persists credentials; tests run on pushes to `main` and on
+  pull requests. Ruff's version is pinned once, in `uv.lock`.
+
 ## 0.8.0
 
 ### Changed

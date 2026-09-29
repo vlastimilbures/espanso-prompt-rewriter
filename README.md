@@ -145,6 +145,7 @@ settings from the `.env` in the repository it was installed from (see
 git clone https://github.com/vlastimilbures/espanso-prompt-rewriter.git
 cd espanso-prompt-rewriter
 cp .env.example .env    # set OPENROUTER_API_KEY, optionally PROMPT_PERSONA
+chmod 600 .env          # macOS/Linux: the file holds your API key
 ```
 
 Keep `.env` in the repository folder: the triggers load it from there. Then install the CLI and
@@ -156,9 +157,10 @@ deploy the Espanso match files:
 ```
 
 The installer runs `uv tool install`, writes the absolute CLI path into the match files, and
-restarts Espanso. It leaves your Espanso `config/default.yml` alone; pass `--with-config`
-(`-WithConfig` on Windows) to also deploy [ours](espanso/config/default.yml), which backs up the
-existing file first. On Windows you may first need
+restarts Espanso. Before replacing a file you changed, it saves a `.bak-<timestamp>` copy next to
+it. It leaves your Espanso `config/default.yml` alone; pass `--with-config` (`-WithConfig` on
+Windows) to also deploy [ours](espanso/config/default.yml). The Windows script runs on Windows
+PowerShell 5.1 and PowerShell 7; you may first need
 `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
 
 Now copy a rough draft, type `-i-` in any text field, and wait a couple of seconds.
@@ -234,7 +236,10 @@ prompt-workflow persona          # prints PROMPT_PERSONA (used by -p-)
 | `--copy`     | off                         | Also copy the result to the clipboard           |
 
 Output never has a trailing newline, and every failure is printed as `[prompt-workflow: …]` with
-exit code 0, so Espanso always has something to paste.
+exit code 0, so Espanso always has something to paste. Drafts over 50,000 characters are refused
+(an accidental copy of a log or document should not go to the cloud). If the model stops at its
+max-tokens cap, the partial rewrite is pasted with
+`[prompt-workflow: output truncated at max tokens]` at the end.
 
 ## Configuration
 
@@ -248,7 +253,8 @@ The CLI reads the first `.env` it finds in:
 3. `~/.config/prompt-workflow/.env` (`%APPDATA%\prompt-workflow\.env` on Windows).
 
 It never reads a `.env` from the current directory, so running the CLI inside some other
-project cannot change its endpoint or switch off the gate.
+project cannot change its endpoint or switch off the gate. Values may be quoted, and an unquoted
+value may be followed by a ` # comment`. Quote a value that itself contains ` #`.
 
 | Variable                     | Default                        | Purpose                                                   |
 |------------------------------|--------------------------------|-----------------------------------------------------------|
@@ -325,7 +331,11 @@ Every OpenRouter or Anthropic call first runs through a regex gate
 
 > [!WARNING]
 > The gate is a heuristic safety net, not a compliance control. It misses things (names,
-> addresses, most countries' ID formats) and sometimes flags harmless text.
+> addresses, most countries' ID formats, look-alike letters from other alphabets) and sometimes
+> flags harmless text.
+
+The draft is also scanned in a normalised form, so no-break or zero-width spaces, soft hyphens and
+fullwidth digits cannot split a card number or key.
 
 A blocked draft pastes `[prompt-workflow: Blocked cloud call. Sensitive content detected: …]`
 instead of calling the API. `ALLOW_CLOUD_OVERRIDE=true` disables the block. No code path builds a
@@ -381,6 +391,9 @@ uv run python scripts/bench_models.py --system-prompt-file candidate.md   # A/B 
 | `[prompt-workflow: OpenRouter returned HTTP 401]` | Wrong key. Replace it in `.env`. |
 | `[prompt-workflow: Ollama request failed: …]` | Start Ollama (`ollama serve`) and pull the model (`ollama pull qwen3:8b`). |
 | `[prompt-workflow: Blocked cloud call. …]` | The [gate](#privacy-and-data-protection) matched. Use a local trigger, or override if policy permits. |
+| `[prompt-workflow: Input is too long …]` | The clipboard holds more than 50,000 characters. Copy just the draft. |
+| `… output truncated at max tokens]` at the end, or `… used the whole max-tokens budget` | The model hit its output cap, often by spending it on reasoning. Raise `OPENROUTER_MAX_TOKENS`, or pick a larger max tokens (or lower effort) in `-if-`. |
+| A `base.yml.bak-…` file appeared in Espanso's `match` folder | Versions before 0.9 deployed `-p-` as `match/base.yml`, the file Espanso creates for your own snippets. The installer backed up that copy and replaced it with `prompts-template.yml`. Older installers overwrote `base.yml` without a backup, so snippets you kept there before first installing this project can only come from your own backups. |
 | Expansion is slow | Use a faster model or endpoint (see [benchmark](#model-benchmark)); Espanso waits for the CLI. |
 | `[prompt-workflow: … must be an https:// URL]` | A cloud `*_BASE_URL` uses `http`. Switch it to `https`. |
 | Reasoning text appears in the output | Set `OLLAMA_THINK=false`. `<think>` blocks are stripped; extend `strip_thinking` in `providers/base.py` for other tag formats. |
@@ -392,20 +405,41 @@ its local server, then check it answers: `curl http://localhost:11434/api/tags` 
 ## Project structure
 
 ```text
-espanso/
-  match/              Espanso triggers: LLM triggers, static snippets, golden template
-  config/             Espanso behaviour settings
-scripts/              install_macos.sh, install_windows.ps1, bench_models.py
-src/prompt_workflow/
-  cli.py              `improve` and `persona` commands, inline error marker
-  factory.py          builds providers from settings, wraps cloud ones in the gate
-  gate.py             data-protection gate
-  redaction.py        sensitive-content patterns
-  config.py           settings from the environment and .env
-  prompt_builder.py   profiles and persona
-  prompts/            one system prompt per profile (*.md)
-  providers/          OpenAI-compatible (OpenRouter, LM Studio), Anthropic, Ollama
-tests/                unit tests (no network) and opt-in live tests
+espanso-prompt-rewriter/
+├── espanso/                      deployed into Espanso by the installers
+│   ├── match/
+│   │   ├── prompts-llm.yml       -i- -ip- -if- -il- -ilm- (-ic-): call the CLI
+│   │   ├── prompts-core.yml      -prompt- -risk-: static snippets and forms
+│   │   └── prompts-template.yml  -p-: the empty golden template, opens with your persona
+│   └── config/
+│       └── default.yml           optional Espanso settings (--with-config / -WithConfig)
+├── src/prompt_workflow/          the prompt-workflow CLI
+│   ├── cli.py                    improve and persona commands, inline error marker
+│   ├── config.py                 Settings from the environment and .env
+│   ├── factory.py                make_provider(): the only place providers are built
+│   ├── gate.py                   GatedProvider: scans every cloud prompt first
+│   ├── redaction.py              the gate's sensitive-content patterns
+│   ├── prompt_builder.py         loads profiles, fills in the persona rule
+│   ├── prompts/
+│   │   ├── default.md            golden-template rewrite (-i-, -ip-, -if-)
+│   │   └── general.md            lighter "make this precise" rewrite (local triggers)
+│   └── providers/
+│       ├── base.py               HTTP call, error mapping, <think> stripping
+│       ├── openai_compatible.py  OpenRouter and LM Studio
+│       ├── anthropic.py          Anthropic Messages API
+│       └── ollama.py             Ollama /api/chat
+├── scripts/
+│   ├── install_macos.sh          install the CLI and deploy the match files
+│   ├── install_windows.ps1       the same for Windows
+│   └── bench_models.py           score models on template fidelity, latency, cost
+├── tests/                        unit tests, no network (fake_http in conftest.py)
+│   ├── test_live.py              opt-in real OpenRouter calls (pytest -m live)
+│   └── test_docs.py              README and .env.example list every setting
+├── .github/                      CI (tests, gitleaks), Dependabot, issue and PR templates
+├── .env.example                  every setting with its default; copy to .env
+├── CONTRIBUTING.md               setup, checks, how to add a profile/trigger/provider
+├── SECURITY.md                   how to report a gate bypass or other vulnerability
+└── CHANGELOG.md                  release notes
 ```
 
 ## Development

@@ -27,7 +27,8 @@ Report privately:
 
 Report as a normal issue:
 
-- a sensitive pattern the gate does not detect, or harmless text it blocks. The gate is a
+- a sensitive pattern the gate does not detect, or harmless text it blocks, or input that makes
+  the scan noticeably slow. The gate is a
   documented heuristic, so these are improvements rather than vulnerabilities. Use fake sample
   data in the issue.
 

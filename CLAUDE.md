@@ -44,7 +44,8 @@ Espanso does not inherit shell PATH):
   selecting the plan-first vs execute-now and the independent-review vs self-review instruction
   variant from signals in the draft. The prompt uses lowercase XML tags for its own structure so
   they are not confused with the uppercase output sections. Its exact variant wordings are
-  matched by `scripts/bench_models.py` and `tests/test_bench.py`; change them together, and
+  matched by `scripts/bench_models.py` and `tests/test_bench.py` (which also checks the `-p-`
+  template in `prompts-template.yml`); change them together, and
   re-run the benchmark (`--system-prompt-file`) before shipping a prompt change.
 
 ### Data-protection gate
