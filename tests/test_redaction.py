@@ -218,8 +218,11 @@ def test_custom_pattern_matches_raw_text():
 
 # scan() stays linear on long runs that used to make the email, URL and secret patterns
 # quadratic (80k chars took 15 s and froze Espanso).
+# Explicit ids: a 200k-char node id breaks Windows, where pytest puts it in an env var.
 @pytest.mark.parametrize(
-    "text", ["a." * 100_000, "a-" * 100_000, "Bearer " + "a." * 100_000, "token=" * 30_000]
+    "text",
+    ["a." * 100_000, "a-" * 100_000, "Bearer " + "a." * 100_000, "token=" * 30_000],
+    ids=["dots", "dashes", "bearer", "assignments"],
 )
 def test_scan_is_fast_on_adversarial_input(text):
     started = time.perf_counter()
