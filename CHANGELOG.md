@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## 0.10.0
+
 ### Security
 - Ollama and LM Studio pass the data-protection gate when the draft would leave the
   machine: a base URL that is not loopback, or an Ollama cloud model (`:cloud`, `-cloud`).
