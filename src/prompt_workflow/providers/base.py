@@ -50,25 +50,40 @@ def post_json(
 
 
 _THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+# A block the model never closed (cut off at the token cap) is reasoning to the end.
+_UNCLOSED_BLOCK = re.compile(r"<think>.*\Z", re.DOTALL | re.IGNORECASE)
 _ORPHAN_TAG = re.compile(r"</?think>", re.IGNORECASE)
 
 
 def strip_thinking(text: str) -> str:
     """Remove reasoning blocks emitted by models such as the qwen3 family.
 
-    Handles complete <think>...</think> spans and any orphaned tags left when a
-    response is truncated. Leading and trailing whitespace is normalized.
+    Handles complete <think>...</think> spans, a block left open when a response is
+    truncated (dropped to the end), and stray closing tags. Leading and trailing
+    whitespace is normalized.
     """
     cleaned = _THINK_BLOCK.sub("", text)
+    cleaned = _UNCLOSED_BLOCK.sub("", cleaned)
     cleaned = _ORPHAN_TAG.sub("", cleaned)
     return cleaned.strip()
 
 
-def finalize_content(content: object, label: str) -> str:
-    """Validate a provider's raw response content, strip <think> blocks, require non-empty text."""
+# Appended to a rewrite the model stopped at its output cap, so a cut-off prompt is never
+# pasted as if it were complete.
+TRUNCATED_NOTE = "\n\n[prompt-workflow: output truncated at max tokens]"
+
+
+def finalize_content(content: object, label: str, *, truncated: bool = False) -> str:
+    """Validate a provider's raw response content, strip <think> blocks, require non-empty text.
+
+    ``truncated`` is the provider's own "stopped at the token cap" signal. With no text, that
+    means a reasoning model spent the whole budget thinking, which only a bigger cap fixes.
+    """
+    result = strip_thinking(content) if isinstance(content, str) else ""
+    if truncated and not result:
+        raise ProviderError(f"{label} used the whole max-tokens budget; raise --max-tokens")
     if not isinstance(content, str):
         raise ProviderError(f"{label} returned no text content")
-    result = strip_thinking(content)
     if not result:
         raise ProviderError(f"{label} returned empty content")
-    return result
+    return result + TRUNCATED_NOTE if truncated else result

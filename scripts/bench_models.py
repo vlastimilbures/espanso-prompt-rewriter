@@ -25,9 +25,10 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
-from prompt_workflow.config import Settings
+from prompt_workflow.config import Settings, split_model_spec
 from prompt_workflow.factory import make_provider
 from prompt_workflow.prompt_builder import PROFILES, render
+from prompt_workflow.providers.base import TRUNCATED_NOTE
 
 MODELS: list[str] = [
     # Standard tier (-i-). The first is the shipped default.
@@ -221,10 +222,13 @@ class Budget:
 
 
 def split_spec(spec: str) -> tuple[str, str, str]:
-    """`model[@provider-tag][~effort]` -> (model, pin, effort); absent parts are ""."""
+    """`model[@provider-tag][~effort]` -> (model, pin, effort); absent parts are "".
+
+    The `model@pin` part is parsed like the CLI's --model, so `@auto` also means no pin.
+    """
     rest, _, effort = spec.partition("~")
-    model, _, pin = rest.partition("@")
-    return model, pin, effort
+    model, pin = split_model_spec(rest)
+    return model or "", pin or "", effort
 
 
 def _call(
@@ -321,6 +325,8 @@ def run_one(
     except (KeyError, IndexError, TypeError, AttributeError):
         finish_reason = ""
 
+    # Truncation is reported once, from finish_reason; the pasted note is not scored.
+    text = text.removesuffix(TRUNCATED_NOTE)
     failed = check(text, wants_plan, wants_independent)
     if finish_reason == "length":
         failed.insert(0, "truncated")

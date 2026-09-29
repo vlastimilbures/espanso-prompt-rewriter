@@ -237,6 +237,23 @@ def test_load_dotenv_quote_handling(tmp_path, monkeypatch):
     assert os.environ["PROMPT_PROFILE"] == "general"
 
 
+# An inline ` # comment` after an unquoted value is not part of the value; a quoted value
+# keeps its '#', and a '#' without whitespace before it is data.
+def test_load_dotenv_strips_inline_comments(tmp_path, monkeypatch):
+    (tmp_path / ".env").write_text(
+        "OPENROUTER_PROVIDER=openai  # pinned for the pro tier\n"
+        'PROMPT_PERSONA="I am #1 here" # note\n'
+        "LMSTUDIO_MODEL=model#v2\n"
+        "OLLAMA_MODEL=#\n"
+    )
+    monkeypatch.chdir(tmp_path)
+    _load_dotenv()
+    assert os.environ["OPENROUTER_PROVIDER"] == "openai"
+    assert os.environ["PROMPT_PERSONA"] == "I am #1 here"
+    assert os.environ["LMSTUDIO_MODEL"] == "model#v2"
+    assert os.environ["OLLAMA_MODEL"] == "#"
+
+
 # PROMPT_PERSONA is empty unless configured.
 def test_persona_default_and_override(monkeypatch):
     assert Settings().persona == ""

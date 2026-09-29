@@ -22,3 +22,9 @@ def test_removes_orphan_tags():
 # Text without think tags is unchanged besides trimming whitespace.
 def test_plain_text_untouched():
     assert strip_thinking("  hello  ") == "hello"
+
+
+# A <think> block cut off before its closing tag is reasoning, not answer text.
+def test_removes_unclosed_think_block():
+    assert strip_thinking("Answer<think>half a thought") == "Answer"
+    assert strip_thinking("<think>a</think>Answer<think>cut off") == "Answer"

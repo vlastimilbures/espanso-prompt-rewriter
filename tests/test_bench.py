@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from bench_module import bench
 
@@ -87,6 +89,23 @@ def test_bench_phrases_match_default_profile():
         assert f"<{tag}>" in template and f"</{tag}>" in template
 
 
+# The static -p- snippet offers the same variants as the default profile, word for word, so
+# a prompt filled in by hand reads like one the rewrite produces.
+def test_bench_phrases_match_static_template():
+    template = (Path(__file__).parents[1] / "espanso/match/prompts-template.yml").read_text(
+        encoding="utf-8"
+    )
+    phrases = [
+        bench.PLAN_FIRST,
+        bench.EXECUTE_NOW,
+        bench.INDEPENDENT,
+        bench.SELF_REVIEW,
+        *bench.MANDATORY.values(),
+    ]
+    for phrase in phrases:
+        assert phrase in template, phrase
+
+
 # Both expected branch combinations are covered by the draft set.
 def test_drafts_span_all_branch_combinations():
     combos = {(plan, independent) for _, plan, independent in bench.DRAFTS.values()}
@@ -98,6 +117,8 @@ def test_split_spec():
     assert bench.split_spec("a/b@c/d") == ("a/b", "c/d", "")
     assert bench.split_spec("a/b~low") == ("a/b", "", "low")
     assert bench.split_spec("a/b@c/d~none") == ("a/b", "c/d", "none")
+    # @auto means OpenRouter's own routing, exactly as in the CLI's --model.
+    assert bench.split_spec("a/b@auto~low") == ("a/b", "", "low")
 
 
 # Reasoning effort is sent to OpenRouter with the trace excluded from the returned text.
