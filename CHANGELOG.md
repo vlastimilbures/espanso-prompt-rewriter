@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Fixed
+- The `prompts-llm.yml` header comment no longer contains the CLI placeholder, so the
+  installers stop writing your absolute CLI path into it.
+
 ## 0.7.0 — first public release
 
 ### Features
