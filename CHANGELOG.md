@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## 0.8.0
+
+### Changed
+- Bumped `typer` to 0.27.2.
+
 ### Fixed
 - The `prompts-llm.yml` header comment no longer contains the CLI placeholder, so the
   installers stop writing your absolute CLI path into it.
