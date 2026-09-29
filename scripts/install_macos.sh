@@ -46,33 +46,53 @@ echo "Using CLI at: $cli_path"
 # unlike 'espanso path' which prints labelled lines for config/packages/runtime.
 espanso_dir="$(espanso path config)"
 mkdir -p "$espanso_dir/match"
+stamp="$(date +%Y%m%d%H%M%S)"
+
+backup() {
+  cp "$1" "$1.bak-$stamp"
+  echo "Backed up existing $1 to $1.bak-$stamp"
+}
+
+# Move $1 to $2, first backing up an existing $2 whose content differs, so a file the
+# user edited (or Espanso's own default.yml) is never lost.
+install_file() {
+  if [ -f "$2" ] && ! cmp -s "$1" "$2"; then
+    backup "$2"
+  fi
+  mv "$1" "$2"
+}
+
+# Before 0.9 the -p- template shipped as match/base.yml, the file Espanso itself creates
+# for the user's own snippets. Retire our copy (backed up) so -p- is not defined twice,
+# and leave any other base.yml alone.
+legacy="$espanso_dir/match/base.yml"
+if [ -f "$legacy" ] && grep -q 'trigger: "-p-"' "$legacy" && grep -q 'prompt-workflow' "$legacy"; then
+  backup "$legacy"
+  rm "$legacy"
+fi
 
 # Deploy match files, substituting the absolute CLI path placeholder.
 # Uses python's str.replace (not sed -e) since cli_path may contain
 # characters like '|' or '&' that break a sed substitution.
 for f in espanso/match/*.yml; do
-  base="$(basename "$f")"
+  target="$espanso_dir/match/$(basename "$f")"
   python3 -c '
 import sys
 text = open(sys.argv[1], encoding="utf-8").read()
 text = text.replace("__PROMPT_WORKFLOW__", sys.argv[2])
 open(sys.argv[3], "w", encoding="utf-8").write(text)
-' "$f" "$cli_path" "$espanso_dir/match/$base"
+' "$f" "$cli_path" "$target.tmp"
+  install_file "$target.tmp" "$target"
 done
 
-# Only with --with-config. Back up any file we would overwrite, since Espanso's
-# default.yml hard-sets toggle_key/search_shortcut the user may have customized.
+# Only with --with-config: Espanso's default.yml hard-sets toggle_key/search_shortcut
+# the user may have customized.
 if [ "$with_config" = true ]; then
   mkdir -p "$espanso_dir/config"
   for f in espanso/config/*.yml; do
-    base="$(basename "$f")"
-    target="$espanso_dir/config/$base"
-    if [ -f "$target" ]; then
-      backup="$target.bak-$(date +%Y%m%d%H%M%S)"
-      cp "$target" "$backup"
-      echo "Backed up existing $target to $backup"
-    fi
-    cp "$f" "$target"
+    target="$espanso_dir/config/$(basename "$f")"
+    cp "$f" "$target.tmp"
+    install_file "$target.tmp" "$target"
   done
 fi
 

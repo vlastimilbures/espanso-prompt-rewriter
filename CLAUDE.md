@@ -40,7 +40,7 @@ Espanso does not inherit shell PATH):
   prompt used to instruct the rewrite. `render()` fills the `{{PERSONA_RULE}}` token from
   `PROMPT_PERSONA` (also printed by the `persona` subcommand for the `-p-` snippet). `default` (the
   `PROMPT_PROFILE` fallback) rewrites the draft into the golden template kept in
-  `espanso/match/base.yml` (`CONTEXT / GOAL / INSTRUCTIONS / CONSTRAINTS / INPUTS / OUTPUTS`),
+  `espanso/match/prompts-template.yml` (`CONTEXT / GOAL / INSTRUCTIONS / CONSTRAINTS / INPUTS / OUTPUTS`),
   selecting the plan-first vs execute-now and the independent-review vs self-review instruction
   variant from signals in the draft. The prompt uses lowercase XML tags for its own structure so
   they are not confused with the uppercase output sections. Its exact variant wordings are
