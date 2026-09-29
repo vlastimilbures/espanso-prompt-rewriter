@@ -30,7 +30,9 @@ Assert-Exit "uv tool install"
 # Resolve the absolute CLI path. GUI-launched Espanso does not inherit PATH.
 # Ask uv where it installed the tool rather than Get-Command, which would pick up an
 # activated project venv whose binary disappears if .venv is removed.
-$Cli = Join-Path (uv tool dir --bin).Trim() "prompt-workflow.exe"
+$ToolBin = (uv tool dir --bin)
+Assert-Exit "uv tool dir"
+$Cli = Join-Path $ToolBin.Trim() "prompt-workflow.exe"
 if (-not (Test-Path $Cli)) {
     Write-Error "Could not locate prompt-workflow. Check 'uv tool install' output."
     exit 1

@@ -2,6 +2,9 @@
 name = "espanso-prompt-rewriter"
 version = "0.9.0"
 description = "Cross-platform Espanso prompt workflow with OpenRouter, Anthropic, Ollama, and LM Studio"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
   "httpx>=0.27,<1",
@@ -9,7 +12,15 @@ dependencies = [
   "typer>=0.12,<1",
 ]
 
-[project.optional-dependencies]
+[project.urls]
+Homepage = "https://github.com/vlastimilbures/espanso-prompt-rewriter"
+Changelog = "https://github.com/vlastimilbures/espanso-prompt-rewriter/blob/main/CHANGELOG.md"
+
+[project.scripts]
+prompt-workflow = "prompt_workflow.cli:app"
+
+# Development tools: `uv sync` installs this group; `uv tool install` never does.
+[dependency-groups]
 dev = [
   "pytest>=9.1,<10",
   "pytest-cov>=7.1,<8",
@@ -19,39 +30,41 @@ dev = [
   "PyYAML>=6.0,<7",
 ]
 
-[project.scripts]
-prompt-workflow = "prompt_workflow.cli:app"
-
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/prompt_workflow"]
 
-[tool.hatch.build.targets.wheel.force-include]
-"src/prompt_workflow/prompts" = "prompt_workflow/prompts"
-
 [tool.ruff]
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "S", "PT", "C4", "PIE", "RET", "PERF", "FURB"]
 
 [tool.ruff.lint.per-file-ignores]
 # _env() returns a dataclasses.field(default_factory=...), not a shared default value.
 "src/prompt_workflow/config.py" = ["RUF009"]
+# Tests assert, and run the CLI in a subprocess the way Espanso does.
+"tests/**" = ["S101", "S603"]
 
 [tool.mypy]
 python_version = "3.12"
+files = ["src", "scripts"]
+strict = true
 ignore_missing_imports = true
-files = ["src"]
-disallow_untyped_defs = true
-warn_return_any = true
-warn_unused_ignores = true
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
 addopts = "--strict-markers -m 'not live'"
 markers = ["live: calls the real OpenRouter API (opt-in: pytest -m live)"]
+
+[tool.coverage.run]
+branch = true
+source = ["prompt_workflow"]
+
+[tool.coverage.report]
+fail_under = 95
+show_missing = true

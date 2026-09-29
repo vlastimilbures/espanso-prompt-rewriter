@@ -1,0 +1,3 @@
+# LF everywhere, on every OS: a CRLF install_macos.sh fails in bash, and the match files
+# and prompts are deployed byte for byte. PowerShell 5.1 and Espanso both read LF.
+* text=auto eol=lf
