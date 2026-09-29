@@ -6,6 +6,37 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Security
+- Ollama and LM Studio pass the data-protection gate when the draft would leave the
+  machine: a base URL that is not loopback, or an Ollama cloud model (`:cloud`, `-cloud`).
+- Control characters, bidi overrides and invisible Unicode tag characters are stripped from
+  the pasted output and from the draft. An escape sequence in a model's reply could end a
+  terminal's bracketed paste and run the lines after it.
+- The gate also catches `DB_PASSWORD=…`, `access_token=…`, `AWS_SECRET_ACCESS_KEY=…`,
+  JSON `"client_secret": "…"`, PGP private key blocks, and GitLab and Hugging Face tokens.
+- API keys no longer appear in the `repr()` of the settings or providers.
+- Gitleaks allowlists two historical test values by fingerprint instead of all of
+  `tests/test_redaction.py`. Pre-commit hooks are pinned to commit SHAs and updated by
+  Dependabot, zizmor checks the workflows, and Dependabot waits 7 days before proposing a
+  new release.
+
+### Fixed
+- Output is always UTF-8. On Windows, a rewrite with letters outside the ANSI code page
+  (Czech, Vietnamese) crashed into a blank expansion.
+- Building a wheel (`uv build`, any non-editable install) failed because
+  `prompts/default.md` was added twice.
+- `PROMPT_TEMPERATURE` also applies to Ollama.
+- The macOS installer no longer needs a system `python3`, and makes `.env` readable by
+  the current user only.
+
+### Changed
+- Settings are validated strictly: booleans must be `true` or `false` (`OLLAMA_THINK=1`
+  used to mean false), and timeouts and token caps must be finite numbers above 0.
+- `--model` is applied to the settings of whichever provider runs, so the gate sees the
+  model actually used.
+- Development: the dev tools are a uv dependency group (`uv sync`, no `--extra dev`), mypy
+  runs strict over `src` and `scripts`, and CI adds Python 3.14 and a 95% coverage floor.
+
 ## 0.9.0
 
 ### Security

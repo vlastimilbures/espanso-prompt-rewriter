@@ -19,18 +19,23 @@ Espanso does not inherit shell PATH):
 ## Architecture
 
 - `cli.py` — main Typer command, `improve`. Reads a draft (`clipboard`/`stdin`/`argument`),
-  applies the data-protection gate, calls a provider, and prints the result to stdout with no
-  trailing newline (Espanso inserts stdout verbatim). All failures are caught and converted to a
-  `[prompt-workflow: ...]` marker printed to stdout with exit code 0, rather than a stack trace or
-  blank expansion, since Espanso has no good way to surface a nonzero exit / stderr to the user.
-  `--tier pro` swaps in the `OPENROUTER_PRO_*` model, endpoint, reasoning effort and timeout
-  via `Settings.for_tier()`, then builds through `make_provider()` as usual (so it stays gated).
+  calls a provider built by `make_provider()` (which applies the gate), and prints the result
+  with no trailing newline (Espanso inserts stdout verbatim). All failures are caught and
+  converted to a `[prompt-workflow: ...]` marker printed to stdout with exit code 0, rather than a
+  stack trace or blank expansion, since Espanso has no good way to surface a nonzero exit /
+  stderr to the user. Everything printed goes through `_emit()`, which strips control, bidi and
+  Unicode tag characters (the draft gets the same `_clean()`); stdin/stdout are reconfigured to
+  UTF-8 because Windows pipes default to the ANSI code page. `--tier pro` swaps in the
+  `OPENROUTER_PRO_*` settings via `Settings.for_tier()`; `--model`/`--effort`/`--max-tokens`/
+  `--timeout` are applied by `Settings.with_overrides()` (`--model` sets every provider's model),
+  so `make_provider()` always sees the effective settings.
 - `factory.py` — `make_provider(name, cfg)` builds a provider from `Settings`; `PROVIDER_NAMES`
   lists the valid names. `cli.py` and `scripts/bench_models.py` both build through it. For
   OpenRouter it adds the endpoint pin (`OPENROUTER_PROVIDER`) and
   `reasoning: {effort, exclude: true}` (`OPENROUTER_REASONING_EFFORT`; empty omits it).
 - `config.py` — `Settings` is a frozen dataclass read from env vars, with defaults for each
-  provider. `_load_dotenv()` loads the first of `$PROMPT_WORKFLOW_ENV`, the editable-install
+  provider. Values are parsed strictly (`_bool`, `_positive_int`, ...) and a bad one raises a
+  `ValueError` naming the variable; API key fields are `secret` (kept out of `repr()`). `_load_dotenv()` loads the first of `$PROMPT_WORKFLOW_ENV`, the editable-install
   repo root's `.env` (derived from `__file__`), or the user config dir `.env`, with a
   dependency-free `setdefault` (never overrides real env vars). It deliberately never reads the
   cwd, so a planted `.env` cannot redirect the base URL or enable the override. This matters
@@ -50,12 +55,14 @@ Espanso does not inherit shell PATH):
 
 ### Data-protection gate
 
-`factory.py`'s `make_provider()` (the only place providers are built) wraps `openrouter` and `anthropic` in `gate.GatedProvider`, which
-runs `redaction.scan()` (built-in patterns plus the user's `PROMPT_EXTRA_PATTERNS`) on every
-prompt and blocks the call unless `ALLOW_CLOUD_OVERRIDE=true` is set. It also requires `https`
-cloud base URLs (plain `http` only to loopback). Ollama and LM Studio are local and always allowed. `scripts/bench_models.py` applies it too,
-since building a provider directly would otherwise bypass the gate. Keep this gate in mind when adding a new
-cloud provider — wrap it in `GatedProvider` in `make_provider()` to be covered by the gate.
+`factory.py`'s `make_provider()` (the only place providers are built) wraps, via `_gate()`,
+everything that can send the draft off the machine in `gate.GatedProvider`: `openrouter` and
+`anthropic` always, `ollama`/`lmstudio` when the base URL is not loopback (`_is_loopback()`) or
+the Ollama model is a `cloud`-tagged one. The gate runs `redaction.scan()` (built-in patterns
+plus the user's `PROMPT_EXTRA_PATTERNS`) and blocks the call unless `ALLOW_CLOUD_OVERRIDE=true`.
+It also requires `https` cloud base URLs (plain `http` only to loopback).
+`scripts/bench_models.py` builds through it too. A new provider that can leave the machine must
+return through `_gate()`.
 
 ### Espanso integration contract
 

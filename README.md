@@ -9,7 +9,7 @@ rewritten by a local or cloud model.
 [![release](https://img.shields.io/github/v/release/vlastimilbures/espanso-prompt-rewriter)](https://github.com/vlastimilbures/espanso-prompt-rewriter/releases)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 <br>
-[![python](https://img.shields.io/badge/python-3.12%20%7C%203.13-blue?logo=python&logoColor=white)](pyproject.toml)
+[![python](https://img.shields.io/badge/python-3.12%20%7C%203.13%20%7C%203.14-blue?logo=python&logoColor=white)](pyproject.toml)
 [![platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey)](#requirements)
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
@@ -86,7 +86,6 @@ step. A quick note to yourself would get "execute now" and a self-review checkli
 - 🔒 [Privacy and data protection](#privacy-and-data-protection)
 - 📊 [Model benchmark](#model-benchmark)
 - 🩺 [Troubleshooting](#troubleshooting)
-- 🗂️ [Project structure](#project-structure)
 - 🛠️ [Development](#development)
 - 🤝 [Contributing, security, license](#contributing-security-license)
 
@@ -99,14 +98,16 @@ step. A quick note to yourself would get "execute now" and a self-review checkli
   drafts to a reasoning model for a more rigorous rewrite in about 5-8 seconds.
 - 🔌 **Four providers, one interface.** OpenRouter (default), Anthropic, Ollama and LM Studio.
   Switching is one setting.
-- 🛡️ **Data-protection gate.** Before any cloud call the draft is scanned for payment cards,
-  national IDs, emails, API keys, tokens, passwords, private keys, confidentiality labels and
-  your own patterns; matches are blocked unless you explicitly override.
+- 🛡️ **Data-protection gate.** Before the draft can leave your machine it is scanned for
+  payment cards, national IDs, emails, API keys, tokens, passwords, private keys,
+  confidentiality labels and your own patterns; matches are blocked unless you explicitly
+  override.
 - 🙋 **Your persona, once.** Set `PROMPT_PERSONA` and every rewrite (and the `-p-` snippet) opens
   with your role.
 - 🧯 **Never a blank expansion.** Errors arrive inline as `[prompt-workflow: …]`, because Espanso
   cannot show stderr or exit codes.
-- 🧹 **Reasoning stripped.** `<think>…</think>` blocks from reasoning models never reach your text.
+- 🧹 **Clean output.** `<think>…</think>` reasoning blocks, control characters and invisible
+  Unicode never reach the app you are typing in.
 - 📊 **Benchmarked model choice.** A bundled benchmark scores models on template fidelity,
   latency and real cost.
 
@@ -116,12 +117,12 @@ step. A quick note to yourself would get "execute now" and a self-review checkli
 flowchart LR
     A["You type -i-"] --> B["Espanso runs<br/>prompt-workflow improve"]
     B --> C["Load .env,<br/>read clipboard"]
-    C --> D{"Cloud provider?"}
+    C --> D{"Leaves this<br/>machine?"}
     D -- yes --> E{"Sensitive content?"}
     E -- "yes, no override" --> X["Pastes a<br/>Blocked cloud call message"]
-    E -- no --> F["OpenRouter / Anthropic"]
-    D -- no --> G["Ollama / LM Studio"]
-    F --> H["Strip think blocks,<br/>validate output"]
+    E -- no --> F["OpenRouter / Anthropic /<br/>remote or cloud model"]
+    D -- no --> G["Ollama / LM Studio<br/>on localhost"]
+    F --> H["Strip think blocks and unsafe<br/>characters, validate output"]
     G --> H
     H --> I["Espanso pastes the<br/>rewritten prompt"]
 ```
@@ -226,7 +227,7 @@ prompt-workflow persona          # prints PROMPT_PERSONA (used by -p-)
 |--------------|-----------------------------|-------------------------------------------------|
 | `--provider` | `PROMPT_PROVIDER`           | `ollama`, `lmstudio`, `openrouter`, `anthropic` |
 | `--profile`  | `PROMPT_PROFILE`            | `default`, `general`, or any file in `prompts/` |
-| `--model`    | provider's configured model | Override the model; `model@endpoint` also pins the OpenRouter endpoint (`@auto` unpins) |
+| `--model`    | provider's configured model | Override the model of whichever provider runs; `model@endpoint` also pins the OpenRouter endpoint (`@auto` unpins) |
 | `--tier`     | `standard`                  | `pro` uses the `OPENROUTER_PRO_*` settings      |
 | `--effort`   | tier's setting              | `none`, `minimal`, `low`, `medium`, `high`      |
 | `--max-tokens` | tier's setting            | Output cap for this call                        |
@@ -235,10 +236,10 @@ prompt-workflow persona          # prints PROMPT_PERSONA (used by -p-)
 | `--text`     | —                           | The draft, with `--source argument`             |
 | `--copy`     | off                         | Also copy the result to the clipboard           |
 
-Output never has a trailing newline, and every failure is printed as `[prompt-workflow: …]` with
-exit code 0, so Espanso always has something to paste. Drafts over 50,000 characters are refused
-(an accidental copy of a log or document should not go to the cloud). If the model stops at its
-max-tokens cap, the partial rewrite is pasted with
+Output is UTF-8 with no trailing newline, and every failure is printed as `[prompt-workflow: …]`
+with exit code 0, so Espanso always has something to paste. Drafts over 50,000 characters are
+refused (an accidental copy of a log or document should not go to the cloud). If the model stops
+at its max-tokens cap, the partial rewrite is pasted with
 `[prompt-workflow: output truncated at max tokens]` at the end.
 
 ## Configuration
@@ -254,7 +255,9 @@ The CLI reads the first `.env` it finds in:
 
 It never reads a `.env` from the current directory, so running the CLI inside some other
 project cannot change its endpoint or switch off the gate. Values may be quoted, and an unquoted
-value may be followed by a ` # comment`. Quote a value that itself contains ` #`.
+value may be followed by a ` # comment`. Quote a value that itself contains ` #`. Booleans are
+`true` or `false`, timeouts and token caps are numbers above 0 (temperature may be 0); anything
+else is reported inline rather than silently ignored.
 
 | Variable                     | Default                        | Purpose                                                   |
 |------------------------------|--------------------------------|-----------------------------------------------------------|
@@ -314,15 +317,19 @@ Left empty, the rewrite uses only a role the draft itself states and never guess
 
 > [!IMPORTANT]
 > Cloud triggers send your clipboard to a third-party API. Use them only where your organisation's
-> policy allows. For sensitive work, set `PROMPT_PROVIDER=ollama` (or use `-il-`) and
-> nothing leaves your machine.
+> policy allows. For sensitive work, use `-il-` (or `PROMPT_PROVIDER=ollama`) with a model that
+> runs on your machine, and nothing leaves it.
 
-Every OpenRouter or Anthropic call first runs through a regex gate
-([`redaction.py`](src/prompt_workflow/redaction.py)). It blocks drafts containing:
+Every call that can send the draft off your machine first runs through a regex gate
+([`redaction.py`](src/prompt_workflow/redaction.py)): OpenRouter and Anthropic always, and
+Ollama or LM Studio when their base URL is not `localhost` (or `127.0.0.1`, `::1`) or the Ollama
+model is a cloud model (a `:cloud` or `-cloud` tag, which the local daemon forwards to
+ollama.com). It blocks drafts containing:
 
 - payment card numbers (Luhn-checked) and email addresses
-- API keys (OpenRouter, Anthropic, OpenAI, Stripe, GitHub, Slack, Google, xAI, AWS), JWTs,
-  bearer tokens, PEM private keys, `user:password@` URLs and `password=…`-style assignments
+- API keys (OpenRouter, Anthropic, OpenAI, Stripe, GitHub, GitLab, Hugging Face, Slack, Google,
+  xAI, AWS), JWTs, bearer tokens, PEM/OpenSSH/PGP private keys, `user:password@` URLs and
+  `password=…`-style assignments, including `DB_PASSWORD=…` and JSON `"client_secret": "…"`
 - confidentiality labels such as *confidential*, *restricted*, *internal only*, *customer data*
 - Vietnamese national ID formats (12-digit, and 9-digit next to an ID keyword)
 - your own patterns from `PROMPT_EXTRA_PATTERNS`, for example
@@ -339,9 +346,15 @@ fullwidth digits cannot split a card number or key.
 
 A blocked draft pastes `[prompt-workflow: Blocked cloud call. Sensitive content detected: …]`
 instead of calling the API. `ALLOW_CLOUD_OVERRIDE=true` disables the block. No code path builds a
-cloud provider without the gate. Cloud base URLs must be `https://` (plain `http` only to
-`localhost`), so a key is never sent in clear text. Keys stay in `.env`, which is gitignored and
-never logged.
+provider that can reach another machine without the gate. Cloud base URLs must be `https://`
+(plain `http` only to `localhost`), so a key is never sent in clear text. Keys stay in `.env`,
+which is gitignored, never logged and never shown in a traceback.
+
+The rewrite comes from a model that read your clipboard, so text copied from a web page can steer
+it. Before anything is pasted, the CLI removes control characters (an escape sequence could end a
+terminal's bracketed paste and run the lines after it), bidi overrides and invisible Unicode tag
+characters (hidden instructions for the next AI). The same characters are removed from the draft
+before it is sent. Still read a rewrite before running anything it contains.
 
 ## Model benchmark
 
@@ -396,64 +409,24 @@ uv run python scripts/bench_models.py --system-prompt-file candidate.md   # A/B 
 | A `base.yml.bak-…` file appeared in Espanso's `match` folder | Versions before 0.9 deployed `-p-` as `match/base.yml`, the file Espanso creates for your own snippets. The installer backed up that copy and replaced it with `prompts-template.yml`. Older installers overwrote `base.yml` without a backup, so snippets you kept there before first installing this project can only come from your own backups. |
 | Expansion is slow | Use a faster model or endpoint (see [benchmark](#model-benchmark)); Espanso waits for the CLI. |
 | `[prompt-workflow: … must be an https:// URL]` | A cloud `*_BASE_URL` uses `http`. Switch it to `https`. |
+| `[prompt-workflow: OLLAMA_THINK must be true or false, got …]` (or `must be a number above 0`) | Fix that value in `.env`. |
+| `-il-` or `-ilm-` says `Blocked cloud call` | `OLLAMA_BASE_URL` / `LMSTUDIO_BASE_URL` points at another machine, or the Ollama model is a cloud model, so the gate applies. Use a model on `localhost` for sensitive drafts. |
 | Reasoning text appears in the output | Set `OLLAMA_THINK=false`. `<think>` blocks are stripped; extend `strip_thinking` in `providers/base.py` for other tag formats. |
 
 For fully local use, pull a model (`ollama pull qwen3:8b`) or load one in LM Studio and enable
 its local server, then check it answers: `curl http://localhost:11434/api/tags` or
 `curl http://localhost:1234/v1/models`.
 
-## Project structure
-
-```text
-espanso-prompt-rewriter/
-├── espanso/                      deployed into Espanso by the installers
-│   ├── match/
-│   │   ├── prompts-llm.yml       -i- -ip- -if- -il- -ilm- (-ic-): call the CLI
-│   │   ├── prompts-core.yml      -prompt- -risk-: static snippets and forms
-│   │   └── prompts-template.yml  -p-: the empty golden template, opens with your persona
-│   └── config/
-│       └── default.yml           optional Espanso settings (--with-config / -WithConfig)
-├── src/prompt_workflow/          the prompt-workflow CLI
-│   ├── cli.py                    improve and persona commands, inline error marker
-│   ├── config.py                 Settings from the environment and .env
-│   ├── factory.py                make_provider(): the only place providers are built
-│   ├── gate.py                   GatedProvider: scans every cloud prompt first
-│   ├── redaction.py              the gate's sensitive-content patterns
-│   ├── prompt_builder.py         loads profiles, fills in the persona rule
-│   ├── prompts/
-│   │   ├── default.md            golden-template rewrite (-i-, -ip-, -if-)
-│   │   └── general.md            lighter "make this precise" rewrite (local triggers)
-│   └── providers/
-│       ├── base.py               HTTP call, error mapping, <think> stripping
-│       ├── openai_compatible.py  OpenRouter and LM Studio
-│       ├── anthropic.py          Anthropic Messages API
-│       └── ollama.py             Ollama /api/chat
-├── scripts/
-│   ├── install_macos.sh          install the CLI and deploy the match files
-│   ├── install_windows.ps1       the same for Windows
-│   └── bench_models.py           score models on template fidelity, latency, cost
-├── tests/                        unit tests, no network (fake_http in conftest.py)
-│   ├── test_live.py              opt-in real OpenRouter calls (pytest -m live)
-│   └── test_docs.py              README and .env.example list every setting
-├── .github/                      CI (tests, gitleaks), Dependabot, issue and PR templates
-├── .env.example                  every setting with its default; copy to .env
-├── CONTRIBUTING.md               setup, checks, how to add a profile/trigger/provider
-├── SECURITY.md                   how to report a gate bypass or other vulnerability
-└── CHANGELOG.md                  release notes
-```
-
 ## Development
 
 ```bash
-uv sync --extra dev
-uv run pytest                 # unit tests, no network
-uv run pytest -m live         # opt-in: real OpenRouter calls, needs OPENROUTER_API_KEY
-uv run ruff check . && uv run ruff format --check . && uv run mypy
-uv run pre-commit install     # same checks on every commit
+uv sync                  # installs the dev tools too
+uv run pytest            # unit tests, no network
 ```
 
-CI runs lint and type checks once, and the tests on macOS, Windows and Linux with Python 3.12 and
-3.13. Gitleaks scans every push for secrets.
+[CONTRIBUTING.md](CONTRIBUTING.md) has the full checks, the project layout and how to add a
+profile, trigger, setting or provider. CI runs lint and type checks once, and the tests on macOS,
+Windows and Linux with Python 3.12 to 3.14. Gitleaks scans every push for secrets.
 
 ## Contributing, security, license
 

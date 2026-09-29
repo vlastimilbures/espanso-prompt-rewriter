@@ -16,7 +16,7 @@ redaction patterns and documentation fixes are all welcome.
 ```bash
 git clone https://github.com/vlastimilbures/espanso-prompt-rewriter.git
 cd espanso-prompt-rewriter
-uv sync --extra dev
+uv sync                  # the project plus its dev tools
 uv run pre-commit install
 ```
 
@@ -27,8 +27,8 @@ Run these before opening a pull request. CI runs the same.
 ```bash
 uv run pytest                                   # unit tests, no network
 uv run ruff check . && uv run ruff format --check .
-uv run mypy
-uv run pre-commit run --all-files               # also YAML checks and gitleaks
+uv run mypy                                     # strict, src and scripts
+uv run pre-commit run --all-files               # also YAML checks, gitleaks and zizmor
 ```
 
 If you change a prompt, a provider or anything on the request path, also run the opt-in live
@@ -42,9 +42,11 @@ uv run pytest -m live
 
 - **The Espanso contract.** The CLI prints the result with no trailing newline, and every failure
   as `[prompt-workflow: …]` with exit code 0. Espanso cannot show stderr or exit codes, so a
-  traceback or a blank line reaches the user as a silent failure.
-- **The gate.** Build providers only through `factory.make_provider()`. It wraps every cloud
-  provider in `GatedProvider`, so no code path can call a cloud API without the redaction check.
+  traceback or a blank line reaches the user as a silent failure. Print only through
+  `cli._emit()`, which strips control and invisible characters from whatever gets pasted.
+- **The gate.** Build providers only through `factory.make_provider()`. It wraps every provider
+  that can send the draft off the machine in `GatedProvider`: the cloud ones always, a local one
+  when its base URL is not loopback or the Ollama model is a cloud model.
 - **Cross-platform.** Everything must work on macOS and Windows. Use `pathlib` and explicit
   timeouts.
 - **Tests.** Unit tests never touch the network; use the `fake_http` fixture in
@@ -57,6 +59,46 @@ uv run pytest -m live
   `fix:`, `docs:`, `refactor:`, `test:`, `chore:`, `ci:`.
 - **Changelog.** Add a line under *Unreleased* in [CHANGELOG.md](CHANGELOG.md) for anything a user
   would notice.
+
+## Project layout
+
+```text
+espanso-prompt-rewriter/
+├── espanso/                      deployed into Espanso by the installers
+│   ├── match/
+│   │   ├── prompts-llm.yml       -i- -ip- -if- -il- -ilm- (-ic-): call the CLI
+│   │   ├── prompts-core.yml      -prompt- -risk-: static snippets and forms
+│   │   └── prompts-template.yml  -p-: the empty golden template, opens with your persona
+│   └── config/
+│       └── default.yml           optional Espanso settings (--with-config / -WithConfig)
+├── src/prompt_workflow/          the prompt-workflow CLI
+│   ├── cli.py                    improve and persona commands, the single output sink
+│   ├── config.py                 Settings from the environment and .env
+│   ├── factory.py                make_provider(): builds providers, decides which are gated
+│   ├── gate.py                   GatedProvider: scans every draft that can leave the machine
+│   ├── redaction.py              the gate's sensitive-content patterns
+│   ├── prompt_builder.py         loads profiles, fills in the persona rule
+│   ├── prompts/
+│   │   ├── default.md            golden-template rewrite (-i-, -ip-, -if-)
+│   │   └── general.md            lighter "make this precise" rewrite (local triggers)
+│   └── providers/
+│       ├── base.py               HTTP call, error mapping, <think> stripping
+│       ├── openai_compatible.py  OpenRouter and LM Studio
+│       ├── anthropic.py          Anthropic Messages API
+│       └── ollama.py             Ollama /api/chat
+├── scripts/
+│   ├── install_macos.sh          install the CLI and deploy the match files
+│   ├── install_windows.ps1       the same for Windows
+│   └── bench_models.py           score models on template fidelity, latency, cost
+├── tests/                        unit tests, no network (fake_http in conftest.py)
+│   ├── test_live.py              opt-in real OpenRouter calls (pytest -m live)
+│   └── test_docs.py              README and .env.example list every setting
+├── .github/                      CI (tests, gitleaks), Dependabot, issue and PR templates
+├── .env.example                  every setting with its default; copy to .env
+├── CONTRIBUTING.md               setup, checks, how to add a profile/trigger/provider
+├── SECURITY.md                   how to report a gate bypass or other vulnerability
+└── CHANGELOG.md                  release notes
+```
 
 ## Common changes
 
@@ -103,8 +145,8 @@ Snippets that need no model go in `espanso/match/prompts-core.yml`, as plain Esp
 1. Implement `generate(prompt, system_prompt, model=None) -> str` in
    `src/prompt_workflow/providers/`. Use `post_json()` and `finalize_content()` from
    `providers/base.py` so transport errors and `<think>` stripping behave like the other providers.
-2. Add it to `PROVIDER_NAMES` and `make_provider()` in `factory.py`. If it sends data off the
-   machine, wrap it in `GatedProvider` like the other cloud providers.
+2. Add it to `PROVIDER_NAMES` and `make_provider()` in `factory.py`. If it can send data off the
+   machine, return it through `_gate()`, as the other providers do.
 3. Add wire-format and error-path cases to `tests/test_providers.py`, and a factory test.
 
 ### Improve the redaction gate
