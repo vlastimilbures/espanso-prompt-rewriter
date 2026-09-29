@@ -4,7 +4,7 @@ import pytest
 from prompt_workflow.config import Settings
 from prompt_workflow.factory import make_provider
 from prompt_workflow.providers.anthropic import ANTHROPIC_VERSION, AnthropicProvider
-from prompt_workflow.providers.base import Provider, ProviderError
+from prompt_workflow.providers.base import TRUNCATED_NOTE, Provider, ProviderError
 from prompt_workflow.providers.ollama import OllamaProvider
 from prompt_workflow.providers.openai_compatible import OpenAICompatibleProvider
 
@@ -219,8 +219,9 @@ def test_invalid_json(fake_http, name):
     [
         ("ollama", {"unexpected": True}),
         ("openai_compatible", {"choices": []}),
-        ("anthropic", {"content": []}),
-        ("anthropic", {"content": [{"type": "thinking", "thinking": "x"}]}),
+        ("anthropic", {"content": None}),
+        # A non-dict block used to escape as an "unexpected error".
+        ("anthropic", {"content": ["text"]}),
     ],
 )
 def test_malformed_response(fake_http, name, body):
@@ -255,3 +256,44 @@ def test_anthropic_skips_non_text_blocks(fake_http):
         {"content": [{"type": "thinking", "thinking": "reasoning"}, {"type": "text", "text": "ok"}]}
     )
     assert AnthropicProvider("http://x", "m", "key").generate("d", "s") == "ok"
+
+
+# A response with no text block at all (only thinking) has no text content.
+@pytest.mark.parametrize("blocks", [[], [{"type": "thinking", "thinking": "x"}]])
+def test_anthropic_without_text_block(fake_http, blocks):
+    fake_http.reply({"content": blocks})
+    with pytest.raises(ProviderError, match=r"^Anthropic returned no text content"):
+        AnthropicProvider("http://x", "m", "key").generate("d", "s")
+
+
+def _truncated(name, text):
+    body = PROVIDERS[name][1](text)
+    if name == "ollama":
+        body["done_reason"] = "length"
+    elif name == "openai_compatible":
+        body["choices"][0]["finish_reason"] = "length"
+    else:
+        body["stop_reason"] = "max_tokens"
+    return body
+
+
+# A rewrite cut off at the token cap is pasted with a visible note, never as if complete.
+@ALL
+def test_truncated_output_is_marked(fake_http, name):
+    build, _, _ = PROVIDERS[name]
+    fake_http.reply(_truncated(name, "<CONTEXT>\nhalf a prompt"))
+    assert build().generate("d", "s") == "<CONTEXT>\nhalf a prompt" + TRUNCATED_NOTE
+
+
+# A reasoning model that spent the whole budget thinking gets a fix-it hint, not a
+# generic "no text content".
+@ALL
+@pytest.mark.parametrize("text", [None, "<think>still thinking"])
+def test_truncated_without_text_asks_for_more_tokens(fake_http, name, text):
+    build, _, label = PROVIDERS[name]
+    body = _truncated(name, text)
+    if name == "anthropic" and text is None:
+        body["content"] = [{"type": "thinking", "thinking": "x"}]
+    fake_http.reply(body)
+    with pytest.raises(ProviderError, match=f"^{label} used the whole max-tokens budget"):
+        build().generate("d", "s")

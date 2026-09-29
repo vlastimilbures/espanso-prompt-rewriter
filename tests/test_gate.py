@@ -1,3 +1,5 @@
+import pytest
+
 from prompt_workflow.gate import GatedProvider
 from prompt_workflow.providers.base import ProviderError
 from prompt_workflow.redaction import compile_extra
@@ -16,12 +18,8 @@ class _Stub:
 def test_blocks_on_findings():
     inner = _Stub()
     provider = GatedProvider(inner, allow_override=False)
-    try:
+    with pytest.raises(ProviderError, match=r"Blocked cloud call.*payment_card"):
         provider.generate("card 4111 1111 1111 1111", "system")
-        raised = False
-    except ProviderError:
-        raised = True
-    assert raised
     assert inner.calls == []
 
 
@@ -46,10 +44,6 @@ def test_clean_draft_passes_through():
 def test_blocks_on_extra_pattern():
     inner = _Stub()
     provider = GatedProvider(inner, allow_override=False, extra_patterns=compile_extra("falcon"))
-    try:
+    with pytest.raises(ProviderError, match="custom_1"):
         provider.generate("Project Falcon roadmap", "system")
-        raised = False
-    except ProviderError as exc:
-        raised = "custom_1" in str(exc)
-    assert raised
     assert inner.calls == []

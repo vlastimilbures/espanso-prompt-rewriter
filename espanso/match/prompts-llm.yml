@@ -4,7 +4,7 @@
 # mangles a command line that starts with a quote and holds more than one quoted part.
 # The CLI finds .env on its own (the repo checkout, or PROMPT_WORKFLOW_ENV), so no `cd`.
 matches:
-  # Rewrites the clipboard draft into the golden template (see base.yml).
+  # Rewrites the clipboard draft into the golden template (see prompts-template.yml).
   # This is the live cloud trigger: it runs on OpenRouter, so the clipboard
   # leaves the machine. The CLI's redaction gate blocks sensitive content
   # unless ALLOW_CLOUD_OVERRIDE=true, but that gate is a heuristic, not a

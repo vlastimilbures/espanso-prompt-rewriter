@@ -56,8 +56,10 @@ class OpenAICompatibleProvider:
             self.on_response(data)
 
         try:
-            content = data["choices"][0]["message"]["content"]  # type: ignore[index]
+            choice = data["choices"][0]  # type: ignore[index]
+            content = choice["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
             raise ProviderError(f"{self.label} response was malformed") from exc
 
-        return finalize_content(content, self.label)
+        truncated = choice.get("finish_reason") == "length"
+        return finalize_content(content, self.label, truncated=truncated)

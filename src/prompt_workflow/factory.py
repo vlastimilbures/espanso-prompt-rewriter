@@ -26,6 +26,20 @@ def openrouter_routing(pin: str, allow_fallbacks: bool) -> dict[str, object]:
     return routing
 
 
+def openrouter_body(cfg: Settings) -> dict[str, object]:
+    """OpenRouter-only request fields from settings: endpoint routing and reasoning effort.
+
+    `exclude`: the reasoning trace is billed but never returned as text to paste.
+    """
+    body: dict[str, object] = {}
+    routing = openrouter_routing(cfg.openrouter_provider, cfg.openrouter_allow_fallbacks)
+    if routing:
+        body["provider"] = routing
+    if cfg.openrouter_reasoning_effort:
+        body["reasoning"] = {"effort": cfg.openrouter_reasoning_effort, "exclude": True}
+    return body
+
+
 def _require(value: str | None, env_name: str) -> str:
     if not value:
         raise ProviderError(f"{env_name} is not configured")
@@ -70,13 +84,6 @@ def make_provider(
 
     inner: Provider
     if name == "openrouter":
-        routing = openrouter_routing(cfg.openrouter_provider, cfg.openrouter_allow_fallbacks)
-        # exclude: the reasoning trace is billed but never returned as text to paste.
-        reasoning = (
-            {"reasoning": {"effort": cfg.openrouter_reasoning_effort, "exclude": True}}
-            if cfg.openrouter_reasoning_effort
-            else {}
-        )
         inner = OpenAICompatibleProvider(
             base_url=_require_https(cfg.openrouter_base_url, "OPENROUTER_BASE_URL"),
             default_model=cfg.openrouter_model,
@@ -86,11 +93,7 @@ def make_provider(
             temperature=cfg.temperature,
             extra_headers={"X-Title": title},
             label="OpenRouter",
-            extra_body={
-                **({"provider": routing} if routing else {}),
-                **reasoning,
-                **(extra_body or {}),
-            },
+            extra_body={**openrouter_body(cfg), **(extra_body or {})},
             on_response=on_response,
         )
     elif name == "anthropic":

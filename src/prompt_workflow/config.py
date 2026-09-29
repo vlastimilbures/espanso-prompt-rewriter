@@ -1,16 +1,22 @@
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Callable
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 from typing import Any
 
 
-def _unquote(value: str) -> str:
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-        return value[1:-1]
-    return value
+def _parse_value(raw: str) -> str:
+    """A .env value: the text inside a leading quote pair, else the text before an inline
+    ` # comment` (so `OPENROUTER_PROVIDER=openai  # note` is just `openai`)."""
+    value = raw.strip()
+    if value[:1] in ("'", '"'):
+        end = value.find(value[0], 1)
+        if end > 0:
+            return value[1:end]
+    return re.split(r"\s+#", value, maxsplit=1)[0]
 
 
 # Root of an editable install (the repo checkout), where the user keeps their .env.
@@ -39,26 +45,34 @@ def _env_file_candidates() -> list[Path]:
     return candidates
 
 
+def read_env_file(path: Path) -> dict[str, str] | None:
+    """KEY=VALUE pairs of a .env file, or None when it is missing or unreadable."""
+    try:
+        raw_text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    pairs = {}
+    for raw in raw_text.splitlines():
+        line = raw.strip().removeprefix("export ")
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        pairs[key.strip()] = _parse_value(value)
+    return pairs
+
+
 def _load_dotenv() -> None:
-    """Load KEY=VALUE pairs from the first .env found, without overriding existing env.
+    """Load the first readable .env found, without overriding existing env.
 
     This is intentionally dependency-free so it works even when GUI-launched
     Espanso does not inherit the interactive shell environment.
     """
     for candidate in _env_file_candidates():
-        if not candidate.is_file():
-            continue
-        try:
-            raw_text = candidate.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            continue
-        for raw in raw_text.splitlines():
-            line = raw.strip().removeprefix("export ")
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, value = line.partition("=")
-            os.environ.setdefault(key.strip(), _unquote(value.strip()))
-        return
+        pairs = read_env_file(candidate)
+        if pairs is not None:
+            for key, value in pairs.items():
+                os.environ.setdefault(key, value)
+            return
 
 
 def _env(name: str, default: str, parse: Callable[[str], Any] = str) -> Any:
@@ -71,7 +85,12 @@ def _env(name: str, default: str, parse: Callable[[str], Any] = str) -> Any:
         except ValueError as exc:
             raise ValueError(f"{name} must be a number, got {raw!r}") from exc
 
-    return field(default_factory=read)
+    return field(default_factory=read, metadata={"env": name})
+
+
+def env_names() -> tuple[str, ...]:
+    """Every environment variable Settings reads, in field order."""
+    return tuple(f.metadata["env"] for f in fields(Settings))
 
 
 def _is_true(raw: str) -> bool:

@@ -12,19 +12,16 @@ from pathlib import Path
 import pytest
 from bench_module import bench
 
+from prompt_workflow.config import read_env_file
+
 REPO = Path(__file__).resolve().parents[1]
 
 pytestmark = pytest.mark.live
 
 
 def _has_key() -> bool:
-    env_file = REPO / ".env"
-    in_file = env_file.is_file() and any(
-        line.strip().removeprefix("export ").startswith("OPENROUTER_API_KEY=")
-        and line.split("=", 1)[1].strip().strip("\"'")
-        for line in env_file.read_text(encoding="utf-8").splitlines()
-    )
-    return in_file or bool(os.environ.get("OPENROUTER_API_KEY"))
+    in_file = (read_env_file(REPO / ".env") or {}).get("OPENROUTER_API_KEY")
+    return bool(in_file or os.environ.get("OPENROUTER_API_KEY"))
 
 
 def _improve(draft: str) -> subprocess.CompletedProcess[str]:

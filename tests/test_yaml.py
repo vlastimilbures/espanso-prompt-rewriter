@@ -87,7 +87,7 @@ def test_shell_commands_use_known_tiers():
 
 
 # form: blocks must interpolate at least one {{var}} — otherwise Espanso pops an
-# empty dialog instead of expanding text (regression test for the base.yml fix in 2.2).
+# empty dialog instead of expanding text (regression test for the -p- template form fix in 2.2).
 def test_form_blocks_interpolate_a_variable():
     for path in MATCH_FILES:
         for match in _load(path)["matches"]:
@@ -159,3 +159,12 @@ def test_form_choices_are_valid_cli_values():
                 assert str(field["default"]) in values, f"{match['trigger']}: {name} default"
                 for value in values:
                     assert checks[option](value), f"{match['trigger']}: {option} {value!r}"
+
+
+# Match files are UTF-8 without a BOM: the installers read and write them as such, and
+# Espanso would treat a BOM as part of the first key.
+def test_match_files_are_utf8_without_bom():
+    for path in ESPANSO_ROOT.rglob("*.yml"):
+        raw = path.read_bytes()
+        assert not raw.startswith(b"\xef\xbb\xbf"), f"{path.name} has a BOM"
+        raw.decode("utf-8")

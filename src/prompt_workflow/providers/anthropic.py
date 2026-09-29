@@ -45,12 +45,17 @@ class AnthropicProvider:
         )
 
         try:
+            # None when there is no text block, e.g. only thinking before the token cap.
             content = next(
-                block["text"]
-                for block in data["content"]  # type: ignore[attr-defined]
-                if block.get("type") == "text"
+                (
+                    block["text"]
+                    for block in data["content"]  # type: ignore[attr-defined]
+                    if block.get("type") == "text"
+                ),
+                None,
             )
-        except (KeyError, IndexError, TypeError, StopIteration) as exc:
+        except (KeyError, TypeError, AttributeError) as exc:
             raise ProviderError("Anthropic response was malformed") from exc
 
-        return finalize_content(content, "Anthropic")
+        truncated = data.get("stop_reason") == "max_tokens"
+        return finalize_content(content, "Anthropic", truncated=truncated)

@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-import os
-
 import httpx
 import pytest
 
-_ENV_PREFIXES = ("PROMPT_", "OLLAMA_", "OPENROUTER_", "LMSTUDIO_", "ANTHROPIC_")
-_ENV_EXACT = ("ALLOW_CLOUD_OVERRIDE", "PROMPT_WORKFLOW_ENV")
+from prompt_workflow.config import env_names
 
 
 @pytest.fixture(autouse=True)
@@ -18,9 +15,8 @@ def isolated_env(tmp_path, monkeypatch):
     alphabetically, making later assertions depend on the developer's
     real .env contents.
     """
-    for key in list(os.environ):
-        if key.startswith(_ENV_PREFIXES) or key in _ENV_EXACT:
-            monkeypatch.delenv(key, raising=False)
+    for key in env_names():
+        monkeypatch.delenv(key, raising=False)
     monkeypatch.chdir(tmp_path)
     # Point the loader at a per-test file so the developer's real repo .env never loads.
     monkeypatch.setenv("PROMPT_WORKFLOW_ENV", str(tmp_path / ".env"))
@@ -81,3 +77,34 @@ def fake_http(monkeypatch):
     fake = FakeHttp()
     monkeypatch.setattr(httpx, "Client", fake)
     return fake
+
+
+class StubProvider:
+    """Stands in for cli.make_provider and the provider it builds: records each build
+    and generate() call, and returns ``result`` or raises ``exc``."""
+
+    def __init__(self):
+        self.result = "improved"
+        self.exc = None
+        self.built = []
+        self.calls = []
+
+    def __call__(self, name, cfg):
+        self.built.append((name, cfg))
+        return self
+
+    def generate(self, prompt, system_prompt, model=None):
+        self.calls.append({"prompt": prompt, "system_prompt": system_prompt, "model": model})
+        if self.exc:
+            raise self.exc
+        return self.result
+
+
+@pytest.fixture
+def stub_provider(monkeypatch):
+    """Replace the CLI's make_provider, so CLI tests never build a real provider."""
+    import prompt_workflow.cli as cli
+
+    stub = StubProvider()
+    monkeypatch.setattr(cli, "make_provider", stub)
+    return stub

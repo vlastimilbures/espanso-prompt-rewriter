@@ -25,9 +25,10 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
-from prompt_workflow.config import Settings
+from prompt_workflow.config import Settings, split_model_spec
 from prompt_workflow.factory import make_provider
 from prompt_workflow.prompt_builder import PROFILES, render
+from prompt_workflow.providers.base import TRUNCATED_NOTE
 
 MODELS: list[str] = [
     # Standard tier (-i-). The first is the shipped default.
@@ -221,10 +222,13 @@ class Budget:
 
 
 def split_spec(spec: str) -> tuple[str, str, str]:
-    """`model[@provider-tag][~effort]` -> (model, pin, effort); absent parts are ""."""
+    """`model[@provider-tag][~effort]` -> (model, pin, effort); absent parts are "".
+
+    The `model@pin` part is parsed like the CLI's --model, so `@auto` also means no pin.
+    """
     rest, _, effort = spec.partition("~")
-    model, _, pin = rest.partition("@")
-    return model, pin, effort
+    model, pin = split_model_spec(rest)
+    return model or "", pin or "", effort
 
 
 def _call(
@@ -268,18 +272,11 @@ def run_one(
     # A --system-prompt-file candidate gets the same token filling as a shipped profile.
     sys_prompt = render(PROFILES["default"] if sys_prompt is None else sys_prompt, cfg.persona)
 
+    # Identity of this run, shared by every Result it can produce.
+    who = {"model": model, "draft": draft_name, "run": run, "pin": pin, "effort": effort}
     if budget.exhausted():
         return Result(
-            model,
-            draft_name,
-            run,
-            0.0,
-            0,
-            0,
-            pin=pin,
-            effort=effort,
-            skipped=True,
-            error="budget exhausted",
+            **who, seconds=0.0, out_tokens=0, in_tokens=0, skipped=True, error="budget exhausted"
         )
 
     started = time.monotonic()
@@ -296,16 +293,7 @@ def run_one(
                 continue
             elapsed = time.monotonic() - started
             return Result(
-                model,
-                draft_name,
-                run,
-                elapsed,
-                0,
-                0,
-                pin=pin,
-                effort=effort,
-                retried=retried,
-                error=message,
+                **who, seconds=elapsed, out_tokens=0, in_tokens=0, retried=retried, error=message
             )
     elapsed = time.monotonic() - started
 
@@ -321,6 +309,8 @@ def run_one(
     except (KeyError, IndexError, TypeError, AttributeError):
         finish_reason = ""
 
+    # Truncation is reported once, from finish_reason; the pasted note is not scored.
+    text = text.removesuffix(TRUNCATED_NOTE)
     failed = check(text, wants_plan, wants_independent)
     if finish_reason == "length":
         failed.insert(0, "truncated")
@@ -328,16 +318,12 @@ def run_one(
     slug = spec.replace("/", "_").replace("@", "__at__").replace("~", "__effort__")
     (outdir / f"{slug}__{draft_name}__{run}.txt").write_text(text, encoding="utf-8")
     return Result(
-        model=model,
-        draft=draft_name,
-        run=run,
+        **who,
         seconds=elapsed,
         out_tokens=int(usage.get("completion_tokens", 0)),
         in_tokens=int(usage.get("prompt_tokens", 0)),
         cost=cost,
         backend=str(body.get("provider", "")),
-        pin=pin,
-        effort=effort,
         reasoning_tokens=reasoning_tokens,
         finish_reason=finish_reason,
         retried=retried,
