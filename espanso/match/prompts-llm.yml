@@ -1,4 +1,4 @@
-# The __PROMPT_WORKFLOW__ placeholder is replaced with the absolute CLI path by
+# The quoted CLI placeholder in each cmd below is replaced with the absolute CLI path by
 # the install scripts, because GUI-launched Espanso does not inherit shell PATH. It is
 # quoted so a path with spaces works; keep every other argument unquoted, since cmd.exe
 # mangles a command line that starts with a quote and holds more than one quoted part.
