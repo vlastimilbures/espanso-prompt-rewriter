@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## 0.9.0
+
 ### Security
 - The redaction gate scans in linear time. An 80,000-character clipboard used to take
   15 s and freeze Espanso before any request timeout applied.
