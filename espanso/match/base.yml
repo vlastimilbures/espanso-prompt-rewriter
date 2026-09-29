@@ -1,0 +1,50 @@
+# espanso match file
+# __PROMPT_WORKFLOW__ is substituted by the install scripts (see prompts-llm.yml). The
+# persona line comes from PROMPT_PERSONA in the repo's .env, the same setting the -i-
+# rewrite uses; unset, it is a fill-in placeholder.
+
+matches:
+  - trigger: "-p-"
+    vars:
+      - name: persona
+        type: shell
+        params:
+          cmd: "\"__PROMPT_WORKFLOW__\" persona"
+    replace: |
+      <CONTEXT>
+      {{persona}}
+      I want to [XXX]. [Constraints etc.]
+      </CONTEXT>
+
+      <GOAL>
+      [XXX]
+      </GOAL>
+
+      <INSTRUCTIONS>
+      [pick one 1a/1b:]
+      1a/ Plan the task thoroughly, list any assumptions and open questions, and validate the plan with me before executing.
+      1b/ Execute, but state assumptions up front.
+      2/ Load and validate all inputs. If anything is missing, ambiguous, or contradictory, ask me up to 5 targeted questions before drafting.
+      3/ [step — the substantive work]
+      [pick one 4a/4b:]
+      4a/ Spin up independent agent with [XXX] domain knowledge and perform critical review, check for errors, and ensure the output is complete and accurate, review formatting and clarity, and ensure the output is well structured and easy to read; summarize all issues and improvement points, validate them with me before implementing any changes
+      4b/ Review your own output against these checks, then list issues found and fixes made:
+        - Accuracy: every factual claim traces to an input or a cited source. Mark anything unverifiable as [not in source]. Separate evidence from opinion (label opinions "assumption" or "view").
+        - Completeness: all parts of the goal addressed.
+        - Logic and math: show calculation steps so I can audit them.
+        - Structure and clarity: clear headings, scannable, no filler.
+      5/ Flag material judgment calls or trade-offs and let me decide.
+      </INSTRUCTIONS>
+
+      <CONSTRAINTS>
+      - [length, tone, deadline, format, standards, data limits]
+      - Out of scope: [XXX]
+      </CONSTRAINTS>
+
+      <INPUTS>
+      [attached files / links / data]
+      </INPUTS>
+
+      <OUTPUTS>
+      structured .md, well formatted with clear headings/subheadings
+      </OUTPUTS>

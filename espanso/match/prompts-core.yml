@@ -1,0 +1,35 @@
+matches:
+  - trigger: "-prompt-"
+    form: |
+      Act as {{role}}.
+
+      Objective:
+      {{objective}}
+
+      Context:
+      {{context}}
+
+      Constraints:
+      {{constraints}}
+
+      Required output:
+      {{output}}
+
+      Validate assumptions and identify missing information.
+    form_fields:
+      role:
+        multiline: false
+      objective:
+        multiline: true
+      context:
+        multiline: true
+      constraints:
+        multiline: true
+      output:
+        multiline: true
+
+  - trigger: "-risk-"
+    replace: |
+      Analyze the following issue from an enterprise risk perspective: $|$
+
+      Separate evidence from assumptions. For each risk, provide likelihood, impact, owner, and next step. Identify control gaps and information that cannot be verified. Do not invent facts.

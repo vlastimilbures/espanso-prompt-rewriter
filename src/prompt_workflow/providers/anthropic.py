@@ -1,0 +1,56 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from .base import ProviderError, finalize_content, post_json
+
+# The Messages API pins its schema via a required version header.
+ANTHROPIC_VERSION = "2023-06-01"
+
+
+@dataclass
+class AnthropicProvider:
+    """Chat provider for Anthropic's native Messages API.
+
+    This is not OpenAI-compatible: the system prompt is a top-level field,
+    max_tokens is required, and the response is a list of content blocks.
+    """
+
+    base_url: str
+    default_model: str
+    api_key: str
+    timeout: float = 30
+    max_tokens: int = 1200
+    temperature: float | None = None
+
+    def __post_init__(self) -> None:
+        self.base_url = self.base_url.rstrip("/")
+
+    def generate(self, prompt: str, system_prompt: str, model: str | None = None) -> str:
+        headers = {
+            "x-api-key": self.api_key,
+            "anthropic-version": ANTHROPIC_VERSION,
+            "content-type": "application/json",
+        }
+        payload: dict[str, object] = {
+            "model": model or self.default_model,
+            "max_tokens": self.max_tokens,
+            "system": system_prompt,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        if self.temperature is not None:
+            payload["temperature"] = self.temperature
+        data = post_json(
+            "Anthropic", f"{self.base_url}/v1/messages", self.timeout, headers=headers, json=payload
+        )
+
+        try:
+            content = next(
+                block["text"]
+                for block in data["content"]  # type: ignore[attr-defined]
+                if block.get("type") == "text"
+            )
+        except (KeyError, IndexError, TypeError, StopIteration) as exc:
+            raise ProviderError("Anthropic response was malformed") from exc
+
+        return finalize_content(content, "Anthropic")

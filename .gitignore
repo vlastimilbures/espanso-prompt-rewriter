@@ -1,0 +1,17 @@
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+.coverage
+.coverage.*
+.ruff_cache/
+.mypy_cache/
+*.pyc
+.DS_Store
+.vscode/*.local.json
+output/
+bench-out*/
+bench-*.log
+.tokensave/
+.claude/
+.codegraph/

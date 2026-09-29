@@ -1,0 +1,1 @@
+Rewrite the user's draft as a precise, effective prompt. Preserve intent. Add missing structure, context placeholders, constraints, expected output, and validation criteria. Do not answer the prompt. Return only the improved prompt.

@@ -1,0 +1,208 @@
+from __future__ import annotations
+
+import os
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
+from pathlib import Path
+from typing import Any
+
+
+def _unquote(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        return value[1:-1]
+    return value
+
+
+# Root of an editable install (the repo checkout), where the user keeps their .env.
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _user_config_dir() -> Path:
+    if os.name == "nt":
+        return Path(os.getenv("APPDATA") or Path.home() / "AppData" / "Roaming") / "prompt-workflow"
+    return Path(os.getenv("XDG_CONFIG_HOME") or Path.home() / ".config") / "prompt-workflow"
+
+
+def _env_file_candidates() -> list[Path]:
+    """Where .env may live, in priority order.
+
+    Deliberately never the current directory or its parents: running the CLI inside an
+    untrusted checkout must not let a planted .env redirect OPENROUTER_BASE_URL (and so the
+    API key) or switch on ALLOW_CLOUD_OVERRIDE.
+    """
+    explicit = os.getenv("PROMPT_WORKFLOW_ENV")
+    if explicit:
+        return [Path(explicit).expanduser()]
+    candidates = [_user_config_dir() / ".env"]
+    if (_PROJECT_ROOT / "pyproject.toml").is_file():
+        candidates.insert(0, _PROJECT_ROOT / ".env")
+    return candidates
+
+
+def _load_dotenv() -> None:
+    """Load KEY=VALUE pairs from the first .env found, without overriding existing env.
+
+    This is intentionally dependency-free so it works even when GUI-launched
+    Espanso does not inherit the interactive shell environment.
+    """
+    for candidate in _env_file_candidates():
+        if not candidate.is_file():
+            continue
+        try:
+            raw_text = candidate.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        for raw in raw_text.splitlines():
+            line = raw.strip().removeprefix("export ")
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            os.environ.setdefault(key.strip(), _unquote(value.strip()))
+        return
+
+
+def _env(name: str, default: str, parse: Callable[[str], Any] = str) -> Any:
+    """A dataclass field read from env var `name` when Settings() is instantiated."""
+
+    def read() -> Any:
+        raw = os.getenv(name, default)
+        try:
+            return parse(raw)
+        except ValueError as exc:
+            raise ValueError(f"{name} must be a number, got {raw!r}") from exc
+
+    return field(default_factory=read)
+
+
+def _is_true(raw: str) -> bool:
+    return raw.lower() == "true"
+
+
+TIERS = ("standard", "pro")
+# OpenRouter `reasoning.effort` values accepted by --effort.
+EFFORTS = ("none", "minimal", "low", "medium", "high")
+# Option value meaning "keep the configured setting"; the -if- popup's choice lists
+# cannot express "unset", so each one offers this word instead.
+KEEP = "default"
+# --model value suffix `@auto` drops the endpoint pin (OpenRouter's blended routing).
+AUTO_ENDPOINT = "auto"
+
+
+def split_model_spec(spec: str | None) -> tuple[str | None, str | None]:
+    """Split `slug@endpoint` into (slug, endpoint pin); a bare slug has no pin (None).
+
+    The popup's model list carries the endpoint with the model because the configured pin
+    (e.g. google-ai-studio/flex) only serves one vendor's models. `@auto` maps to "".
+    """
+    if not spec or "@" not in spec:
+        return spec, None
+    model, _, endpoint = spec.partition("@")
+    if not model or not endpoint:
+        raise ValueError(f"--model must be slug or slug@endpoint, got {spec!r}")
+    return model, "" if endpoint == AUTO_ENDPOINT else endpoint
+
+
+def _override[T](raw: str | None, option: str, parse: Callable[[str], T]) -> T | None:
+    """Parse an optional per-call override; None or `default` means keep the setting."""
+    if raw is None or raw == KEEP:
+        return None
+    try:
+        return parse(raw)
+    except ValueError as exc:
+        raise ValueError(f"{option} must be a number or {KEEP}, got {raw!r}") from exc
+
+
+@dataclass(frozen=True)
+class Settings:
+    """Runtime settings resolved at instantiation, not import time."""
+
+    provider: str = _env("PROMPT_PROVIDER", "openrouter")
+    profile: str = _env("PROMPT_PROFILE", "default")
+    # Opening sentence of the default profile's CONTEXT and of the -p- snippet, e.g.
+    # "I am working as a Head of Data at Example Corp." Empty: no fixed persona.
+    persona: str = _env("PROMPT_PERSONA", "")
+    timeout: float = _env("PROMPT_TIMEOUT_SECONDS", "30", float)
+    # Low by default: the rewrite must reproduce fixed template wordings verbatim.
+    temperature: float = _env("PROMPT_TEMPERATURE", "0.2", float)
+    ollama_base_url: str = _env("OLLAMA_BASE_URL", "http://localhost:11434")
+    ollama_model: str = _env("OLLAMA_MODEL", "qwen3:8b")
+    ollama_think: bool = _env("OLLAMA_THINK", "false", _is_true)
+    openrouter_base_url: str = _env("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+    openrouter_model: str = _env("OPENROUTER_MODEL", "google/gemini-3.5-flash-lite")
+    openrouter_api_key: str = _env("OPENROUTER_API_KEY", "")
+    openrouter_max_tokens: int = _env("OPENROUTER_MAX_TOKENS", "2400", int)
+    # OpenRouter routes one model slug across many hosts, and the host drives latency,
+    # cost and template fidelity (see the benchmark section in README.md). Pin one
+    # endpoint tag; empty string restores OpenRouter's own blended routing.
+    openrouter_provider: str = _env("OPENROUTER_PROVIDER", "google-ai-studio/flex")
+    # OpenRouter `reasoning.effort` (none/minimal/low/medium/high); empty omits the field
+    # for models without a reasoning control. Gemini 3.x cannot switch thinking off, and
+    # minimal keeps the inline rewrite at ~2 s.
+    openrouter_reasoning_effort: str = _env("OPENROUTER_REASONING_EFFORT", "minimal")
+    # Preference, not constraint: a pinned endpoint can be down, and in Espanso that
+    # surfaces as an error marker pasted into the editor. Set false for a hard pin.
+    openrouter_allow_fallbacks: bool = _env("OPENROUTER_ALLOW_FALLBACKS", "true", _is_true)
+    # The `pro` tier (-ip-): a reasoning model for hard, multi-part drafts. It
+    # swaps in these OpenRouter settings; everything else is shared with the default tier.
+    openrouter_pro_model: str = _env("OPENROUTER_PRO_MODEL", "openai/gpt-6-luna")
+    openrouter_pro_provider: str = _env("OPENROUTER_PRO_PROVIDER", "openai")
+    openrouter_pro_reasoning_effort: str = _env("OPENROUTER_PRO_REASONING_EFFORT", "low")
+    pro_timeout: float = _env("PROMPT_PRO_TIMEOUT_SECONDS", "60", float)
+    lmstudio_base_url: str = _env("LMSTUDIO_BASE_URL", "http://localhost:1234/v1")
+    lmstudio_model: str = _env("LMSTUDIO_MODEL", "local-model")
+    anthropic_base_url: str = _env("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
+    anthropic_model: str = _env("ANTHROPIC_MODEL", "claude-sonnet-5")
+    anthropic_api_key: str = _env("ANTHROPIC_API_KEY", "")
+    anthropic_max_tokens: int = _env("ANTHROPIC_MAX_TOKENS", "2400", int)
+    allow_cloud_override: bool = _env("ALLOW_CLOUD_OVERRIDE", "false", _is_true)
+    # Extra `;`-separated regexes the data-protection gate blocks on, e.g. internal project
+    # code names or customer-ID formats. Compiled by redaction.compile_extra().
+    extra_patterns: str = _env("PROMPT_EXTRA_PATTERNS", "")
+
+    @classmethod
+    def load(cls) -> Settings:
+        """Load .env (without overriding real env) then build settings."""
+        _load_dotenv()
+        return cls()
+
+    def for_tier(self, tier: str) -> Settings:
+        """Settings for a quality tier: `standard` as-is, `pro` with the OPENROUTER_PRO_*
+        model, endpoint and effort. Only OpenRouter has a pro tier."""
+        if tier == "standard":
+            return self
+        if tier == "pro":
+            return replace(
+                self,
+                openrouter_model=self.openrouter_pro_model,
+                openrouter_provider=self.openrouter_pro_provider,
+                openrouter_reasoning_effort=self.openrouter_pro_reasoning_effort,
+                timeout=self.pro_timeout,
+            )
+        raise ValueError(f"Unknown tier: {tier}. Choose from: {', '.join(TIERS)}")
+
+    def with_overrides(
+        self,
+        *,
+        endpoint: str | None = None,
+        effort: str | None = None,
+        max_tokens: str | None = None,
+        timeout: str | None = None,
+    ) -> Settings:
+        """Per-call overrides from the CLI (the -if- popup). Values arrive as
+        strings; None or `default` keeps the setting. Bad values raise ValueError, which
+        the CLI prints inline."""
+        if effort not in (None, KEEP, *EFFORTS):
+            raise ValueError(f"--effort must be one of {', '.join((KEEP, *EFFORTS))}")
+        tokens = _override(max_tokens, "--max-tokens", int)
+        seconds = _override(timeout, "--timeout", float)
+        changes: dict[str, Any] = {}
+        if endpoint is not None:
+            changes["openrouter_provider"] = endpoint
+        if effort not in (None, KEEP):
+            changes["openrouter_reasoning_effort"] = effort
+        if tokens is not None:
+            changes["openrouter_max_tokens"] = tokens
+            changes["anthropic_max_tokens"] = tokens
+        if seconds is not None:
+            changes["timeout"] = seconds
+        return replace(self, **changes) if changes else self

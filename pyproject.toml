@@ -1,0 +1,58 @@
+[project]
+name = "espanso-prompt-rewriter"
+version = "0.7.0"
+description = "Cross-platform Espanso prompt workflow with OpenRouter, Anthropic, Ollama, and LM Studio"
+requires-python = ">=3.12"
+dependencies = [
+  "httpx>=0.27,<1",
+  "pyperclip>=1.9,<2",
+  "typer>=0.12,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=9.1,<10",
+  "pytest-cov>=7.1,<8",
+  # Keep in step with the ruff-pre-commit rev in .pre-commit-config.yaml.
+  "ruff>=0.16.9,<0.17",
+  "mypy>=2.3,<3",
+  "pre-commit>=4.6,<5",
+  "PyYAML>=6.0,<7",
+]
+
+[project.scripts]
+prompt-workflow = "prompt_workflow.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/prompt_workflow"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/prompt_workflow/prompts" = "prompt_workflow/prompts"
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+# _env() returns a dataclasses.field(default_factory=...), not a shared default value.
+"src/prompt_workflow/config.py" = ["RUF009"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+files = ["src"]
+disallow_untyped_defs = true
+warn_return_any = true
+warn_unused_ignores = true
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "--strict-markers -m 'not live'"
+markers = ["live: calls the real OpenRouter API (opt-in: pytest -m live)"]

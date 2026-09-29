@@ -1,0 +1,51 @@
+name: Bug report
+description: Something does not work as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please do not paste API keys, customer data or confidential drafts. Replace them with fake
+        values. Security problems belong in a private report (see SECURITY.md).
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: "Include the exact `[prompt-workflow: …]` message if you got one."
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Trigger or CLI command, provider, profile, and a fake draft that shows the problem.
+      placeholder: |
+        1. echo "…" | prompt-workflow improve --provider openrouter --source stdin
+        2. …
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [macOS, Windows, Linux]
+    validations:
+      required: true
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider
+      options: [openrouter, anthropic, ollama, lmstudio, not provider related]
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: "Output of `uv tool list | grep espanso-prompt-rewriter` and `espanso --version`, plus the model if relevant."

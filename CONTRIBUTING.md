@@ -1,0 +1,125 @@
+# Contributing
+
+Thanks for helping improve Espanso Prompt Rewriter. Bug reports, prompt-quality findings, new
+redaction patterns and documentation fixes are all welcome.
+
+## Before you start
+
+- For anything bigger than a small fix, open an issue first so we can agree on the approach.
+- Never put real API keys, customer data or confidential text in code, tests, issues or commits.
+  Use obviously fake values (`sk-test…`, `4111 1111 1111 1111`, `john.doe@example.com`).
+- Security problems, including ways around the data-protection gate, go through
+  [SECURITY.md](SECURITY.md), not public issues.
+
+## Set up
+
+```bash
+git clone https://github.com/vlastimilbures/espanso-prompt-rewriter.git
+cd espanso-prompt-rewriter
+uv sync --extra dev
+uv run pre-commit install
+```
+
+## Checks
+
+Run these before opening a pull request. CI runs the same.
+
+```bash
+uv run pytest                                   # unit tests, no network
+uv run ruff check . && uv run ruff format --check .
+uv run mypy
+uv run pre-commit run --all-files               # also YAML checks and gitleaks
+```
+
+If you change a prompt, a provider or anything on the request path, also run the opt-in live
+tests (needs `OPENROUTER_API_KEY` in `.env`, costs fractions of a cent):
+
+```bash
+uv run pytest -m live
+```
+
+## Ground rules
+
+- **The Espanso contract.** The CLI prints the result with no trailing newline, and every failure
+  as `[prompt-workflow: …]` with exit code 0. Espanso cannot show stderr or exit codes, so a
+  traceback or a blank line reaches the user as a silent failure.
+- **The gate.** Build providers only through `factory.make_provider()`. It wraps every cloud
+  provider in `GatedProvider`, so no code path can call a cloud API without the redaction check.
+- **Cross-platform.** Everything must work on macOS and Windows. Use `pathlib` and explicit
+  timeouts.
+- **Tests.** Unit tests never touch the network; use the `fake_http` fixture in
+  `tests/conftest.py`, which records requests and replays responses. Add a test for every
+  behaviour change, and a regression test for every bug fix.
+- **Triggers.** Keep existing trigger names working. Tests enforce the `-name-` shape, uniqueness
+  and no prefix collisions.
+- **Commits** follow [Conventional Commits](https://www.conventionalcommits.org/): `feat:`,
+  `fix:`, `docs:`, `refactor:`, `test:`, `chore:`, `ci:`.
+- **Changelog.** Add a line under *Unreleased* in [CHANGELOG.md](CHANGELOG.md) for anything a user
+  would notice.
+
+## Common changes
+
+### Add a profile
+
+1. Add `src/prompt_workflow/prompts/<name>.md` containing the system prompt as plain prose. It is
+   picked up automatically.
+2. Optionally include `{{PERSONA_RULE}}` where the user's persona should be applied (see
+   `prompt_builder.render()`).
+3. Add a test in `tests/test_prompts.py`.
+
+### Add a trigger
+
+Add a match to `espanso/match/prompts-llm.yml`. Shell commands start with the quoted
+`__PROMPT_WORKFLOW__` placeholder, which the install scripts replace with the absolute CLI path.
+Quote nothing else: `cmd.exe` mangles a command line holding more than one quoted part.
+
+```yaml
+- trigger: "-ireg-"
+  replace: "{{output}}"
+  vars:
+    - name: output
+      type: shell
+      params:
+        cmd: "\"__PROMPT_WORKFLOW__\" improve --provider ollama --profile regulation --source clipboard"
+```
+
+`tests/test_yaml.py` checks the placeholder and quoting, and that the profile and provider exist.
+
+### Add a static snippet or form
+
+Snippets that need no model go in `espanso/match/prompts-core.yml`, as plain Espanso matches
+(`replace:` for fixed text, `form:` plus `form_fields:` for a fill-in form). See the
+[Espanso docs](https://espanso.org/docs/matches/basics/). Test in a plain-text editor first.
+
+### Add a provider
+
+1. Implement `generate(prompt, system_prompt, model=None) -> str` in
+   `src/prompt_workflow/providers/`. Use `post_json()` and `finalize_content()` from
+   `providers/base.py` so transport errors and `<think>` stripping behave like the other providers.
+2. Add it to `PROVIDER_NAMES` and `make_provider()` in `factory.py`. If it sends data off the
+   machine, wrap it in `GatedProvider` like the other cloud providers.
+3. Add wire-format and error-path cases to `tests/test_providers.py`, and a factory test.
+
+### Improve the redaction gate
+
+Add a pattern to `_PATTERNS` in `src/prompt_workflow/redaction.py`, with a validator in
+`_VALIDATORS` if the raw regex is too broad. Add both a positive and a near-miss negative test to
+`tests/test_redaction.py`. Build fake keys at runtime (`"sk-ant-" + body`) so no key-shaped
+literal lands in the repo. Patterns specific to one organisation belong in the user's
+`PROMPT_EXTRA_PATTERNS`, not in the code.
+
+### Change the default prompt
+
+Template wording is scored by `scripts/bench_models.py`, and `tests/test_bench.py` checks the
+scored phrases still exist in `prompts/default.md`. A/B a change before proposing it on both the
+standard and pro defaults, and include the before/after pass rates in the pull request:
+
+```bash
+MODELS="google/gemini-3.5-flash-lite@google-ai-studio/flex~minimal openai/gpt-6-luna@openai~low"
+uv run python scripts/bench_models.py --models $MODELS --runs 3
+uv run python scripts/bench_models.py --models $MODELS --runs 3 --system-prompt-file candidate.md
+```
+
+Small models such as flash-lite need an explicit trigger for *each* variant of a branching step.
+A rule like "if unsure, use (a)" with no positive condition for (b) makes them pick (a) almost
+every time. Check the per-draft table in the report, not only the total.
