@@ -44,7 +44,7 @@ def test_good_output_passes():
 
 
 @pytest.mark.parametrize(
-    "mutate,failure",
+    ("mutate", "failure"),
     [
         (lambda t: t.replace("</GOAL>", "</CONTEXT>", 1), "mismatched closing tag"),
         (lambda t: t.replace("<INPUTS>", "", 1), "no <INPUTS>"),
@@ -86,7 +86,8 @@ def test_bench_phrases_match_default_profile():
     for phrase in phrases:
         assert phrase in template, phrase
     for tag in bench.TAGS:
-        assert f"<{tag}>" in template and f"</{tag}>" in template
+        assert f"<{tag}>" in template
+        assert f"</{tag}>" in template
 
 
 # The static -p- snippet offers the same variants as the default profile, word for word, so

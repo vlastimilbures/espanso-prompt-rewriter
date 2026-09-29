@@ -9,7 +9,7 @@ class _Stub:
     def __init__(self):
         self.calls = []
 
-    def generate(self, prompt, system_prompt, model=None):
+    def generate(self, prompt, system_prompt):
         self.calls.append(prompt)
         return "improved"
 

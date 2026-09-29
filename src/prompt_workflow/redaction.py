@@ -24,22 +24,26 @@ _PATTERNS: dict[str, re.Pattern[str]] = {
     "openai_key": re.compile(r"\bsk-(?!or-|ant-)[A-Za-z0-9_-]{20,}"),
     "stripe_key": re.compile(r"\b[spr]k_(?:live|test)_[A-Za-z0-9]{16,}"),
     "github_token": re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})"),
+    "gitlab_token": re.compile(r"\bglpat-[A-Za-z0-9_-]{20,}"),
+    "huggingface_token": re.compile(r"\bhf_[A-Za-z0-9]{34,}"),
     "slack_token": re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}"),
     "google_api_key": re.compile(r"\bAIza[0-9A-Za-z_-]{35}"),
     "xai_key": re.compile(r"\bxai-[A-Za-z0-9]{20,}"),
     "aws_access_key": re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
     "jwt": re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"),
-    "pem_private_key": re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+    # PEM, OpenSSH and PGP (`-----BEGIN PGP PRIVATE KEY BLOCK-----`) private keys.
+    "pem_private_key": re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----"),
     "bearer_token": re.compile(r"\bBearer\s+[A-Za-z0-9._-]{16,}\b", re.IGNORECASE),
     # scheme://user:password@host
     "url_credentials": re.compile(
         r"\b[a-z][a-z0-9+.-]{0,31}://[^\s/:@]{1,256}:[^\s/@]{1,256}@", re.IGNORECASE
     ),
-    # password=..., api_key: ...; the value must contain a digit so prose such as
-    # "token: explanation" does not trip it.
+    # password=..., DB_PASSWORD: ..., "client_secret": "..."; the value must contain a digit
+    # so prose such as "token: explanation" does not trip it. The name may follow '_' or '-'
+    # (access_token, AWS_SECRET_ACCESS_KEY), where \b would not match.
     "secret_assignment": re.compile(
-        r"\b(?:password|passwd|pwd|secret|api[_-]?key|token)\s*[:=]\s*[\"']?"
-        r"(?=[^\s\"']{0,256}\d)[^\s\"']{8,}",
+        r"(?<![a-z0-9])(?:password|passwd|pwd|secret[_-]?access[_-]?key|secret|api[_-]?key|token)"
+        r"[\"']?\s*[:=]\s*[\"']?(?=[^\s\"']{0,256}\d)[^\s\"']{8,}",
         re.IGNORECASE,
     ),
     "confidential_label": re.compile(

@@ -59,8 +59,8 @@ def test_shell_commands_start_with_quoted_cli():
         assert "__REPO_DIR__" not in cmd, f"{trigger} still uses __REPO_DIR__"
 
 
-# Every --profile passed to the CLI is a profile prompt_builder.PROFILES actually defines
-# (this is exactly the class of regression the 0.3.0 profile deletion should have caught).
+# Every --profile passed to the CLI is a profile prompt_builder.PROFILES actually defines,
+# so deleting or renaming a profile cannot leave a trigger pointing at nothing.
 def test_shell_commands_use_known_profiles():
     for trigger, cmd in (cmd for path in MATCH_FILES for cmd in _shell_commands(path)):
         match = re.search(r"--profile\s+(\S+)", cmd)
@@ -87,7 +87,7 @@ def test_shell_commands_use_known_tiers():
 
 
 # form: blocks must interpolate at least one {{var}} — otherwise Espanso pops an
-# empty dialog instead of expanding text (regression test for the -p- template form fix in 2.2).
+# empty dialog instead of expanding text.
 def test_form_blocks_interpolate_a_variable():
     for path in MATCH_FILES:
         for match in _load(path)["matches"]:

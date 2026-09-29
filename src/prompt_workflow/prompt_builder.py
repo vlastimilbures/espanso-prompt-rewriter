@@ -16,7 +16,7 @@ def _load_profiles() -> dict[str, str]:
 PROFILES: dict[str, str] = _load_profiles()
 
 # Replaced in a profile by the rule for how CONTEXT opens (see PROMPT_PERSONA).
-PERSONA_TOKEN = "{{PERSONA_RULE}}"
+PERSONA_TOKEN = "{{PERSONA_RULE}}"  # noqa: S105 - a template placeholder, not a secret
 
 
 def persona_rule(persona: str) -> str:

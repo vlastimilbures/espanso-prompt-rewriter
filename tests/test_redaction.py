@@ -50,18 +50,24 @@ def test_detects_aws_access_key():
     assert "aws_access_key" in scan("key AKIAIOSFODNN7EXAMPLE")
 
 
-# scan() flags a JWT.
+# scan() flags a JWT (assembled at runtime, like the fake keys below).
 def test_detects_jwt():
-    token = (
-        "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0."
-        "dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"  # gitleaks:allow
+    token = ".".join(
+        [
+            "eyJhbGciOiJIUzI1NiJ9",
+            "eyJzdWIiOiIxMjM0NTY3ODkwIn0",
+            "dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U",
+        ]
     )
     assert "jwt" in scan(f"auth header {token}")
 
 
-# scan() flags a PEM private key header.
-def test_detects_pem_private_key():
-    assert "pem_private_key" in scan("-----BEGIN RSA PRIVATE KEY-----\nMIIB...")
+# scan() flags PEM, OpenSSH and PGP private key headers.
+@pytest.mark.parametrize(
+    "kind", ["RSA PRIVATE KEY", "OPENSSH PRIVATE KEY", "PGP PRIVATE KEY BLOCK"]
+)
+def test_detects_pem_private_key(kind):
+    assert "pem_private_key" in scan(f"-----BEGIN {kind}-----\nMIIB...")
 
 
 # Text with no sensitive matches returns no findings.
@@ -90,6 +96,8 @@ _BODY = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"
         ("sk_live_" + _BODY, "stripe_key"),
         ("ghp_" + _BODY + "ab", "github_token"),
         ("github_pat_11" + _BODY, "github_token"),
+        ("glpat-" + _BODY[:20], "gitlab_token"),
+        ("hf_" + _BODY[:34], "huggingface_token"),
         ("xoxb-1234-" + _BODY, "slack_token"),
         ("AIza" + _BODY[:35], "google_api_key"),
         ("xai-" + _BODY, "xai_key"),
@@ -121,15 +129,42 @@ def test_ignores_url_without_credentials():
     assert scan("see https://example.com:8080/path") == []
 
 
-# scan() flags a password or token assignment whose value looks like a secret.
-@pytest.mark.parametrize("text", ["password=hunter2hunter2", "API_KEY: 'a1b2c3d4e5f6'"])
-def test_detects_secret_assignment(text):
-    assert "secret_assignment" in scan(text)
+# scan() flags a password or token assignment whose value looks like a secret, including
+# env-style names with a prefix, JSON keys and the AWS secret key. Values are assembled at
+# runtime so no secret-shaped literal sits in the repo.
+_VALUE = "a1b2c3" * 2
 
 
-# Prose after "token:" is not a secret: the value must contain a digit.
-def test_ignores_secret_assignment_prose():
-    assert scan("token: explanation of the design") == []
+@pytest.mark.parametrize(
+    "name",
+    [
+        "password=",
+        "API_KEY: ",
+        "DB_PASSWORD=",
+        "client_secret: ",
+        "access_token=",
+        '"password": ',
+        "AWS_SECRET_ACCESS_KEY=",
+        "export GITHUB_TOKEN=",
+    ],
+)
+def test_detects_secret_assignment(name):
+    assert "secret_assignment" in scan(f"{name}'{_VALUE}'")
+
+
+# Prose after "token:", or a longer word that merely contains a key name, is not a secret.
+@pytest.mark.parametrize(
+    "text",
+    [
+        "token: explanation of the design",
+        "tokenizer: bert-base-2",
+        "token_count=12345678",
+        "max_tokens=24000000",
+        "passwords: see policy doc",
+    ],
+)
+def test_ignores_secret_assignment_near_misses(text):
+    assert scan(text) == []
 
 
 # A dot-separated card number is still a card.
@@ -221,8 +256,15 @@ def test_custom_pattern_matches_raw_text():
 # Explicit ids: a 200k-char node id breaks Windows, where pytest puts it in an env var.
 @pytest.mark.parametrize(
     "text",
-    ["a." * 100_000, "a-" * 100_000, "Bearer " + "a." * 100_000, "token=" * 30_000],
-    ids=["dots", "dashes", "bearer", "assignments"],
+    [
+        "a." * 100_000,
+        "a-" * 100_000,
+        "Bearer " + "a." * 100_000,
+        "token=" * 30_000,
+        "_token='" * 30_000,
+        "-----BEGIN " + "A " * 100_000,
+    ],
+    ids=["dots", "dashes", "bearer", "assignments", "prefixed-assignments", "pem"],
 )
 def test_scan_is_fast_on_adversarial_input(text):
     started = time.perf_counter()

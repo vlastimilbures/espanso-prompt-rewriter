@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """Benchmark OpenRouter models on the `default` (golden template) profile.
 
 Scores every run mechanically: tag balance, mandatory steps, branch selection,
@@ -23,6 +22,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field, replace
+from functools import partial
 from pathlib import Path
 
 from prompt_workflow.config import Settings, split_model_spec
@@ -140,12 +140,12 @@ def check(text: str, wants_plan: bool, wants_independent: bool) -> list[str]:
         if needle not in text:
             failed.append(f"missing {name} step")
 
-    steps = re.findall(r"^\s*(\d+)/", text, re.M)
+    steps = re.findall(r"^\s*(\d+)/", text, re.MULTILINE)
     if [int(s) for s in steps] != list(range(1, len(steps) + 1)):
         failed.append("step numbering")
     if len(steps) < 5:
         failed.append("fewer than 5 steps")
-    if re.search(r"^\s*\d+\.\s", text, re.M):
+    if re.search(r"^\s*\d+\.\s", text, re.MULTILINE):
         failed.append("used 1. instead of 1/")
 
     got_plan = PLAN_FIRST in text
@@ -255,7 +255,7 @@ def _call(
         on_response=body.update,
         title="espanso-prompt-rewriter-bench",
     )
-    return provider.generate(draft, sys_prompt, model=model), body
+    return provider.generate(draft, sys_prompt), body
 
 
 def run_one(
@@ -273,10 +273,10 @@ def run_one(
     sys_prompt = render(PROFILES["default"] if sys_prompt is None else sys_prompt, cfg.persona)
 
     # Identity of this run, shared by every Result it can produce.
-    who = {"model": model, "draft": draft_name, "run": run, "pin": pin, "effort": effort}
+    result = partial(Result, model=model, draft=draft_name, run=run, pin=pin, effort=effort)
     if budget.exhausted():
-        return Result(
-            **who, seconds=0.0, out_tokens=0, in_tokens=0, skipped=True, error="budget exhausted"
+        return result(
+            seconds=0.0, out_tokens=0, in_tokens=0, skipped=True, error="budget exhausted"
         )
 
     started = time.monotonic()
@@ -292,8 +292,8 @@ def run_one(
                 time.sleep(3)
                 continue
             elapsed = time.monotonic() - started
-            return Result(
-                **who, seconds=elapsed, out_tokens=0, in_tokens=0, retried=retried, error=message
+            return result(
+                seconds=elapsed, out_tokens=0, in_tokens=0, retried=retried, error=message
             )
     elapsed = time.monotonic() - started
 
@@ -317,8 +317,7 @@ def run_one(
 
     slug = spec.replace("/", "_").replace("@", "__at__").replace("~", "__effort__")
     (outdir / f"{slug}__{draft_name}__{run}.txt").write_text(text, encoding="utf-8")
-    return Result(
-        **who,
+    return result(
         seconds=elapsed,
         out_tokens=int(usage.get("completion_tokens", 0)),
         in_tokens=int(usage.get("prompt_tokens", 0)),
@@ -411,7 +410,12 @@ def main() -> None:
     parser.add_argument("--drafts", nargs="*", default=list(DRAFTS))
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--workers", type=int, default=4)
-    parser.add_argument("--budget", type=float, default=1.0, help="hard spend ceiling in USD")
+    parser.add_argument(
+        "--budget",
+        type=float,
+        default=1.0,
+        help="stop starting calls once this much USD is spent (in-flight calls still finish)",
+    )
     parser.add_argument("--outdir", default="bench-out")
     # A/B a candidate template without adding a throwaway file to
     # src/prompt_workflow/prompts/, where _load_profiles() would pick it up as a profile.

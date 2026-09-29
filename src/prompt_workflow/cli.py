@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import io
+import re
 import sys
 from collections.abc import Callable
 
 import pyperclip
 import typer
 
-from .config import EFFORTS, KEEP, TIERS, Settings, split_model_spec
+from .config import EFFORTS, KEEP, TIERS, Settings
 from .factory import PROVIDER_NAMES, make_provider
 from .prompt_builder import system_prompt
 from .providers.base import ProviderError
@@ -17,11 +19,34 @@ app = typer.Typer(add_completion=False, no_args_is_help=True)
 # a whole document) that should neither go to the cloud nor stall the gate's scan.
 MAX_DRAFT_CHARS = 50_000
 
+# Characters no prompt needs that do harm where Espanso types the text: C0/C1 controls other
+# than tab and newline (an escape sequence can end a terminal's bracketed paste, so the lines
+# after it run as commands), bidi overrides (text that reads differently than it is), and
+# Unicode tag characters (invisible text that can smuggle instructions to the next model).
+_UNSAFE_CHARS = re.compile(
+    r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069\U000e0000-\U000e007f]"
+)
+
+
+def _clean(text: str) -> str:
+    return _UNSAFE_CHARS.sub("", text)
+
+
+def _emit(text: str) -> None:
+    """The only way anything reaches Espanso: unsafe characters stripped, and no trailing
+    newline, since Espanso inserts stdout verbatim."""
+    typer.echo(_clean(text), nl=False)
+
 
 @app.callback()
 def _main() -> None:
     """Espanso-invoked prompt rewriter. Keeps ``improve`` as an explicit subcommand
     so the Espanso match files and docs (``prompt-workflow improve ...``) resolve."""
+    # A piped stdout uses the ANSI code page on Windows, which lacks many letters (Czech ř,
+    # Vietnamese ố): printing such a rewrite would crash into a blank expansion.
+    for stream in (sys.stdin, sys.stdout):
+        if isinstance(stream, io.TextIOWrapper):
+            stream.reconfigure(encoding="utf-8", errors="replace")
 
 
 def _clipboard[T](op: Callable[..., T], *args: str) -> T:
@@ -66,24 +91,24 @@ def improve(
 ) -> None:
     """Improve a draft prompt. Errors are printed inline so Espanso shows them."""
     try:
-        model, endpoint = split_model_spec(model)
         cfg = (
             Settings.load()
             .for_tier(tier)
-            .with_overrides(
-                endpoint=endpoint, effort=effort, max_tokens=max_tokens, timeout=timeout
-            )
+            .with_overrides(model=model, effort=effort, max_tokens=max_tokens, timeout=timeout)
         )
-        draft = _read_input(source, text)
+        draft = _clean(_read_input(source, text))
         if not draft.strip():
             raise ProviderError("Input is empty")
         if len(draft) > MAX_DRAFT_CHARS:
             raise ProviderError(f"Input is too long ({len(draft)} chars, max {MAX_DRAFT_CHARS})")
 
-        # Data-protection gate: applied inside make_provider via GatedProvider
-        # for openrouter/anthropic, so it cannot be bypassed.
-        result = make_provider(provider or cfg.provider, cfg).generate(
-            draft, system_prompt(profile or cfg.profile, cfg.persona), model=model
+        # Data-protection gate: make_provider wraps anything that can send the draft off this
+        # machine in GatedProvider, so it cannot be bypassed. The result is cleaned here too
+        # because --copy puts it on the clipboard.
+        result = _clean(
+            make_provider(provider or cfg.provider, cfg).generate(
+                draft, system_prompt(profile or cfg.profile, cfg.persona)
+            )
         )
         if copy:
             _clipboard(pyperclip.copy, result)
@@ -91,11 +116,10 @@ def improve(
         # Nothing may traceback or exit nonzero: Espanso cannot surface stderr, so emit a
         # visible bracketed marker instead of a blank expansion.
         expected = isinstance(exc, ProviderError | ValueError)
-        typer.echo(f"[prompt-workflow: {'' if expected else 'unexpected error: '}{exc}]", nl=False)
+        _emit(f"[prompt-workflow: {'' if expected else 'unexpected error: '}{exc}]")
         raise typer.Exit(0) from None
 
-    # No trailing newline: Espanso inserts stdout verbatim.
-    typer.echo(result, nl=False)
+    _emit(result)
 
 
 PERSONA_PLACEHOLDER = "I am working as [role] in [company]."
@@ -109,7 +133,7 @@ def persona() -> None:
     except Exception:
         # Same contract as improve: never a traceback or blank expansion in Espanso.
         text = PERSONA_PLACEHOLDER
-    typer.echo(text, nl=False)
+    _emit(text)
 
 
 if __name__ == "__main__":

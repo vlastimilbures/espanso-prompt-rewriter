@@ -9,12 +9,13 @@ from prompt_workflow.providers.ollama import OllamaProvider
 from prompt_workflow.providers.openai_compatible import OpenAICompatibleProvider
 
 
-# make_provider("ollama") passes through the think flag.
+# make_provider("ollama") passes through the think flag and the temperature.
 def test_make_provider_ollama():
     cfg = Settings()
     provider = make_provider("ollama", cfg)
     assert isinstance(provider, OllamaProvider)
     assert provider.think == cfg.ollama_think
+    assert provider.temperature == cfg.temperature
 
 
 # make_provider("lmstudio") sends no api key and labels itself "LM Studio".
@@ -63,7 +64,7 @@ def test_make_provider_pro_tier(monkeypatch):
     provider = make_provider("openrouter", Settings().for_tier("pro"))
     assert isinstance(provider, GatedProvider)
     inner = provider._inner
-    assert inner.default_model == "openai/gpt-6-luna"
+    assert inner.model == "openai/gpt-6-luna"
     assert inner.timeout == 60.0
     assert inner.extra_body == {
         "provider": {"order": ["openai"]},
@@ -130,15 +131,59 @@ def test_every_provider_name_builds(monkeypatch, name):
     assert hasattr(make_provider(name, Settings()), "generate")
 
 
-# Only the cloud providers are gated.
+# With the default settings only the cloud providers are gated.
 @pytest.mark.parametrize(
-    "name,gated",
+    ("name", "gated"),
     [("ollama", False), ("lmstudio", False), ("openrouter", True), ("anthropic", True)],
 )
 def test_cloud_providers_are_gated(monkeypatch, name, gated):
     monkeypatch.setenv("OPENROUTER_API_KEY", "k")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
     assert isinstance(make_provider(name, Settings()), GatedProvider) is gated
+
+
+# A local provider pointed at another machine sends the draft off this one, so it is gated.
+@pytest.mark.parametrize(
+    ("name", "var"), [("ollama", "OLLAMA_BASE_URL"), ("lmstudio", "LMSTUDIO_BASE_URL")]
+)
+@pytest.mark.parametrize(
+    ("url", "gated"),
+    [
+        ("http://192.168.1.5:11434", True),
+        ("https://ollama.com", True),
+        ("http://gpu-box.internal:1234/v1", True),
+        ("http://localhost:11434", False),
+        ("http://127.0.0.2:1234/v1", False),
+        ("http://[::1]:11434", False),
+    ],
+)
+def test_remote_local_provider_is_gated(monkeypatch, name, var, url, gated):
+    monkeypatch.setenv(var, url)
+    assert isinstance(make_provider(name, Settings()), GatedProvider) is gated
+
+
+# Ollama runs `cloud`-tagged models on ollama.com, even through a local daemon.
+@pytest.mark.parametrize(
+    ("model", "gated"),
+    [
+        ("gpt-oss:120b-cloud", True),
+        ("glm-4.6:cloud", True),
+        ("qwen3:8b", False),
+        ("cloud-model", False),
+    ],
+)
+def test_ollama_cloud_model_is_gated(monkeypatch, model, gated):
+    monkeypatch.setenv("OLLAMA_MODEL", model)
+    assert isinstance(make_provider("ollama", Settings()), GatedProvider) is gated
+
+
+# The gate on a remote local provider blocks a sensitive draft before any request.
+def test_remote_ollama_blocks_sensitive_draft(monkeypatch, fake_http):
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://192.168.1.5:11434")
+    provider = make_provider("ollama", Settings())
+    with pytest.raises(ProviderError, match="Blocked cloud call"):
+        provider.generate("card 4111 1111 1111 1111", "sys")
+    assert fake_http.calls == []
 
 
 # extra_body is merged over the routing preferences, on_response and title are forwarded
@@ -164,7 +209,7 @@ def test_openrouter_extra_body_on_response_and_title(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "pin,allow,expected",
+    ("pin", "allow", "expected"),
     [
         ("", True, {}),
         ("", False, {}),
@@ -178,7 +223,7 @@ def test_openrouter_routing(pin, allow, expected):
 
 # Cloud base URLs must be https, so the API key never travels in plaintext.
 @pytest.mark.parametrize(
-    "name,var", [("openrouter", "OPENROUTER_BASE_URL"), ("anthropic", "ANTHROPIC_BASE_URL")]
+    ("name", "var"), [("openrouter", "OPENROUTER_BASE_URL"), ("anthropic", "ANTHROPIC_BASE_URL")]
 )
 @pytest.mark.parametrize("url", ["http://example.com/api", "ftp://example.com", "example.com"])
 def test_cloud_base_url_requires_https(monkeypatch, name, var, url):
