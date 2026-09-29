@@ -321,3 +321,12 @@ def test_persona_command_placeholder_on_config_error(monkeypatch):
     result = runner.invoke(app, ["persona"])
     assert result.exit_code == 0
     assert result.stdout == "I am working as [role] in [company]."
+
+
+# An oversized draft (an accidental copy of a log or document) is refused inline.
+def test_too_long_input_reports_inline():
+    result = runner.invoke(
+        app, ["improve", "--provider", "ollama", "--source", "stdin"], input="x" * 50_001
+    )
+    assert result.exit_code == 0
+    assert result.stdout == "[prompt-workflow: Input is too long (50001 chars, max 50000)]"

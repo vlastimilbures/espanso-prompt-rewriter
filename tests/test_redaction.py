@@ -1,3 +1,5 @@
+import time
+
 import pytest
 
 from prompt_workflow.redaction import compile_extra, scan
@@ -163,8 +165,8 @@ def test_detects_confidentiality_label_variants():
     for text in (
         "marked RESTRICTED",
         "for internal only use",
-        "tài liệu mật",
-        "lưu hành nội bộ",
+        "t\u00e0i li\u1ec7u mật",
+        "l\u01b0u h\u00e0nh nội bộ",
     ):
         assert "confidential_label" in scan(text)
 
@@ -184,3 +186,42 @@ def test_detects_card_after_non_luhn_digit_run():
 # A Luhn-failing digit run after a real card is irrelevant to the finding.
 def test_detects_card_before_non_luhn_digit_run():
     assert "payment_card" in scan("card 4111 1111 1111 1111, order 1234 5678 9012 3456")
+
+
+# Separators copied from web pages and PDFs cannot split a card number: no-break space,
+# zero-width space, soft hyphen and fullwidth digits are folded before scanning.
+@pytest.mark.parametrize(
+    "text",
+    [
+        "card 4111\u00a01111\u00a01111\u00a01111",
+        "card 4111\u200b1111\u200b1111\u200b1111",
+        "card 4111\u00ad1111\u00ad1111\u00ad1111",
+        # Fullwidth digits U+FF10..FF19.
+        "card "
+        + "4111 1111 1111 1111".translate({ord(d): ord(d) + 0xFF10 - 0x30 for d in "0123456789"}),
+    ],
+)
+def test_detects_card_behind_unicode_separators(text):
+    assert "payment_card" in scan(text)
+
+
+# A zero-width space inside a vendor key does not hide it.
+def test_detects_key_split_by_zero_width_space():
+    key = "sk-ant-" + "\u200b".join("a" * 30)
+    assert "anthropic_key" in scan(key)
+
+
+# Normalization only adds findings: a raw-text match still counts.
+def test_custom_pattern_matches_raw_text():
+    assert scan("\uff21BC", compile_extra("\uff21BC")) == ["custom_1"]
+
+
+# scan() stays linear on long runs that used to make the email, URL and secret patterns
+# quadratic (80k chars took 15 s and froze Espanso).
+@pytest.mark.parametrize(
+    "text", ["a." * 100_000, "a-" * 100_000, "Bearer " + "a." * 100_000, "token=" * 30_000]
+)
+def test_scan_is_fast_on_adversarial_input(text):
+    started = time.perf_counter()
+    scan(text)
+    assert time.perf_counter() - started < 2

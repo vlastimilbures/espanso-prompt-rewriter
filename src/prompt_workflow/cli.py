@@ -13,6 +13,10 @@ from .providers.base import ProviderError
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
+# A rough draft is a few hundred words; anything far larger is an accidental copy (a log,
+# a whole document) that should neither go to the cloud nor stall the gate's scan.
+MAX_DRAFT_CHARS = 50_000
+
 
 @app.callback()
 def _main() -> None:
@@ -73,6 +77,8 @@ def improve(
         draft = _read_input(source, text)
         if not draft.strip():
             raise ProviderError("Input is empty")
+        if len(draft) > MAX_DRAFT_CHARS:
+            raise ProviderError(f"Input is too long ({len(draft)} chars, max {MAX_DRAFT_CHARS})")
 
         # Data-protection gate: applied inside make_provider via GatedProvider
         # for openrouter/anthropic, so it cannot be bypassed.
