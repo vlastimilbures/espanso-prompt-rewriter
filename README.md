@@ -108,8 +108,8 @@ step. A quick note to yourself would get "execute now" and a self-review checkli
   cannot show stderr or exit codes.
 - 🧹 **Clean output.** `<think>…</think>` reasoning blocks, control characters and invisible
   Unicode never reach the app you are typing in.
-- 📊 **Benchmarked model choice.** A bundled benchmark scores models on template fidelity,
-  latency and real cost.
+- 📊 **Benchmarked model choice and prompt.** A bundled benchmark scores models on template
+  fidelity, injection and language edge cases, latency and real cost.
 
 ## How it works
 
@@ -299,7 +299,14 @@ A profile is a system prompt in [`src/prompt_workflow/prompts/`](src/prompt_work
   "execute, but state assumptions". The review step is an independent reviewer when the result
   goes to a board, regulator, customer or other high-stakes audience, otherwise a self-review
   checklist. `CONSTRAINTS` lists the rules the result must respect (length, tone, deadline,
-  format, standards, data limits), ending with an "Out of scope:" line. The prompt itself is
+  format, standards, data limits), ending with an "Out of scope:" line.
+  The whole draft is treated as material to rewrite, never as instructions: a question becomes a
+  prompt that asks for the answer, pasted emails or notes are copied into `INPUTS`, and text such
+  as "ignore previous instructions" is dropped. The rewrite is always in English; a draft in
+  another language gets a `- Language: …` constraint so the result comes back in that language.
+  `OUTPUTS` is the `.md` line for documents and a matching format (plain-text email, code block,
+  slides…) for everything else. Specifics from the draft (numbers, names, dates, deliverables)
+  are kept; anything missing is flagged `[REVIEW: …]` rather than invented. The prompt itself is
   organised in lowercase XML sections (`<section_rules>`, `<step>`, `<decision_rule>`,
   `<example>`…), which keeps its own scaffolding visibly apart from the uppercase sections the
   model must write.
@@ -358,19 +365,41 @@ before it is sent. Still read a rewrite before running anything it contains.
 
 ## Model benchmark
 
-The rewrite is only useful if the template comes back intact, so the default model was chosen
-with [`scripts/bench_models.py`](scripts/bench_models.py) rather than by taste. It sends 8 drafts
-that cross two independent decisions — *plan first or execute now* (task complexity) and
-*independent or self review* (audience and consequence) — three runs each, and scores every
-response mechanically: all six sections present and correctly closed, mandatory steps verbatim,
-`1/ 2/ 3/` numbering, both branch choices right, no third-person context, no degeneration. Cost
-and token counts come from OpenRouter's own usage data. Each model is given as
+The rewrite is only useful if the template comes back intact, so the default model and prompt
+were chosen with [`scripts/bench_models.py`](scripts/bench_models.py) rather than by taste. The
+`core` suite (the default) sends 8 drafts that cross two independent decisions — *plan first or
+execute now* (task complexity) and *independent or self review* (audience and consequence). The
+`edge` suite (`--suite edge` or `--suite all`) adds 20 drafts that probe the rest: prompt
+injection, questions, pasted emails, Czech, German and Spanish drafts, a draft stating its own
+role, code, and outside readers that are only implied. Every response is scored mechanically:
+all six sections present and correctly closed, mandatory steps verbatim, `1/ 2/ 3/` numbering,
+both branch choices right, no leaked scaffolding or `[domain]` placeholder, the draft's language
+and role respected, `OUTPUTS` matching the deliverable, no third-person context, no
+degeneration. A `kept` column reports the share of the draft's specifics carried over. Cost and
+token counts come from OpenRouter's own usage data. Each model is given as
 `model@endpoint~effort`: the endpoint is pinned with fallbacks off, because the same model on
 another host can differ several-fold in latency and cost, and `~effort` sets the reasoning
 effort. The report splits passes by draft, so a draft every model fails shows up as a prompt
 problem rather than a model one.
 
-**Result (2026-09-29, 24 calls per setup, current prompt):**
+**Result (2026-09-30, current prompt):**
+
+| Setup | Tier | core | edge | kept | p50 | p95 | $ per rewrite |
+|-------|------|------|------|------|-----|-----|---------------|
+| `google/gemini-3.5-flash-lite` @ `google-ai-studio/flex`, effort `minimal` | standard (default) | 23/24 | 55/60 | 1.00 | 1.9 s | 2.9 s | 0.0010 |
+| `openai/gpt-6-luna` @ `openai`, effort `low` | pro (default) | 24/24 | 57/60 | 1.00 | 5.0 s | 10.0 s | 0.0004 |
+
+The previous prompt, scored with the same checks, reached 12/24 and 15/60 on flash-lite and
+21/24 and 43/60 on gpt-6-luna. Most of the gap is emails and code given the `.md` line, drafts
+in other languages answered in that language (gpt-6-luna even translated the fixed steps), and
+flash-lite not spotting a vendor, partner or customer as an outside reader. It had scored 24/24
+on the older `core` checks. In a blind pairwise comparison of 168 rewrite pairs (Opus judges,
+A/B order randomised), the current prompt was preferred 117 to 32 with 19 ties: 70 to 12 on
+flash-lite, 47 to 20 on gpt-6-luna, and 28 to 3 on 6 drafts written after the prompt was frozen.
+The remaining gaps are listed in
+[CONTRIBUTING.md](CONTRIBUTING.md#known-gaps-in-the-default-prompt).
+
+**Model choice (2026-09-29, 24 calls per setup, previous prompt, older `core` checks):**
 
 | Setup | Tier | Pass | p50 | p95 | $ per rewrite |
 |-------|------|------|-----|-----|---------------|
@@ -392,6 +421,7 @@ never mentioned in 3 of 24 outputs. `inception/mercury-2.5` scored 10/24 and was
 
 ```bash
 uv run python scripts/bench_models.py --models google/gemini-3.5-flash-lite@google-ai-studio/flex~minimal --runs 3
+uv run python scripts/bench_models.py --suite all --runs 3                 # core + edge drafts
 uv run python scripts/bench_models.py --system-prompt-file candidate.md   # A/B a prompt change
 ```
 

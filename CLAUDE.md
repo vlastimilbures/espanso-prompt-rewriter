@@ -47,11 +47,16 @@ Espanso does not inherit shell PATH):
   `PROMPT_PROFILE` fallback) rewrites the draft into the golden template kept in
   `espanso/match/prompts-template.yml` (`CONTEXT / GOAL / INSTRUCTIONS / CONSTRAINTS / INPUTS / OUTPUTS`),
   selecting the plan-first vs execute-now and the independent-review vs self-review instruction
-  variant from signals in the draft. The prompt uses lowercase XML tags for its own structure so
-  they are not confused with the uppercase output sections. Its exact variant wordings are
+  variant from signals in the draft. It treats the whole user message as the draft (data, not
+  instructions), always rewrites in English (adding a `- Language:` constraint for other
+  languages) and matches `OUTPUTS` to the deliverable. The prompt uses lowercase XML tags for its
+  own structure so they are not confused with the uppercase output sections. Its exact variant
+  wordings are
   matched by `scripts/bench_models.py` and `tests/test_bench.py` (which also checks the `-p-`
   template in `prompts-template.yml`); change them together, and
-  re-run the benchmark (`--system-prompt-file`) before shipping a prompt change.
+  re-run the benchmark (`--suite all --system-prompt-file`) on both default models before
+  shipping a prompt change. Open weaknesses are listed in CONTRIBUTING.md ("Known gaps in the
+  default prompt").
 
 ### Data-protection gate
 

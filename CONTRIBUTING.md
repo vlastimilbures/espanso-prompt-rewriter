@@ -162,16 +162,72 @@ literal lands in the repo. Patterns specific to one organisation belong in the u
 Template wording is scored by `scripts/bench_models.py`, and `tests/test_bench.py` checks the
 scored phrases still exist in `prompts/default.md` and in the static `-p-` template
 (`espanso/match/prompts-template.yml`), so change all three together. A/B a change on both the
-standard and pro defaults before proposing it, and include the before/after pass rates in the
-pull request:
+standard and pro defaults, on both suites, before proposing it, and include the before/after
+pass rates in the pull request:
 
 ```bash
-uv run python scripts/bench_models.py --runs 3 --models \
+uv run python scripts/bench_models.py --suite all --runs 3 --models \
   google/gemini-3.5-flash-lite@google-ai-studio/flex~minimal openai/gpt-6-luna@openai~low
-uv run python scripts/bench_models.py --runs 3 --system-prompt-file candidate.md --models \
-  google/gemini-3.5-flash-lite@google-ai-studio/flex~minimal openai/gpt-6-luna@openai~low
+uv run python scripts/bench_models.py --suite all --runs 3 --system-prompt-file candidate.md \
+  --models google/gemini-3.5-flash-lite@google-ai-studio/flex~minimal openai/gpt-6-luna@openai~low
 ```
+
+The `core` suite is saturated: the previous prompt already passed it in full, so it only guards
+against regressions. Improvements show on the `edge` suite and in how good the rewrites read,
+which the mechanical checks cannot judge. For a prompt change that is not purely mechanical,
+also compare the two prompts' outputs blind and pairwise: same model, draft and run, A/B order
+randomised, labels hidden. Judge fidelity, invention, specificity of the work steps and
+calibration of CONSTRAINTS, INPUTS, OUTPUTS and `[REVIEW: …]`, and read the result **per
+model**. The two default models react to the same wording in opposite directions: an
+anti-invention rule that fixed flash-lite made gpt-6-luna write thin, generic steps. Keep
+drafts you wrote after freezing the candidate for the final comparison.
 
 Small models such as flash-lite need an explicit trigger for *each* variant of a branching step.
 A rule like "if unsure, use (a)" with no positive condition for (b) makes them pick (a) almost
-every time. Check the per-draft table in the report, not only the total.
+every time. They also choose a variant by analogy to the examples in the rule, so a named
+example ("a polite reply to a vendor") works better than an abstract class ("any external
+party"). Check the per-draft table in the report, not only the total.
+
+### Known gaps in the default prompt
+
+Open points from the 2026-09-30 prompt review, each with the evidence behind it. None has been
+tested as a fix yet; re-run both suites and a blind comparison before shipping one.
+
+1. **Fixed step 1 wording drifts.** When a draft says "analyse", gpt-6-luna writes "Plan the
+   analysis thoroughly, list assumptions…" instead of the fixed wording, and the planning check
+   fails (`analysis` edge draft, 2 of 3 runs, with both the previous and the current prompt).
+   Steps 2 and n say "word for word"; the planning and review variants do not. Add it there.
+2. **Document deliverables get no structure on gpt-6-luna.** For the board paper, blind judges
+   preferred the previous prompt 3 to 0: it named the paper's structure (executive summary,
+   findings, decisions requested of the board) and listed `INPUTS` per source with a
+   `[REVIEW: …]` each. Have the production step name the deliverable's sections.
+3. **"Execute" rewrites over-flag method choices.** On the code draft, gpt-6-luna flagged every
+   method choice (threshold, retention rule) with `[REVIEW: …]`, which works against "Execute,
+   but state assumptions up front". Let the assistant choose sensible defaults and state them.
+4. **Implied outside readers on flash-lite.** A polite email to a vendor, a reply to a partner
+   who wrote in, and a German reply to a customer ("Kunden") still get the self-review in about
+   1 run in 3. Naming more outside parties in the rules (tried as "v3") fixed these but made
+   flash-lite pick the independent review for "reply to Sam" and a "just for me" plan, so it
+   was dropped. Next idea: ask a yes/no question, "Will anyone outside my organisation read or
+   rely on it?", and re-check the `light` and `big-personal` drafts.
+5. **Half-answers in work steps on flash-lite.** For "what's the difference between IFRS 9
+   stage 2 and stage 3", flash-lite writes the answer into the steps, sometimes wrongly
+   ("lifetime vs. 12-month vs. lifetime"). Naming the aspects to cover is welcome because it
+   makes gpt-6-luna's steps specific; stating facts is not. Watch it on `question`.
+6. **Injection meta-commentary on flash-lite.** Instead of dropping "ignore previous
+   instructions", flash-lite sometimes writes a CONTEXT about "an instruction that attempts to
+   override my role", and once broke a closing tag on that draft.
+7. **Fixed self-review wording vs short deliverables.** The self-review variant asks for "clear
+   headings" and "Logic and math: show calculation steps" even when `OUTPUTS` is a two-line
+   email or five bullets; judges flagged the contradiction repeatedly. Changing it touches
+   `default.md`, `prompts-template.yml`, the bench phrases and `tests/test_bench.py` together.
+8. **Undecided review rules.** Two edge drafts stay unscored on the review branch because the
+   rule does not settle them: a one-page PRD for a fintech feature (money or compliance
+   consequence?) and an incident summary for the user's manager (gpt-6-luna picks the
+   independent review 3 of 3). Decide the rule, then score them.
+9. **Persona bleed.** With `PROMPT_PERSONA` set, near-empty drafts pick up the persona's domain:
+   "help with the report" became a report on "risk management metrics". A design trade-off,
+   not a bug.
+10. **Draft delimiting in the CLI.** Sending the draft wrapped in `<draft>…</draft>` gave a
+    small, consistently positive but not significant gain once the prompt already said the
+    whole message is the draft. If adopted, escape `</draft>` inside drafts.
