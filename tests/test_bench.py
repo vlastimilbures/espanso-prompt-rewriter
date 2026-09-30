@@ -6,6 +6,7 @@ from bench_module import bench
 from prompt_workflow.config import Settings
 from prompt_workflow.prompt_builder import system_prompt
 from prompt_workflow.providers.base import ProviderError
+from prompt_workflow.redaction import scan
 
 # A rewrite that satisfies every check for a plan-first, independent-review draft.
 GOOD = """<CONTEXT>
@@ -107,10 +108,103 @@ def test_bench_phrases_match_static_template():
         assert phrase in template, phrase
 
 
-# Both expected branch combinations are covered by the draft set.
+# The core suite covers all four branch combinations, so coupling the branches cannot pass.
 def test_drafts_span_all_branch_combinations():
-    combos = {(plan, independent) for _, plan, independent in bench.DRAFTS.values()}
+    core = [bench.DRAFTS[name] for name in bench.suite_drafts("core")]
+    combos = {(d.plan, d.independent) for d in core}
     assert combos == {(True, True), (True, False), (False, True), (False, False)}
+
+
+# core stays the 8 model-choice drafts (and the default); edge adds the probing drafts.
+def test_suites():
+    core, edge, every = (bench.suite_drafts(s) for s in ("core", "edge", "all"))
+    assert len(core) == 8
+    assert len(edge) == 20
+    assert every == core + edge
+
+
+# A bench draft the data-protection gate blocks would fail on every run for a reason
+# unrelated to the model.
+@pytest.mark.parametrize("name", list(bench.DRAFTS))
+def test_draft_passes_gate(name):
+    assert scan(bench.DRAFTS[name].text) == []
+
+
+def test_draft_languages_are_known():
+    for d in bench.DRAFTS.values():
+        assert d.language is None or d.language in bench.LANGUAGE_LETTERS
+
+
+# A None branch expectation accepts either variant but still requires exactly one.
+def test_check_unscored_branches():
+    assert bench.check(GOOD, wants_plan=None, wants_independent=None) == []
+    failed = bench.check(GOOD, wants_plan=False, wants_independent=None)
+    assert failed == ["wrong planning branch"]
+    both = GOOD.replace("3/ Analyse", "3/ Execute, but state assumptions up front. Analyse")
+    assert "planning branch absent or both emitted" in bench.check(both, None, None)
+
+
+def test_scaffold_tags_of_default_profile():
+    tags = bench.scaffold_tags(system_prompt("default"))
+    assert {"draft_handling", "section_rules", "step", "variant", "rewrite"} <= tags
+    assert "CONTEXT" not in tags
+
+
+@pytest.mark.parametrize(
+    ("mutate", "failure"),
+    [
+        (lambda t: t.replace("<GOAL>", "<step>\n<GOAL>", 1), "scaffolding tag step"),
+        (lambda t: t.replace("credit risk domain", "[domain] domain"), "unreplaced placeholder"),
+    ],
+)
+def test_check_catches_leftovers(mutate, failure):
+    assert failure in bench.check(mutate(GOOD), wants_plan=True, wants_independent=True)
+
+
+def _draft(**kwargs):
+    return bench.Draft("draft", None, None, "edge", **kwargs)
+
+
+def test_check_draft_outputs_format():
+    assert bench.check_draft(GOOD, _draft(outputs="doc")) == []
+    assert bench.check_draft(GOOD, _draft(outputs="message")) == [
+        "message given the .md OUTPUTS line"
+    ]
+    email = GOOD.replace(bench.DEFAULT_OUTPUTS, "plain-text email, ready to paste")
+    assert bench.check_draft(email, _draft(outputs="message")) == []
+    assert bench.check_draft(email, _draft(outputs="doc")) == [
+        "document without the .md OUTPUTS line"
+    ]
+
+
+# A non-English draft is rewritten in English with a Language bullet; the original draft
+# quoted in INPUTS does not count against it.
+def test_check_draft_language():
+    czech = _draft(language="Czech")
+    quoted = GOOD.replace("NPL data.", "My request: potřebuju rychlý mail, že to pošleme v pátek")
+    assert bench.check_draft(quoted, czech) == ["no language constraint"]
+    ok = quoted.replace("Model rebuild.", "- Language: write the result in Czech.")
+    assert bench.check_draft(ok, czech) == []
+    untranslated = ok.replace("A board-ready paper", "Potřebuji stručný e-mail, přečíst v pátek")
+    assert bench.check_draft(untranslated, czech) == ["not rewritten in English (Czech)"]
+
+
+# A role stated in the draft opens CONTEXT, in place of the configured persona.
+def test_check_draft_role():
+    pm = _draft(role="product manager")
+    assert bench.check_draft(GOOD, pm) == ["draft's role not in CONTEXT"]
+    own = GOOD.replace("I am working as a Head of Data.", "As a product manager, I")
+    assert bench.check_draft(own, pm, persona="I am working as a Head of Data.") == []
+    both = GOOD.replace("I want", "As a product manager I want")
+    assert bench.check_draft(both, pm, persona="I am working as a Head of Data.") == [
+        "configured persona despite the draft's role"
+    ]
+
+
+def test_retention():
+    d = _draft(keys=(("board",), ("NPL spike", "NPL"), ("Q3",)))
+    assert bench.retention(GOOD, d) == pytest.approx(2 / 3)
+    assert bench.retention(GOOD, _draft()) == 1.0
 
 
 def test_split_spec():

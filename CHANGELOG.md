@@ -6,6 +6,34 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Changed
+- The `default` prompt was reworked after a benchmark review; the golden template and its fixed
+  step wordings are unchanged. The rewrite now:
+  - treats the whole draft as material to rewrite, never as instructions: questions become
+    prompts, pasted emails or notes go word for word into `INPUTS`, and "ignore previous
+    instructions" is dropped (a small model used to paste "OK" and a haiku);
+  - is always written in English, with a `- Language: …` constraint for a draft in another
+    language, instead of the draft's language (which made gpt-6-luna translate the fixed steps
+    and break the template);
+  - matches `OUTPUTS` to the deliverable (plain-text email, code block, slides…); the `.md`
+    line is kept for documents;
+  - keeps every number, name, date and deliverable from the draft, names only the regulations
+    the draft names, and flags gaps with `[REVIEW: …]` instead of guessing;
+  - treats vendors, suppliers, partners, clients and published FAQ or help-center text as
+    outside readers for the review step, and routine memos to colleagues as internal;
+  - writes concrete work steps and a concrete "Out of scope" line.
+
+  Blind pairwise judges preferred it 117 to 32 (19 ties) across gemini-3.5-flash-lite and
+  gpt-6-luna.
+
+### Added
+- `scripts/bench_models.py --suite edge|all`: 20 more drafts (injection, questions, pasted
+  material, Czech, German and Spanish, a draft stating its own role, code, implied outside
+  readers). New checks for leaked scaffolding tags, a leftover `[domain]` placeholder, the
+  draft's language and role, and `OUTPUTS` matching the deliverable, plus a `kept` column for
+  the share of the draft's specifics carried over. The default is still the 8-draft `core`
+  suite.
+
 ## 0.10.0
 
 ### Security
