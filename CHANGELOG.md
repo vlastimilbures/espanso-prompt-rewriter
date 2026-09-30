@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## 0.11.0
+
 ### Changed
 - The `default` prompt was reworked after a benchmark review; the golden template and its fixed
   step wordings are unchanged. The rewrite now:
