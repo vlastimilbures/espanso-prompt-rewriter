@@ -119,7 +119,7 @@ def test_drafts_span_all_branch_combinations():
 def test_suites():
     core, edge, every = (bench.suite_drafts(s) for s in ("core", "edge", "all"))
     assert len(core) == 8
-    assert len(edge) == 20
+    assert len(edge) == 24
     assert every == core + edge
 
 

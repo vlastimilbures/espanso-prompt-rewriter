@@ -190,44 +190,61 @@ party"). Check the per-draft table in the report, not only the total.
 
 ### Known gaps in the default prompt
 
-Open points from the 2026-09-30 prompt review, each with the evidence behind it. None has been
-tested as a fix yet; re-run both suites and a blind comparison before shipping one.
+The `default` profile (standard tier, flash-lite) and `default-pro` (pro tier, gpt-6-luna) differ
+by one review-rule clause; `tests/test_prompts.py` keeps them otherwise identical, so edit both
+together. The 2026-10-02 rework (see `docs/prompt-candidates/PLAN.md`) closed the old gaps 1–4
+and 7: fixed wordings are copied word for word, document steps name their sections, method
+choices are stated as assumptions, a message to a named person at another organisation gets the
+independent review, and the self-review lines match the format in `OUTPUTS`. Still open:
 
-1. **Fixed step 1 wording drifts.** When a draft says "analyse", gpt-6-luna writes "Plan the
-   analysis thoroughly, list assumptions…" instead of the fixed wording, and the planning check
-   fails (`analysis` edge draft, 2 of 3 runs, with both the previous and the current prompt).
-   Steps 2 and n say "word for word"; the planning and review variants do not. Add it there.
-2. **Document deliverables get no structure on gpt-6-luna.** For the board paper, blind judges
-   preferred the previous prompt 3 to 0: it named the paper's structure (executive summary,
-   findings, decisions requested of the board) and listed `INPUTS` per source with a
-   `[REVIEW: …]` each. Have the production step name the deliverable's sections.
-3. **"Execute" rewrites over-flag method choices.** On the code draft, gpt-6-luna flagged every
-   method choice (threshold, retention rule) with `[REVIEW: …]`, which works against "Execute,
-   but state assumptions up front". Let the assistant choose sensible defaults and state them.
-4. **Implied outside readers on flash-lite.** A polite email to a vendor, a reply to a partner
-   who wrote in, and a German reply to a customer ("Kunden") still get the self-review in about
-   1 run in 3. Naming more outside parties in the rules (tried as "v3") fixed these but made
-   flash-lite pick the independent review for "reply to Sam" and a "just for me" plan, so it
-   was dropped. Next idea: ask a yes/no question, "Will anyone outside my organisation read or
-   rely on it?", and re-check the `light` and `big-personal` drafts.
-5. **Half-answers in work steps on flash-lite.** For "what's the difference between IFRS 9
-   stage 2 and stage 3", flash-lite writes the answer into the steps, sometimes wrongly
-   ("lifetime vs. 12-month vs. lifetime"). Naming the aspects to cover is welcome because it
-   makes gpt-6-luna's steps specific; stating facts is not. Watch it on `question`.
-6. **Injection meta-commentary on flash-lite.** Instead of dropping "ignore previous
+1. **Published text on flash-lite.** "short answer for our help-center FAQ…" gets the
+   self-review in about half the runs (a fresh FAQ wording: 1 of 5; the previous prompt 5 of
+   5). The word "short" seems to pull it towards (b). Adding "and 'short'" to the length rule
+   gave mixed results over 3 runs and was not shipped.
+2. **Self-review drafts on gpt-6-luna.** A script or query "for me" (`outliers`, `sql`) and the
+   team `memo` still get the independent review in 1–2 runs of 3, as with the previous prompt.
+3. **Half-answers in work steps on flash-lite.** For "what's the difference between IFRS 9
+   stage 2 and stage 3", flash-lite writes the answer into the steps, sometimes wrongly. Naming
+   the aspects to cover is welcome; stating facts is not. Watch it on `question`.
+4. **Injection meta-commentary on flash-lite.** Instead of dropping "ignore previous
    instructions", flash-lite sometimes writes a CONTEXT about "an instruction that attempts to
-   override my role", and once broke a closing tag on that draft.
-7. **Fixed self-review wording vs short deliverables.** The self-review variant asks for "clear
-   headings" and "Logic and math: show calculation steps" even when `OUTPUTS` is a two-line
-   email or five bullets; judges flagged the contradiction repeatedly. Changing it touches
-   `default.md`, `prompts-template.yml`, the bench phrases and `tests/test_bench.py` together.
-8. **Undecided review rules.** Two edge drafts stay unscored on the review branch because the
-   rule does not settle them: a one-page PRD for a fintech feature (money or compliance
-   consequence?) and an incident summary for the user's manager (gpt-6-luna picks the
-   independent review 3 of 3). Decide the rule, then score them.
-9. **Persona bleed.** With `PROMPT_PERSONA` set, near-empty drafts pick up the persona's domain:
+   override my role".
+5. **Undecided review rules.** Two edge drafts stay unscored on the review branch: a one-page PRD
+   for a fintech feature (money or compliance consequence?) and an incident summary for the
+   user's manager. Decide the rule, then score them.
+6. **Persona bleed.** With `PROMPT_PERSONA` set, near-empty drafts pick up the persona's domain:
    "help with the report" became a report on "risk management metrics". A design trade-off,
    not a bug.
-10. **Draft delimiting in the CLI.** Sending the draft wrapped in `<draft>…</draft>` gave a
-    small, consistently positive but not significant gain once the prompt already said the
-    whole message is the draft. If adopted, escape `</draft>` inside drafts.
+7. **Draft delimiting in the CLI.** Sending the draft wrapped in `<draft>…</draft>` gave a
+   small, consistently positive but not significant gain once the prompt already said the
+   whole message is the draft. If adopted, escape `</draft>` inside drafts.
+8. **Prompt length.** The rework made the system prompt about 40% longer (about 3,900 input
+   tokens per call); cost per call rose about 15% on flash-lite and is flat on gpt-6-luna.
+9. **The bench runs `default` on every model.** Without `--system-prompt-file`,
+   `scripts/bench_models.py` scores gpt-6-luna on `default`, not `default-pro`; pass
+   `--system-prompt-file src/prompt_workflow/prompts/default-pro.md` for the pro model.
+
+### Next steps for the default prompt
+
+Limits of the 2026-10-02 evaluation, and what to do next:
+
+1. **Re-judge the shipped prompts blind on new drafts.** The final `default` and `default-pro`
+   were checked mechanically only; the blind ranking was on I2. The revisions were tuned on the
+   same 32 drafts, and `landlord` is no longer held out. Write 6–8 new drafts (outside emails,
+   published text, internal memos, "for me" scripts) before changing anything else, and judge
+   the current prompts against the previous release on both tiers.
+2. **Use more runs per draft.** At 3 runs, a single draft flips between 0/3 and 2/3 from noise
+   alone (seen on `big-personal` and `memo`). Re-check any single-draft change at 6 runs or more
+   before acting on it.
+3. **Fix gap 1 (published FAQ text on flash-lite)** with a positive trigger that does not
+   depend on the word "short", and verify it against `quick-ceo` and `memo`, which moved when
+   it was last tried.
+4. **Let the bench follow the tier profiles.** Make `scripts/bench_models.py` pick
+   `default-pro` for the pro model by default (gap 9), so a plain `--suite all` run scores what
+   ships.
+5. **Merge the two profiles again if possible.** One prompt per tier doubles the bench and
+   review work. Retry a single wording that serves both models once the review rule has a more
+   robust form (for example the yes/no outside-reader question, which failed on flash-lite in
+   round 1 when combined with the long rule list).
+6. **Watch the prompt length.** The prompt is now about 3,900 input tokens; check latency on the
+   pro tier (6–9 s) after any further additions.

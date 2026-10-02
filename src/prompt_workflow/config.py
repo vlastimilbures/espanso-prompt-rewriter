@@ -197,6 +197,10 @@ class Settings:
     openrouter_pro_provider: str = _env("OPENROUTER_PRO_PROVIDER", "openai")
     openrouter_pro_reasoning_effort: str = _env("OPENROUTER_PRO_REASONING_EFFORT", "low")
     pro_timeout: float = _env("PROMPT_PRO_TIMEOUT_SECONDS", "60", _positive_float)
+    # Profile for the pro tier; empty uses PROMPT_PROFILE. The two tiers' models react to
+    # the same prompt wording differently: `default-pro` is `default` without the clause that
+    # flash-lite needs and gpt-6-luna over-applies (see tests/test_prompts.py).
+    pro_profile: str = _env("PROMPT_PRO_PROFILE", "default-pro")
     lmstudio_base_url: str = _env("LMSTUDIO_BASE_URL", "http://localhost:1234/v1")
     lmstudio_model: str = _env("LMSTUDIO_MODEL", "local-model")
     anthropic_base_url: str = _env("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
@@ -216,7 +220,8 @@ class Settings:
 
     def for_tier(self, tier: str) -> Settings:
         """Settings for a quality tier: `standard` as-is, `pro` with the OPENROUTER_PRO_*
-        model, endpoint and effort. Only OpenRouter has a pro tier."""
+        model, endpoint and effort, and PROMPT_PRO_PROFILE if set. Only OpenRouter has a
+        pro tier."""
         if tier == "standard":
             return self
         if tier == "pro":
@@ -226,6 +231,7 @@ class Settings:
                 openrouter_provider=self.openrouter_pro_provider,
                 openrouter_reasoning_effort=self.openrouter_pro_reasoning_effort,
                 timeout=self.pro_timeout,
+                profile=self.pro_profile or self.profile,
             )
         raise ValueError(f"Unknown tier: {tier}. Choose from: {', '.join(TIERS)}")
 

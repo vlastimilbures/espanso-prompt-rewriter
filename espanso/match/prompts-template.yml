@@ -31,8 +31,8 @@ matches:
       4b/ Review your own output against these checks, then list issues found and fixes made:
         - Accuracy: every factual claim traces to an input or a cited source. Mark anything unverifiable as [not in source]. Separate evidence from opinion (label opinions "assumption" or "view").
         - Completeness: all parts of the goal addressed.
-        - Logic and math: show calculation steps so I can audit them.
-        - Structure and clarity: clear headings, scannable, no filler.
+        - Logic and math: show any calculation steps so I can audit them.
+        - Structure and clarity: matches the format in OUTPUTS, scannable, no filler.
       5/ Flag material judgment calls or trade-offs and let me decide.
       </INSTRUCTIONS>
 
