@@ -1,10 +1,10 @@
-# Default prompt: A/B round 2026-10-02 and plan for the OpenRouter run
+# Default prompt: A/B rounds 1–2 (2026-10-02) and plan for the OpenRouter run
 
 Continues "Known gaps in the default prompt" in CONTRIBUTING.md. The candidates here are
 **not shipped**: `src/prompt_workflow/prompts/default.md` is unchanged. Each candidate is a
 complete prompt file for `scripts/bench_models.py --system-prompt-file`.
 
-## What was run here (cloud screen, no OpenRouter)
+## Round 1: gap fixes (screened here, no OpenRouter)
 
 OpenRouter is not reachable from the cloud session, so this round used Opus subagents as the
 rewrite model, with the bench's own checks and two blind Opus judges on top. Opus is much
@@ -50,7 +50,7 @@ gains and targets that noise.
 5. Fixed step 2 ("Load and validate all inputs…") appears even when there are no inputs. It is
    golden-template wording, so it is left as is.
 
-## Candidates
+## Round 1 candidates
 
 All candidates keep every bench-scored phrase and `{{PERSONA_RULE}}`. Each builds on the one
 before it.
@@ -65,49 +65,122 @@ D changes fixed wording. If D wins, update `espanso/match/prompts-template.yml` 
 `tests/test_bench.py` in the same PR. The bench matches only the first line of the self-review,
 so scoring works unchanged.
 
-## Plan for the local OpenRouter run
+## Round 2: best-practice candidates (screened here)
 
-Models from CONTRIBUTING:
+All round-2 candidates build on C. Each change applies a prompt-engineering best practice.
+
+| File | Adds | Status |
+|---|---|---|
+| `E.md` | **Decide first** (`<procedure>`: deliverable → planning → review → language, then write); a **reason** on key rules (first-person CONTEXT, no invented facts); **done-criteria in GOAL** (deliverable, reader, what makes it done); **one** consolidated fixed-wording rule in place of four repeats; tone and form of address for outside messages; shorter `final_check` | screened |
+| `F.md` | E + a **second, contrasting example** (plan-first, independent review, multi-source document with named sections and one `[REVIEW]` per source), set outside finance to limit domain bleed | screened |
+| `G.md` | E + round-2 judge findings: one or two work steps for short messages, with no duplicate "produce" step; no added offers, commitments or content; never `None` followed by a `[REVIEW]`; a missing outside recipient's name is a fair flag; a question gets no prompt to cite paragraphs or sources the draft doesn't name | **not screened** |
+| `H.md` | G + D's self-review wording (gap 7) | **not screened** |
+
+**Setup:** 18 drafts, including 4 fresh ones written before the run and kept out of every
+prompt (multi-source vendor review for a procurement committee, a short email to a landlord, a
+quick Teams message to Jana, and a pandas outlier script). The rewrite model was Opus, 1 run per
+prompt, with A, C, E and F compared. Two blind judges ranked all four rewrites per draft, with
+labels shuffled per draft.
+
+- **Mechanical checks:** all 4 prompts passed every bench check, and all 4 picked the expected
+  variants on the fresh drafts. Total `[REVIEW]` flags: A 22, C 13, E 19, F 17.
+- **Rankings** (1 = best). Judge 1 did not rank `investor` or `outage`.
+
+| | A | C | E | F |
+|---|---|---|---|---|
+| Judge 1, mean rank (16 drafts) | 2.62 | 3.00 | **2.00** | 2.38 |
+| Judge 2, mean rank (18 drafts) | **2.22** | 2.72 | 2.50 | 2.56 |
+| First places, judge 1 / judge 2 | 3 / 6 | 2 / 3 | **8 / 7** | 3 / 2 |
+| Short and outside messages (judge 1 / judge 2) | 2.50 / 3.00 | 3.25 / 2.56 | **1.75 / 2.00** | 2.50 / 2.44 |
+| Documents (judge 1 / judge 2) | 3.20 / **1.50** | 2.40 / 2.67 | **2.00** / 3.17 | 2.40 / 2.67 |
+| Fresh drafts (judge 1 / judge 2) | 2.75 / 2.50 | 2.75 / 2.75 | 2.50 / 2.75 | **2.00 / 2.00** |
+
+**Reading the results:**
+- Per draft, the two judges agreed closely; on 7 drafts their orders were identical. The quality
+  differences between individual rewrites are therefore real.
+- With one run per prompt, though, a single good or bad rewrite moves a prompt's mean a lot.
+  Across prompts the results are a lean, not a verdict.
+- **E** is the most consistent winner. It won `analysis`, `code`, `pasted`, `client` and
+  `fresh-landlord` for both judges, so its gains are on outside messages and on fidelity.
+- E lost `light` and `question` for both judges. On `light` it added an unneeded time flag; on
+  `question` it invited citations. G targets both.
+- **A** stays strong on documents for judge 2 (`board`, `memo`, `investor`). E's procedure did
+  not hurt short tasks, but it has not shown a document gain.
+- **F's** second example helped the fresh drafts most (best mean for both judges) and did not
+  cause copying. Whether it causes domain bleed on flash-lite is unknown.
+- **C** came last: with flags trimmed and no other change, the rewrites were thinner.
+
+**Weaknesses both judges still saw in most rewrites** (G covers 1–3; 4 is gap 7 and covered by H;
+5 is by design):
+1. INPUTS says "None needed" and then adds a `[REVIEW]`.
+2. Added content the draft never asked for: offers of help, handover plans, an "outlook/asks"
+   slide, example drivers.
+3. Short messages split into trivial sub-steps, plus a duplicate "write the X" step.
+4. The self-review demands headings and calculation steps on Teams messages and 3-line replies.
+5. The fixed "ask up to 5 questions" step and the independent review add overhead to trivial
+   outside emails.
+
+## Plan for the local OpenRouter run (next)
+
+Models:
 `google/gemini-3.5-flash-lite@google-ai-studio/flex~minimal openai/gpt-6-luna@openai~low`.
+Candidates for the run: **A (baseline), E, F, G, H**. Drop B, C and D: C lost in round 2, and H
+supersedes D.
 
-1. **Baseline and candidates, mechanical.** Run each with a separate `--outdir`:
+1. **Add the 4 fresh drafts to the bench first** as an `edge` group in
+   `scripts/bench_models.py` `DRAFTS`, with expectations:
+
+   | Draft | Planning | Review | `outputs` |
+   |---|---|---|---|
+   | `vendor-review` | plan-first | independent (committee) | `doc` |
+   | `landlord` | execute | independent (outside) | `message` |
+   | `teams-jana` | execute | self | `message` |
+   | `outliers` | either | self | `code` |
+
+   Freeze them before running.
+
+2. **Mechanical run.** Run each candidate with its own `--outdir`:
    ```bash
    M="google/gemini-3.5-flash-lite@google-ai-studio/flex~minimal openai/gpt-6-luna@openai~low"
    uv run python scripts/bench_models.py --suite all --runs 3 --models $M --outdir bench-A
-   for c in B C D; do
+   for c in E F G H; do
      uv run python scripts/bench_models.py --suite all --runs 3 --models $M \
        --system-prompt-file docs/prompt-candidates/$c.md --outdir bench-$c
    done
    ```
-   Read the per-draft table **per model**. Reject a candidate that loses any core-suite pass.
-   Watch these drafts:
-   - `analysis`, gpt-6-luna, planning check: was 2/3 failing (gap 1)
-   - `vendor`, `pasted`, `german`, flash-lite: independent review expected (gap 4)
-   - `light`, `big-personal`, flash-lite: **must stay** self-review; v3's regression showed here
-   - `question`: half-answers in steps (gap 5, observe only)
-   - `injection`, `pasted-injection`: no meta-commentary, tags intact (gap 6, observe only)
+   Reject any candidate that loses a core-suite pass on either model. Drafts to watch:
+   - `analysis`, gpt-6-luna: planning wording (gap 1). E–H keep one consolidated
+     "word for word" rule; check it still holds on the small model.
+   - `vendor`, `pasted`, `german`, `landlord`, flash-lite: independent review expected (gap 4)
+   - `light`, `big-personal`, `teams-jana`, flash-lite: must stay self-review (the v3 regression)
+   - `injection`, `pasted-injection`, flash-lite: the longer prompt and F's second example must
+     not bring back meta-commentary or broken tags (gap 6)
+   - F only: check `vague` and the persona run (`PROMPT_PERSONA` set) for bleed from the
+     bike-sharing example
+   - Latency and cost per model, since E–H are 20–40% longer than A
 
-2. **Count `[REVIEW]` flags** per draft and model across outdirs. The `.txt` files are named
-   `<model>__<draft>__<run>.txt`. Expect C/D ≤ A on the short-message drafts (`light`, `slack`,
-   `client`, `quick-external`, `short-external`, `czech`) and ≥ A on `board`, `analysis`,
-   `investor`.
-
-3. **Blind pairwise judging** of the best mechanical candidate against A: same model, draft
-   and run; A/B order randomised; labels hidden. Use two judges with different framings
-   ("better result for the user" and "skeptical receiving assistant"). Ask for `winner` plus a
-   ≤20-word reason per pair, and up to 5 weaknesses common to both. Unblind afterwards and
-   report **per model**: gpt-6-luna and flash-lite moved in opposite directions last time.
-   Focus on `board`, `analysis`, `code`, `investor`, `memo`, `question` and the short
+3. **Flag count.** Count `[REVIEW` per draft, model and outdir from the `.txt` files
+   (`<model>__<draft>__<run>.txt`). Expect fewer flags than A on short messages, no
+   "None + [REVIEW]" pairs (grep `None` near `[REVIEW`), and a recipient-name flag on outside
    messages.
 
-4. **Fresh drafts.** Before the final comparison, write 4–5 drafts after freezing the
-   candidate: one multi-source document, one short outside email, one internal quick note,
-   one code task with an open threshold, and one "keep it short" question.
+4. **Blind ranking** of the top 2–3 mechanical survivors against A:
+   - Use the round-2 setup: ranking 3–4 rewrites per draft, labels shuffled per draft, two
+     judges with different framings, compact JSON output. Take **run 1 of each model**, so
+     there are two sets.
+   - Report mean rank and first places **per model** and per group (documents, short messages,
+     fresh drafts).
+   - Read the documents group closely: it is where A still led for judge 2.
 
-5. **Ship gate.** No core regressions on either model; edge pass rate ≥ A on both; blind
-   preference ≥ A per model; and flag counts on short messages not worse. Then copy the winner
-   to `src/prompt_workflow/prompts/default.md`, update `prompts-template.yml` if D, close the
-   gaps you fixed in CONTRIBUTING, and put the before/after numbers in the PR.
+5. **Ship gate.**
+   - Pass rate on the edge suite: no core regressions and ≥ A on both models.
+   - Blind mean rank better than A on both models, and not worse on documents.
+   - `[REVIEW]` flags on short messages ≤ A.
+   - If H wins, update `espanso/match/prompts-template.yml` (self-review lines) and confirm
+     `tests/test_bench.py` passes.
+   - Then copy the winner to `src/prompt_workflow/prompts/default.md`, add the 4 drafts'
+     expectations (already in step 1), update "Known gaps" in CONTRIBUTING (close gaps 1–4 and
+     7 if fixed; record what is still open), and put before/after numbers per model in the PR.
 
 ## Decisions for you (not settled by testing)
 
