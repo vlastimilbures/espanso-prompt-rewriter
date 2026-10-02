@@ -190,3 +190,40 @@ supersedes D.
 2. **Heavy review on short outside emails** (weakness 4): keep the independent review for a
    2-line note to an auditor, or allow a lighter variant? A lighter variant needs a new fixed
    wording in the golden template.
+
+## Results of the OpenRouter run (2026-10-02, local)
+
+Models as planned, 32 drafts (8 core + 24 edge, including the 4 held-out drafts written for this
+run), 3 runs each. Blind judging used two Claude Code Opus judge framings (the draft's author;
+the executing assistant) on run 1 per model, labels shuffled per item, with 8 reshuffled repeats.
+A separate Opus agent applied the ship gate and made each decision. OpenRouter spend: about $1.25.
+
+**Round 1 (A, E, F, G, H): no ship.** Every candidate lost edge passes on flash-lite
+(63/72 for A, 44–52 for the others): emails to vendors, partners and customers got the
+self-review, and E, G and H often closed `<CONTEXT>` with `</GOAL>`. G also lost core passes.
+On gpt-6-luna, E and F passed every gate item.
+
+**Revisions.** `I2.md` is H plus: A's review rule with one added sentence (an email to a named
+person at another organisation is (a)); a second example (a short email to a supplier); a
+narrower recipient `[REVIEW]`; an explicit one-page-memo planning trigger; and a slide-deck
+`OUTPUTS` line. Later revisions changed only the recipient `[REVIEW]` sentence (to stop
+gpt-6-luna flagging a recipient named by role) and added a clause for replies to another
+company's proposal and published FAQ text, which flash-lite needed and gpt-6-luna over-applied.
+
+| | A | I2 | shipped |
+|---|---|---|---|
+| flash-lite core / edge | 22/24 / 63/72 | 23/24 / 67/72 | `default`: 23/24 / 66/72 |
+| gpt-6-luna core / edge | 23/24 / 63/72 | 24/24 / 68/72 | `default-pro`: 22/24 / 67/72 |
+| `[REVIEW]` per short message, flash-lite / luna | 0.38 / 0.33 | 0.27 / 0.38 | 0.20 / 0.27 |
+| Blind mean rank vs A and F (of 3), flash-lite J1 / J2 | 2.25 / 2.34 | 1.62 / 1.56 | – |
+| Blind mean rank vs A and F (of 3), luna J1 / J2 | 2.06 / 2.12 | 1.88 / 1.81 | – |
+
+**Decision: two profiles.** `default` (standard tier) carries the extra clause; `default-pro`
+(selected by `PROMPT_PRO_PROFILE`, default `default-pro`) does not. The extra clause took
+flash-lite's independent-review picks on internal drafts from 1 to 0 of 42 and fixed `faq` and
+`pasted`. On gpt-6-luna it raised over-triggers from 6 to 9 of 42 and brought nothing there.
+
+**Caveats.** The revisions were tuned on this bench after round 1. `landlord` stopped being
+held out once "landlord" was added to the rule; `vendor-review`, `teams-jana` and `outliers` were
+never targeted. The shipped prompts were not re-judged blind; they differ from I2 only in the
+sentences above. Open gaps are in CONTRIBUTING.md.

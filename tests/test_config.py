@@ -46,7 +46,8 @@ def test_defaults():
     assert settings.allow_cloud_override is False
 
 
-# for_tier("pro") swaps in the pro model, endpoint, effort and timeout; standard is a no-op.
+# for_tier("pro") swaps in the pro model, endpoint, effort, timeout and profile; standard is
+# a no-op.
 def test_for_tier(monkeypatch):
     monkeypatch.setenv("OPENROUTER_PRO_MODEL", "x/pro")
     settings = Settings()
@@ -55,6 +56,12 @@ def test_for_tier(monkeypatch):
     assert (pro.openrouter_model, pro.openrouter_provider) == ("x/pro", "openai")
     assert (pro.openrouter_reasoning_effort, pro.timeout) == ("low", 60.0)
     assert pro.persona == settings.persona
+    assert pro.profile == "default-pro"
+    monkeypatch.setenv("PROMPT_PRO_PROFILE", "")
+    assert Settings().for_tier("pro").profile == settings.profile  # empty: same profile
+    monkeypatch.setenv("PROMPT_PRO_PROFILE", "general")
+    assert Settings().for_tier("pro").profile == "general"
+    assert Settings().for_tier("standard").profile == settings.profile
     with pytest.raises(ValueError, match="Unknown tier"):
         settings.for_tier("ultra")
 

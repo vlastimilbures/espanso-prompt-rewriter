@@ -26,7 +26,7 @@ Espanso does not inherit shell PATH):
   stderr to the user. Everything printed goes through `_emit()`, which strips control, bidi and
   Unicode tag characters (the draft gets the same `_clean()`); stdin/stdout are reconfigured to
   UTF-8 because Windows pipes default to the ANSI code page. `--tier pro` swaps in the
-  `OPENROUTER_PRO_*` settings via `Settings.for_tier()`; `--model`/`--effort`/`--max-tokens`/
+  `OPENROUTER_PRO_*` settings and `PROMPT_PRO_PROFILE` (if set) via `Settings.for_tier()`; `--model`/`--effort`/`--max-tokens`/
   `--timeout` are applied by `Settings.with_overrides()` (`--model` sets every provider's model),
   so `make_provider()` always sees the effective settings.
 - `factory.py` — `make_provider(name, cfg)` builds a provider from `Settings`; `PROVIDER_NAMES`
@@ -41,7 +41,7 @@ Espanso does not inherit shell PATH):
   cwd, so a planted `.env` cannot redirect the base URL or enable the override. This matters
   because Espanso runs the CLI as a GUI-spawned subprocess without an inherited login-shell
   environment. `tests/conftest.py` points `PROMPT_WORKFLOW_ENV` at a temp file per test.
-- `prompt_builder.py` — `PROFILES` maps a profile name (`default`, `general`) to a system
+- `prompt_builder.py` — `PROFILES` maps a profile name (`default`, `default-pro`, `general`) to a system
   prompt used to instruct the rewrite. `render()` fills the `{{PERSONA_RULE}}` token from
   `PROMPT_PERSONA` (also printed by the `persona` subcommand for the `-p-` snippet). `default` (the
   `PROMPT_PROFILE` fallback) rewrites the draft into the golden template kept in
@@ -55,7 +55,9 @@ Espanso does not inherit shell PATH):
   matched by `scripts/bench_models.py` and `tests/test_bench.py` (which also checks the `-p-`
   template in `prompts-template.yml`); change them together, and
   re-run the benchmark (`--suite all --system-prompt-file`) on both default models before
-  shipping a prompt change. Open weaknesses are listed in CONTRIBUTING.md ("Known gaps in the
+  shipping a prompt change. `default-pro` (the pro tier's profile, via `PROMPT_PRO_PROFILE`) is
+  `default` minus one review-rule clause, enforced by `tests/test_prompts.py`; edit both, and
+  bench gpt-6-luna with `--system-prompt-file .../default-pro.md`. Open weaknesses are listed in CONTRIBUTING.md ("Known gaps in the
   default prompt").
 
 ### Data-protection gate

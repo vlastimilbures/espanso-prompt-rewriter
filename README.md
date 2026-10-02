@@ -277,6 +277,7 @@ else is reported inline rather than silently ignored.
 | `OPENROUTER_PRO_PROVIDER`    | `openai`                       | Endpoint pin for the pro tier                             |
 | `OPENROUTER_PRO_REASONING_EFFORT` | `low`                     | Reasoning effort for the pro tier                         |
 | `PROMPT_PRO_TIMEOUT_SECONDS` | `60`                           | Request timeout for the pro tier                          |
+| `PROMPT_PRO_PROFILE`         | `default-pro`                  | Profile for the pro tier; empty = `PROMPT_PROFILE`        |
 | `ANTHROPIC_API_KEY`          | —                              | Required for Anthropic                                    |
 | `ANTHROPIC_MODEL`            | `claude-sonnet-5`              |                                                           |
 | `ANTHROPIC_MAX_TOKENS`       | `2400`                         |                                                           |
@@ -369,7 +370,7 @@ The rewrite is only useful if the template comes back intact, so the default mod
 were chosen with [`scripts/bench_models.py`](scripts/bench_models.py) rather than by taste. The
 `core` suite (the default) sends 8 drafts that cross two independent decisions — *plan first or
 execute now* (task complexity) and *independent or self review* (audience and consequence). The
-`edge` suite (`--suite edge` or `--suite all`) adds 20 drafts that probe the rest: prompt
+`edge` suite (`--suite edge` or `--suite all`) adds 24 drafts that probe the rest: prompt
 injection, questions, pasted emails, Czech, German and Spanish drafts, a draft stating its own
 role, code, and outside readers that are only implied. Every response is scored mechanically:
 all six sections present and correctly closed, mandatory steps verbatim, `1/ 2/ 3/` numbering,

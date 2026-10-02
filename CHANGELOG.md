@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Changed
+- The `default` prompt was reworked after an A/B run on both tiers (judged blind; details in
+  `docs/prompt-candidates/PLAN.md`). The rewrite now decides deliverable, planning, review and
+  language before writing; names the sections of a document deliverable; states method choices
+  as assumptions instead of `[REVIEW: …]`; asks for each missing item once and never for
+  material the draft already gives; gives an email to a named person at another organisation
+  (a customer, supplier, landlord) the independent review; and describes a slide deck in
+  `OUTPUTS` instead of the `.md` line. The self-review lines now read "show any calculation
+  steps" and "matches the format in OUTPUTS", in `prompts-template.yml` too.
+  On the 32-draft bench (3 runs): flash-lite 22→23/24 core, 63→66/72 edge; gpt-6-luna
+  (`default-pro`) 23→22/24 core (one run; a 6-run recheck was clean), 63→67/72 edge.
+
+### Added
+- `PROMPT_PRO_PROFILE` (default `default-pro`): the profile `--tier pro` uses. `default-pro`
+  is `default` without one review-rule clause that flash-lite needs and gpt-6-luna over-applies.
+  Set it empty to use `PROMPT_PROFILE` for both tiers.
+- Four held-out drafts in the bench's `edge` suite (`vendor-review`, `landlord`, `teams-jana`,
+  `outliers`), and the `spanish` draft accepts a plain-text `OUTPUTS` line.
+
 ## 0.11.0
 
 ### Changed

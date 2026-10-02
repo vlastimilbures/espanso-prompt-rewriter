@@ -14,7 +14,7 @@ A spec is `model`, optionally `@provider-tag` to pin one endpoint and `~effort` 
 OpenRouter's reasoning effort (none/minimal/low/medium/high).
 
 The `core` suite (default) is the 8 drafts the model choice was made on. The `edge` suite adds
-20 drafts that probe what `core` cannot: prompt injection, questions, pasted material,
+24 drafts that probe what `core` cannot: prompt injection, questions, pasted material,
 non-English drafts, a draft stating its own role, code, and outside readers that are only
 implied. `edge` is not expected to pass in full; see CONTRIBUTING.md for its known gaps.
 """
@@ -376,7 +376,7 @@ DRAFTS: dict[str, Draft] = {
         False,
         "edge",
         keys=(("IT budget",), ("yesterday",), ("meeting",), ("notes",)),
-        outputs="doc",
+        # "Short, for me": a plain-text answer is as valid as the .md document line.
         language="Spanish",
     ),
     "pasted-injection": Draft(
@@ -414,6 +414,53 @@ DRAFTS: dict[str, Draft] = {
         False,
         "edge",
         keys=(("SQL",), ("3 missed", "three missed", "more than 3"), ("6 months", "six months")),
+        outputs="code",
+    ),
+    # Held-out drafts written after the round-2 candidates, so no candidate was tuned on them.
+    "vendor-review": Draft(
+        "compare the three bids we got for the new collections dialer (Talkdesk, Genesys and a "
+        "local vendor, VNCall): pricing sheets, the security questionnaire answers and the "
+        "reference-call notes are attached; I need a recommendation paper for the procurement "
+        "committee on 14 November with a scoring matrix and the main risks of each option",
+        True,
+        True,
+        "edge",
+        keys=(
+            ("Talkdesk",),
+            ("Genesys",),
+            ("VNCall",),
+            ("procurement committee",),
+            ("14 November", "November 14"),
+            ("scoring matrix",),
+            ("security questionnaire",),
+        ),
+        outputs="doc",
+    ),
+    "landlord": Draft(
+        "short email to our office landlord Mr Tran asking to move the lease renewal meeting from "
+        "Thursday to the following Monday because our CFO is travelling",
+        False,
+        True,
+        "edge",
+        keys=(("Tran",), ("lease renewal",), ("Thursday",), ("Monday",), ("CFO",)),
+        outputs="message",
+    ),
+    "teams-jana": Draft(
+        "quick teams message to Jana: can she send me the updated PD backtesting file before "
+        "lunch, I want to check it before the 2pm call",
+        False,
+        False,
+        "edge",
+        keys=(("Jana",), ("backtesting",), ("lunch",), ("2pm", "2 pm", "14:00")),
+        outputs="message",
+    ),
+    "outliers": Draft(
+        "pandas script for me that flags outliers in daily disbursement amounts per branch using "
+        "a rolling 30-day median and MAD, and writes the flagged rows to a CSV",
+        None,
+        False,
+        "edge",
+        keys=(("pandas",), ("30-day", "30 day"), ("MAD", "median absolute deviation"), ("CSV",)),
         outputs="code",
     ),
 }
@@ -800,7 +847,7 @@ def main() -> None:
         "--suite",
         choices=SUITES,
         default="core",
-        help="core: the 8 model-choice drafts; edge: 20 injection, language, pasted-material "
+        help="core: the 8 model-choice drafts; edge: 24 injection, language, pasted-material "
         "and audience drafts; all: both",
     )
     parser.add_argument("--drafts", nargs="*", help="run these drafts instead of a suite")
