@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## 0.12.0
+
 ### Changed
 - The `default` prompt was reworked after an A/B run on both tiers (judged blind; details in
   `docs/prompt-candidates/PLAN.md`). The rewrite now decides deliverable, planning, review and
