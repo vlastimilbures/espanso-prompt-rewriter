@@ -3,8 +3,8 @@
 - Keep all functionality cross-platform for macOS and Windows.
 - Use Python 3.12, uv, type hints, pathlib, and explicit timeouts.
 - Never place API keys, customer data, credentials, or confidential prompts in source, tests, logs, or commits.
-- Keep Espanso matches in espanso/match and behavior settings in espanso/config.
-- Espanso match commands must start with the quoted "__PROMPT_WORKFLOW__" placeholder and quote nothing else; install scripts substitute the absolute CLI path.
+- Keep Espanso matches in espanso/match; never deploy anything to Espanso's config/ folder.
+- Espanso match commands must start with the quoted "__PROMPT_WORKFLOW__" placeholder and quote nothing else; `prompt-workflow espanso deploy` substitutes the absolute CLI path.
 - Every Espanso match that runs the CLI sets `force_mode: clipboard`, so output is pasted, never typed.
 - Preserve existing triggers unless a migration note and test are added.
 - Every Espanso match sets `left_word: true`, so triggers never fire inside a word.

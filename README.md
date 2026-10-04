@@ -127,10 +127,10 @@ flowchart LR
     H --> I["Espanso pastes the<br/>rewritten prompt"]
 ```
 
-Espanso starts the CLI as a GUI subprocess without your shell's `PATH` or environment. So the
-install scripts write the CLI's absolute path into the match files, and the CLI reads its
-settings from files rather than your shell: a `.env`, or the saved `config.toml` and
-`secrets.toml` (see [Configuration](#configuration)).
+Espanso starts the CLI as a GUI subprocess without your shell's `PATH` or environment. So
+`prompt-workflow espanso deploy` writes the CLI's absolute path into the match files, and the
+CLI reads its settings from files rather than your shell: a `.env`, or the saved `config.toml`
+and `secrets.toml` (see [Configuration](#configuration)).
 
 ## Requirements
 
@@ -161,12 +161,11 @@ CLI and deploy the Espanso match files:
 .\scripts\install_windows.ps1   # Windows (PowerShell)
 ```
 
-The installer runs `uv tool install`, writes the absolute CLI path into the match files, and
-restarts Espanso. Before replacing a file you changed, it saves a `.bak-<timestamp>` copy next to
-it. It leaves your Espanso `config/default.yml` alone; pass `--with-config` (`-WithConfig` on
-Windows) to also deploy [ours](espanso/config/default.yml). The Windows script runs on Windows
-PowerShell 5.1 and PowerShell 7; you may first need
-`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
+The installer runs `uv tool install` pinned to `uv.lock` (and checks the tool venv against it),
+then `prompt-workflow espanso deploy --yes`, which writes the match files with the CLI's absolute
+path and restarts Espanso. It never touches Espanso's `config/` folder (the old `--with-config` /
+`-WithConfig` option is gone). The Windows script runs on Windows PowerShell 5.1 and
+PowerShell 7; you may first need `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
 
 Now copy a rough draft, type `-i-` in any text field, and wait a couple of seconds.
 
@@ -175,10 +174,8 @@ Now copy a rough draft, type `-i-` in any text field, and wait a couple of secon
 
 ```bash
 uv tool install --editable .
+prompt-workflow espanso deploy
 ```
-
-Copy `espanso/match/*.yml` into `$(espanso path config)/match/`, replacing `__PROMPT_WORKFLOW__`
-with the output of `echo "$(uv tool dir --bin)/prompt-workflow"`, then run `espanso restart`.
 
 </details>
 
@@ -199,10 +196,33 @@ uv tool install \
 To check the files first, download them (`gh release download v<version> -R
 vlastimilbures/espanso-prompt-rewriter`), run `gh attestation verify <file> -R
 vlastimilbures/espanso-prompt-rewriter` on each, and install the local wheel with
-`-c constraints.txt`. This installs the CLI only: deploy the match files as in the manual install
-above. The CLI then reads `.env` from the user config directory, not from a checkout.
+`-c constraints.txt`. This installs the CLI only: then run `prompt-workflow espanso deploy` to
+write the match files (see below). The CLI then reads `.env` from the user config directory, not
+from a checkout.
 
 </details>
+
+### Managing the deployed match files
+
+`prompt-workflow espanso` owns the match files it writes into Espanso's `match/` folder (found
+with `espanso path config`, else Espanso's default folder) and keeps a manifest of them in
+`~/.local/share/prompt-workflow/` (`$XDG_DATA_HOME`; `%LOCALAPPDATA%\prompt-workflow\` on
+Windows). Each deployed file starts with `# prompt-workflow <version> (managed; edit at your own
+risk)`.
+
+| Command | What it does |
+|---------|--------------|
+| `prompt-workflow espanso status [--diff]` | Each file: `missing`, `in sync`, `stale` (an older deploy of ours, such as after an upgrade), `modified` (you edited it) or `foreign` (not ours) |
+| `prompt-workflow espanso deploy` | Shows the plan and a diff, asks, then writes and restarts Espanso. `--yes` skips the question; a second run with nothing to change does nothing |
+| `prompt-workflow espanso detach` | Removes the matches that call the CLI and keeps `-prompt-`/`-risk-` as static snippets (`--keep-static`, the default); `--remove-all` removes every file we deployed |
+
+A file you edited is never overwritten silently: `deploy` asks whether to keep yours, take ours
+(yours is saved as `<file>.bak-<timestamp>`; only the last 2 of these backups are kept) or write
+ours side by side as `<file>.prompt-workflow-new`, which Espanso does not load. With `--yes` it
+keeps yours unless you pass `--on-conflict ours|side`. `detach` likewise removes only files whose
+content is still what we wrote, and reports any you edited. The launcher written into the
+matches is the install channel's stable entry point (uv's tool bin, Homebrew's `bin/`, Scoop's
+shim), never a versioned path an upgrade would remove; `--launcher PATH` overrides it.
 
 ## Usage
 
@@ -236,14 +256,14 @@ as-is, whatever it holds, so copy the draft first. On macOS and Windows an item 
 manager marked as concealed is refused and cleared from the clipboard
 (`[prompt-workflow: The clipboard held a password-manager item …]`) when the check can tell. Cloud triggers pass through the
 [data-protection gate](#privacy-and-data-protection) first. To enable `-ic-`,
-uncomment it in [`espanso/match/prompts-llm.yml`](espanso/match/prompts-llm.yml) and re-run the
-installer.
+uncomment it in [`espanso/match/prompts-llm.yml`](espanso/match/prompts-llm.yml) and run
+`prompt-workflow espanso deploy` (or the installer) again.
 
 `-if-` opens an Espanso form with four dropdowns before the rewrite runs: the model
 (each entry is `model@endpoint`, the OpenRouter slug plus its endpoint pin; `@auto` leaves
 routing to OpenRouter), reasoning effort, max output tokens and timeout. `default` in any list
 keeps the pro-tier setting (`OPENROUTER_PRO_*`). Edit the lists in
-[`espanso/match/prompts-llm.yml`](espanso/match/prompts-llm.yml) and re-run the installer; the
+[`espanso/match/prompts-llm.yml`](espanso/match/prompts-llm.yml) and deploy again; the
 tests reject any value the CLI would not accept. Two things to know:
 
 - Many reasoning models count thinking tokens against the max-tokens cap, so pair `high` effort
@@ -647,7 +667,7 @@ uv run python scripts/bench_models.py --profile general --suite all       # the 
 | Symptom | Fix |
 |---------|-----|
 | Trigger does not expand right after a letter, digit, `-` or `=`, or in a field you emptied with the keyboard | Triggers only fire at the start of a word, judged by what you last typed. Type a space first, or click into the field. |
-| Trigger does not expand | Run `espanso status`, check the match files are in `$(espanso path config)/match`, re-run the installer. |
+| Trigger does not expand | Run `espanso status`, then `prompt-workflow espanso status`, then `prompt-workflow espanso deploy`. |
 | `[prompt-workflow: OPENROUTER_API_KEY is not configured]` | The key is missing from `.env` (or `secrets.toml`), or the file is not in one of the [places the CLI looks](#configuration). Once `config.toml` exists, a `.env` is no longer read. |
 | `[prompt-workflow: config.toml is not valid TOML (at line …)]` | Fix that line of `config.toml` in the config folder (`secrets.toml` likewise). |
 | `[prompt-workflow: OpenRouter returned HTTP 401: check the API key…]` | Wrong key. Replace it in `.env`. |

@@ -6,6 +6,8 @@ import re
 import sys
 import unicodedata
 from collections.abc import Callable
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pyperclip
 import typer
@@ -22,6 +24,9 @@ from .prompt_builder import (
 )
 from .providers.base import ProviderError
 from .redaction import DEFAULT_IGNORABLE
+
+if TYPE_CHECKING:
+    from .deploy import Plan
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
@@ -218,6 +223,167 @@ def persona() -> None:
         # Same contract as improve: never a traceback or blank expansion in Espanso.
         text = PERSONA_PLACEHOLDER
     _emit(text)
+
+
+# Deployment commands. Not on the trigger path: each imports the deploy module only when run,
+# so improve and persona never load it.
+espanso_app = typer.Typer(
+    no_args_is_help=True, help="Deploy the match files into Espanso, check them, or remove them."
+)
+app.add_typer(espanso_app, name="espanso")
+
+_ESPANSO_DIR = typer.Option(None, "--espanso-dir", help="Default: `espanso path config`")
+_LAUNCHER = typer.Option(
+    None, "--launcher", help="CLI path to write into the matches; default: this install's own"
+)
+_YES = typer.Option(False, "--yes", "-y", help="Apply without asking")
+_NO_RESTART = typer.Option(False, "--no-restart", help="Do not restart Espanso afterwards")
+
+
+def _fail(exc: Exception) -> typer.Exit:
+    typer.echo(f"error: {exc}", err=True)
+    return typer.Exit(1)
+
+
+def _make_plan(espanso_dir: str | None, launcher: str | None) -> Plan:
+    from . import deploy
+
+    if launcher is None:
+        found = deploy.resolve_launcher()
+        path, channel = str(found.path), found.channel
+    else:
+        path, channel = launcher, "given"
+    target = deploy.espanso_dir() if espanso_dir is None else Path(espanso_dir)
+    the_plan = deploy.plan(target, deploy.launcher_text(path), deploy.Manifest.load())
+    typer.echo(f"Espanso match folder: {target / 'match'}")
+    typer.echo(f"Launcher ({channel}): {path}")
+    return the_plan
+
+
+def _restart(no_restart: bool) -> None:
+    from . import deploy
+
+    if no_restart:
+        typer.echo("Espanso was not restarted (--no-restart).")
+    elif not deploy.restart_espanso():
+        typer.echo("Could not restart Espanso; run `espanso restart` yourself.", err=True)
+
+
+@espanso_app.command("status")
+def espanso_status(
+    espanso_dir: str | None = _ESPANSO_DIR,
+    launcher: str | None = _LAUNCHER,
+    diff: bool = typer.Option(False, "--diff", help="Show what deploy would change"),
+) -> None:
+    """Report each match file: missing, in sync, stale, modified or foreign."""
+    from . import deploy
+
+    try:
+        the_plan = _make_plan(espanso_dir, launcher)
+    except (deploy.DeployError, ValueError, OSError) as exc:
+        raise _fail(exc) from None
+    for step in the_plan.steps:
+        typer.echo(f"  {step.state:<9} {step.name}")
+        if diff and step.state != deploy.IN_SYNC:
+            typer.echo(step.diff(), nl=False)
+    if the_plan.legacy is not None:
+        typer.echo(f"  legacy    {the_plan.legacy.name} (deploy retires it, with a backup)")
+
+
+def _ask_choice(name: str, state: str) -> str:
+    from . import deploy
+
+    while True:
+        answer = str(
+            typer.prompt(
+                f"{name} is {state}: keep yours, take ours (backed up), or write ours side by "
+                f"side? [{'/'.join(deploy.CHOICES)}]",
+                default=deploy.KEEP,
+                show_default=False,
+            )
+        ).strip()
+        if answer in deploy.CHOICES:
+            return answer
+        typer.echo(f"Answer one of {', '.join(deploy.CHOICES)}.")
+
+
+@espanso_app.command("deploy")
+def espanso_deploy(
+    espanso_dir: str | None = _ESPANSO_DIR,
+    launcher: str | None = _LAUNCHER,
+    yes: bool = _YES,
+    on_conflict: str | None = typer.Option(
+        None,
+        "--on-conflict",
+        help="For a file you edited: keep (yours, the default with --yes), ours (replace it, "
+        "with a backup) or side (write ours next to it)",
+    ),
+    no_restart: bool = _NO_RESTART,
+) -> None:
+    """Show the plan and a diff, then write the match files (asks first unless --yes)."""
+    from . import deploy
+
+    try:
+        if on_conflict is not None and on_conflict not in deploy.CHOICES:
+            raise deploy.DeployError(f"--on-conflict must be one of {', '.join(deploy.CHOICES)}")
+        the_plan = _make_plan(espanso_dir, launcher)
+        if the_plan.is_noop:
+            typer.echo("Nothing to do: every match file is in sync.")
+            return
+        for step in the_plan.steps:
+            typer.echo(f"  {step.state:<9} {step.name}")
+            if step.state not in (deploy.IN_SYNC, deploy.MISSING):
+                typer.echo(step.diff(), nl=False)
+        if the_plan.legacy is not None:
+            typer.echo(f"  legacy    {the_plan.legacy.name} will be retired, with a backup")
+        choices = {}
+        for step in the_plan.conflicts:
+            if on_conflict is not None or yes:
+                choices[step.name] = on_conflict or deploy.KEEP
+            else:
+                choices[step.name] = _ask_choice(step.name, step.state)
+        if not yes:
+            typer.confirm("Apply this plan?", abort=True)
+        outcome = deploy.apply(the_plan, choices)
+    except (deploy.DeployError, ValueError, OSError) as exc:
+        raise _fail(exc) from None
+    for line in outcome.lines:
+        typer.echo(line)
+    if outcome.changed:
+        _restart(no_restart)
+
+
+@espanso_app.command("detach")
+def espanso_detach(
+    keep_static: bool = typer.Option(
+        True,
+        "--keep-static/--remove-all",
+        help="Remove only the matches that call the CLI (default), or every file we deployed",
+    ),
+    yes: bool = _YES,
+    no_restart: bool = _NO_RESTART,
+) -> None:
+    """Remove the match files prompt-workflow deployed. Files you edited are kept."""
+    from . import deploy
+
+    try:
+        manifest = deploy.Manifest.load()
+        if not manifest.entries:
+            typer.echo("Nothing to do: prompt-workflow has no deployed match files on record.")
+            return
+        mode = "the CLI-calling match files" if keep_static else "every deployed match file"
+        typer.echo(f"Detach removes {mode} that you have not edited:")
+        for target in sorted(manifest.entries):
+            typer.echo(f"  {target}")
+        if not yes:
+            typer.confirm("Detach?", abort=True)
+        outcome = deploy.detach(manifest, remove_all=not keep_static)
+    except (deploy.DeployError, OSError) as exc:
+        raise _fail(exc) from None
+    for line in outcome.lines:
+        typer.echo(line)
+    if outcome.changed:
+        _restart(no_restart)
 
 
 if __name__ == "__main__":

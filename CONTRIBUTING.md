@@ -150,13 +150,11 @@ path. Raise the ceiling only with new measurements here.
 
 ```text
 espanso-prompt-rewriter/
-├── espanso/                      deployed into Espanso by the installers
-│   ├── match/                    also shipped in the wheel (config/ is not), see assets.py
+├── espanso/                      deployed into Espanso by `prompt-workflow espanso deploy`
+│   ├── match/                    also shipped in the wheel, see assets.py
 │   │   ├── prompts-llm.yml       -i- -ip- -if- -iok- -il- -ilm- (-ic-): call the CLI
 │   │   ├── prompts-core.yml      -prompt- -risk-: static snippets and forms
 │   │   └── prompts-template.yml  -p-: the empty golden template, opens with your persona
-│   └── config/
-│       └── default.yml           optional Espanso settings (--with-config / -WithConfig)
 ├── src/prompt_workflow/          the prompt-workflow CLI
 │   ├── cli.py                    improve and persona commands, the single output sink
 │   ├── config.py                 Settings from the environment, config.toml or .env
@@ -170,6 +168,7 @@ espanso-prompt-rewriter/
 │   ├── prompt_builder.py         loads built-in and user profiles, fills in the persona rule
 │   ├── profiles.py               migrate a checkout's own profiles to the user directory
 │   ├── assets.py                 the packaged Espanso match files (importlib.resources)
+│   ├── deploy.py                 espanso deploy/status/detach: manifest, states, stable launcher
 │   ├── prompts/
 │   │   ├── default.md            golden-template rewrite (-i-, -ip-, -if-)
 │   │   └── general.md            lighter "make this precise" rewrite (local triggers)
@@ -180,8 +179,9 @@ espanso-prompt-rewriter/
 │       ├── anthropic.py          Anthropic Messages API
 │       └── ollama.py             Ollama /api/chat
 ├── scripts/
-│   ├── install_macos.sh          install the CLI and deploy the match files
+│   ├── install_macos.sh          contributor install pinned to uv.lock, then espanso deploy
 │   ├── install_windows.ps1       the same for Windows
+│   ├── check_tool_lock.py        the tool venv's packages match uv.lock (#34)
 │   ├── bench_models.py           score models on template fidelity, latency, cost
 │   ├── check_wheel.py            CI: what an installed wheel really contains
 │   └── release_notes.py          release: the version and its CHANGELOG notes
@@ -220,7 +220,7 @@ To ship a new built-in profile:
 ### Add a trigger
 
 Add a match to `espanso/match/prompts-llm.yml`. Shell commands start with the quoted
-`__PROMPT_WORKFLOW__` placeholder, which the install scripts replace with the absolute CLI path.
+`__PROMPT_WORKFLOW__` placeholder, which `prompt-workflow espanso deploy` replaces with the absolute CLI path.
 Quote nothing else: `cmd.exe` mangles a command line holding more than one quoted part.
 Set `force_mode: clipboard` on every match that runs the CLI, so Espanso pastes the output
 instead of typing short replies key by key.

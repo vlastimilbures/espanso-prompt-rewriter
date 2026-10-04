@@ -7,6 +7,22 @@ All notable changes to this project are documented here. The format follows
 ## Unreleased
 
 ### Added
+- Managed Espanso deployment (#86): `prompt-workflow espanso deploy|status|detach`. `deploy`
+  shows a plan and a diff and asks first (`--yes` skips); a second run with nothing to change
+  does nothing. A manifest in the per-device data dir (`~/.local/share/prompt-workflow/`,
+  `%LOCALAPPDATA%\prompt-workflow\` on Windows) records each file it wrote, so `status` reports
+  `missing`, `in sync`, `stale` (an older deploy of ours, the #25 drift case), `modified` or
+  `foreign`. Each deployed file opens with `# prompt-workflow <version> (managed; edit at your own
+  risk)`; the rest is byte-identical to what the install scripts wrote. A file you edited is never
+  overwritten silently: keep yours (the default with `--yes`), take ours with a
+  `.bak-<timestamp>` backup (only our last 2 backups are kept), or write ours side by side
+  (`--on-conflict keep|ours|side`). `detach` keeps `-prompt-`/`-risk-` by default
+  (`--keep-static`) or removes every deployed file (`--remove-all`), and changes only files
+  still as we wrote them. The launcher is the install channel's stable entry point (uv's tool
+  bin, Homebrew's `bin/`, Scoop's shim), never a versioned path an upgrade removes.
+- The install scripts pin the tool to `uv.lock` (`uv export` constraints for `uv tool install`)
+  and check the result with `scripts/check_tool_lock.py` (#34), then call
+  `prompt-workflow espanso deploy --yes`.
 - Per-attempt usage metadata for every provider (#87), the data source for the coming usage
   history. `make_provider(..., observer=...)` passes an observer to each provider, inside the
   gate, and every HTTP attempt (both attempts of a retry, a timeout, a non-2xx reply) reports
@@ -166,6 +182,12 @@ All notable changes to this project are documented here. The format follows
   separators become newlines instead of disappearing.
 - A draft over 50,000 characters is refused before it is cleaned, so a pasted multi-megabyte
   log no longer stalls the expansion.
+
+### Removed
+- `espanso/config/default.yml` and the installers' `--with-config` / `-WithConfig` option (#37).
+  Nothing deploys to Espanso's `config/` folder any more, so your own `default.yml` (and any
+  symlink to it) is never replaced; set `toggle_key` or `search_shortcut` there yourself if
+  you want them. The scripts now refuse the old option with a message.
 
 ## 0.15.0 - 2026-10-04
 
