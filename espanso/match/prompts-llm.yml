@@ -10,6 +10,7 @@ matches:
   # unless ALLOW_CLOUD_OVERRIDE=true, but that gate is a heuristic, not a
   # guarantee — only use this trigger where company policy permits.
   - trigger: "-i-"
+    left_word: true
     replace: "{{output}}"
     force_mode: clipboard
     vars:
@@ -21,6 +22,7 @@ matches:
   # Same rewrite on the pro tier: a reasoning model (OPENROUTER_PRO_MODEL) for hard,
   # multi-part drafts. Slower (~5-8 s) but more rigorous. Same cloud caveats as above.
   - trigger: "-ip-"
+    left_word: true
     replace: "{{output}}"
     force_mode: clipboard
     vars:
@@ -37,6 +39,7 @@ matches:
   # Many reasoning models count thinking tokens against the max tokens cap, so pair high
   # effort with 8000+ or the rewrite can come back cut short. Same cloud caveats as above.
   - trigger: "-if-"
+    left_word: true
     replace: "{{output}}"
     force_mode: clipboard
     vars:
@@ -75,6 +78,7 @@ matches:
           cmd: "\"__PROMPT_WORKFLOW__\" improve --provider openrouter --tier pro --source clipboard --model {{form1.model}} --effort {{form1.effort}} --max-tokens {{form1.maxtokens}} --timeout {{form1.timeout}}"
 
   - trigger: "-il-"
+    left_word: true
     replace: "{{output}}"
     force_mode: clipboard
     vars:
@@ -84,6 +88,7 @@ matches:
           cmd: "\"__PROMPT_WORKFLOW__\" improve --provider ollama --profile general --source clipboard"
 
   - trigger: "-ilm-"
+    left_word: true
     replace: "{{output}}"
     force_mode: clipboard
     vars:
@@ -96,6 +101,7 @@ matches:
   # to the Anthropic API. Uncomment only if company policy permits, and note
   # that the CLI still blocks sensitive content unless ALLOW_CLOUD_OVERRIDE=true.
   # - trigger: "-ic-"
+  #   left_word: true
   #   replace: "{{output}}"
   #   force_mode: clipboard
   #   vars:

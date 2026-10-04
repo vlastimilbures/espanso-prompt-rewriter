@@ -5,6 +5,7 @@
 
 matches:
   - trigger: "-p-"
+    left_word: true
     vars:
       - name: persona
         type: shell
