@@ -56,8 +56,9 @@ if (-not (Test-Path $Cli) -or -not (Test-Path $ToolPython)) {
 & $ToolPython scripts\check_tool_lock.py --python $ToolPython
 Assert-Exit "lock check"
 
-Write-Host "Settings are read from $RepoDir\.env (copy .env.example), or from the file"
-Write-Host "named by PROMPT_WORKFLOW_ENV. Then test -p- and -i- in any text field."
+Write-Host "Settings are read from a .env (copy .env.example to %APPDATA%\prompt-workflow\.env;"
+Write-Host "one in $RepoDir is still read), or the saved config.toml and secrets.toml"
+Write-Host "(see Configuration in README.md). Then test -p- and -i- in any text field."
 # Last, so its result is the final thing printed: it shows the plan, writes the match files
 # with this launcher (forward slashes, path guards) and restarts Espanso. A match file you
 # edited is kept, never overwritten, and it ends with a WARNING naming each one (exit 0:

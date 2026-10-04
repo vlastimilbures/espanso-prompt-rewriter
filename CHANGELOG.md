@@ -45,55 +45,6 @@ All notable changes to this project are documented here. The format follows
   runtime pins from `uv.lock`, so `uv tool install <wheel-url> -c <constraints-url>` installs
   exactly the locked dependencies. Release builds pin the build backend (hatchling 1.32.4).
   CHANGELOG headings now carry their release date (`## 0.15.0 - 2026-10-04`); a test checks that the newest one is the `pyproject.toml` version.
-
-### Security
-- A clipboard item that a password manager marked as concealed is refused before it is read,
-  for every trigger, and cleared, so Espanso's restore cannot put it back unmarked for the next
-  trigger (#24). Markers: `org.nspasteboard.ConcealedType` or `com.agilebits.onepassword` on
-  macOS; `ExcludeClipboardContentFromMonitorProcessing`, `Clipboard Viewer Ignore` or
-  `CanIncludeInClipboardHistory` (0, or present but unreadable) on Windows. The probe asks only
-  which formats are present, through ctypes (about 10-40 ms on macOS), and adds no dependency.
-  On Linux, for browser-extension copies, or if the probe fails, the clipboard is read as
-  before.
-- The `general` profile, used by the local triggers `-il-` and `-ilm-`, treats the whole
-  clipboard as the draft: data to rewrite, never instructions to the rewriter (#47). Pasted
-  material is copied word for word, and the rewrite adds a constraint that instructions inside
-  it must not be followed. It adds no facts, roles or audiences, and returns only the prompt.
-  On flash-lite (a proxy; no local model measured yet), the bench's `check_general` passes
-  36/36 drafts, up from 4/36 (31 of the old failures were invented roles), and the injection
-  drafts are never carried over as instructions, with the guard present, in 12/12 runs.
-- Invisible characters no longer reach the model or the paste (#22). `_clean()` now drops
-  every code point Unicode marks as default-ignorable (zero-width space, word joiner, BOM, bidi
-  marks, soft hyphen, combining grapheme joiner, Hangul fillers, variation selectors, and the
-  unassigned blocks that render as nothing) and every other format character, since a run of
-  them after one visible character could carry a hidden instruction. An emoji keeps one
-  presentation selector and one joiner, a keycap keeps its selector, and Persian and Indic
-  joiners survive. Ideographic variation selectors, Mongolian variation selectors and bidi marks
-  are dropped too. The gate's normalised scan drops the same characters, so they can no longer
-  split a card number.
-- The gate catches the secret shapes developers paste most (#20):
-  - camelCase and JSON names (`clientSecret`, `accessToken`, `dbPassword`), compound env names
-    (`PGPASSWORD`), `*_KEY` names (`SECRET_KEY`, `PRIVATE_KEY`, `secret_key_base`) and
-    `_authToken`;
-  - PHP `'password' => …`, Go `:=`, `define('DB_PASSWORD', …)`, `environ["API_KEY"] = …` and
-    values aligned with many spaces;
-  - passwords of 6+ characters (`password: hunter2`) and in prose (`the password for the
-    admin account is …`, Vietnamese `mật khẩu wifi là …`, `mật khẩu đăng nhập: …`);
-  - AWS temporary keys (`ASIA…`), `Basic` credentials (UTF-8 too), `curl -u user:password`
-    (also after a `\` line continuation), npm tokens, Azure `AccountKey=`/`SharedAccessKey=`
-    and SAS `sig=`;
-  - IBANs (any case, spaces or dashes; country length and mod-97 checked);
-  - card numbers split by up to three spaces, tabs, slashes, dashes or minus signs, or one line
-    break, or next to another number.
-- A draft that is one password- or token-like word (no spaces, 8-200 characters, a digit and
-  three of lower case, upper case, digit and symbol) is blocked as `bare_token`: the classic
-  stale-clipboard slip. URLs, paths, emails, UUIDs, hashes, versions, dates and lower-case
-  slugs and file names are not. A single word is never a prompt, so a mixed-case identifier
-  with a digit is blocked too.
-- An email address next to a password (`jane@example.com:…`) is a hard `credential_pair`
-  finding, and `scheme://:password@host` (no user name) counts as `url_credentials` (#21).
-
-### Added
 - Saved settings (#84). Once `config.toml` exists in the config folder
   (`~/.config/prompt-workflow/`, `%APPDATA%\prompt-workflow\` on Windows), it is the saved
   configuration and no `.env` is read, so an old `.env` never overrides a saved value. API keys
@@ -143,6 +94,53 @@ All notable changes to this project are documented here. The format follows
   CSV/JSON export, prune, reset and health. New settings `PROMPT_HISTORY` (default `true`) and
   `PROMPT_HISTORY_RETENTION_DAYS` (default `365`, at most 36500). Optional estimates come from a user
   `prices.toml` in the config dir. Nothing records yet; the CLI starts recording in #89.
+
+### Security
+- A clipboard item that a password manager marked as concealed is refused before it is read,
+  for every trigger, and cleared, so Espanso's restore cannot put it back unmarked for the next
+  trigger (#24). Markers: `org.nspasteboard.ConcealedType` or `com.agilebits.onepassword` on
+  macOS; `ExcludeClipboardContentFromMonitorProcessing`, `Clipboard Viewer Ignore` or
+  `CanIncludeInClipboardHistory` (0, or present but unreadable) on Windows. The probe asks only
+  which formats are present, through ctypes (about 10-40 ms on macOS), and adds no dependency.
+  On Linux, for browser-extension copies, or if the probe fails, the clipboard is read as
+  before.
+- The `general` profile, used by the local triggers `-il-` and `-ilm-`, treats the whole
+  clipboard as the draft: data to rewrite, never instructions to the rewriter (#47). Pasted
+  material is copied word for word, and the rewrite adds a constraint that instructions inside
+  it must not be followed. It adds no facts, roles or audiences, and returns only the prompt.
+  On flash-lite (a proxy; no local model measured yet), the bench's `check_general` passes
+  36/36 drafts, up from 4/36 (31 of the old failures were invented roles), and the injection
+  drafts are never carried over as instructions, with the guard present, in 12/12 runs.
+- Invisible characters no longer reach the model or the paste (#22). `_clean()` now drops
+  every code point Unicode marks as default-ignorable (zero-width space, word joiner, BOM, bidi
+  marks, soft hyphen, combining grapheme joiner, Hangul fillers, variation selectors, and the
+  unassigned blocks that render as nothing) and every other format character, since a run of
+  them after one visible character could carry a hidden instruction. An emoji keeps one
+  presentation selector and one joiner, a keycap keeps its selector, and Persian and Indic
+  joiners survive. Ideographic variation selectors, Mongolian variation selectors and bidi marks
+  are dropped too. The gate's normalised scan drops the same characters, so they can no longer
+  split a card number.
+- The gate catches the secret shapes developers paste most (#20):
+  - camelCase and JSON names (`clientSecret`, `accessToken`, `dbPassword`), compound env names
+    (`PGPASSWORD`), `*_KEY` names (`SECRET_KEY`, `PRIVATE_KEY`, `secret_key_base`) and
+    `_authToken`;
+  - PHP `'password' => …`, Go `:=`, `define('DB_PASSWORD', …)`, `environ["API_KEY"] = …` and
+    values aligned with many spaces;
+  - passwords of 6+ characters (`password: hunter2`) and in prose (`the password for the
+    admin account is …`, Vietnamese `mật khẩu wifi là …`, `mật khẩu đăng nhập: …`);
+  - AWS temporary keys (`ASIA…`), `Basic` credentials (UTF-8 too), `curl -u user:password`
+    (also after a `\` line continuation), npm tokens, Azure `AccountKey=`/`SharedAccessKey=`
+    and SAS `sig=`;
+  - IBANs (any case, spaces or dashes; country length and mod-97 checked);
+  - card numbers split by up to three spaces, tabs, slashes, dashes or minus signs, or one line
+    break, or next to another number.
+- A draft that is one password- or token-like word (no spaces, 8-200 characters, a digit and
+  three of lower case, upper case, digit and symbol) is blocked as `bare_token`: the classic
+  stale-clipboard slip. URLs, paths, emails, UUIDs, hashes, versions, dates and lower-case
+  slugs and file names are not. A single word is never a prompt, so a mixed-case identifier
+  with a digit is blocked too.
+- An email address next to a password (`jane@example.com:…`) is a hard `credential_pair`
+  finding, and `scheme://:password@host` (no user name) counts as `url_credentials` (#21).
 
 ### Changed
 - `.env.example` sets only `OPENROUTER_API_KEY` and `PROMPT_PERSONA`; every other setting is

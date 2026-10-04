@@ -571,13 +571,14 @@ def test_espanso_dir_fallback(monkeypatch, tmp_path):
     ("platform", "env", "expected"),
     [
         ("win32", {"APPDATA": "/r"}, Path("/r/espanso")),
-        ("darwin", {}, Path.home() / "Library" / "Application Support" / "espanso"),
+        ("darwin", {}, Path("~/Library/Application Support/espanso")),
         ("linux", {"XDG_CONFIG_HOME": "/c"}, Path("/c/espanso")),
-        ("linux", {}, Path.home() / ".config" / "espanso"),
+        ("linux", {}, Path("~/.config/espanso")),
     ],
 )
 def test_default_espanso_dir(platform, env, expected):
-    assert deploy.default_espanso_dir(env, platform=platform) == expected
+    # Expanded here: conftest gives each test its own home folder.
+    assert deploy.default_espanso_dir(env, platform=platform) == expected.expanduser()
 
 
 @pytest.mark.parametrize(
