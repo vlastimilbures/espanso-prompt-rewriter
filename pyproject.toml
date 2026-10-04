@@ -34,6 +34,11 @@ dev = [
 requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
+[tool.uv]
+# The exact build backend for `uv build`, so a release wheel does not depend on whichever
+# hatchling is newest on the day. Bump it by hand to a release at least a week old.
+build-constraint-dependencies = ["hatchling==1.32.4"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/prompt_workflow"]
 

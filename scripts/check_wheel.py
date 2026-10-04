@@ -9,17 +9,21 @@ built wheel into a clean venv and runs this with that venv's Python (not from th
 It checks that the package was imported from the venv, that every match file under the repo's
 espanso/match/ and every profile under src/prompt_workflow/prompts/ resolves through
 importlib.resources, that espanso/config/ was not shipped, and that `prompt-workflow persona`
-runs with an empty config. Exits nonzero on the first failure.
+runs with an empty config. With `--constraints` (the release's constraints.txt, exported from
+uv.lock), every distribution installed next to the package must be pinned there at the
+installed version. Exits nonzero on the first failure.
 """
 
 from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 import tempfile
 import zipfile
+from importlib import metadata
 from pathlib import Path
 
 import prompt_workflow
@@ -92,12 +96,54 @@ def _check_persona() -> None:
         _fail(f"persona exited {result.returncode} with {stdout!r} {result.stderr!r}")
 
 
+def _normalize(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def constraint_mismatches(constraints: str, installed: dict[str, str]) -> list[str]:
+    """Installed distributions that `constraints` does not pin at their installed version.
+
+    A pin's environment marker is not evaluated: a pin whose marker excludes this platform
+    simply has nothing installed to compare against.
+    """
+    pins: dict[str, str] = {}
+    for line in constraints.splitlines():
+        requirement = line.split(";", 1)[0].strip()
+        if requirement and not requirement.startswith("#"):
+            name, sep, version = requirement.partition("==")
+            if not sep:
+                raise ValueError(f"constraint {requirement!r} is not name==version")
+            pins[_normalize(name)] = version.strip()
+    return [
+        f"{name} {version} (constraints: {pins.get(_normalize(name), 'not pinned')})"
+        for name, version in sorted(installed.items())
+        if pins.get(_normalize(name)) != version
+    ]
+
+
+def _check_constraints(constraints: Path) -> None:
+    own = _normalize(metadata.distribution("espanso-prompt-rewriter").metadata["Name"])
+    installed = {
+        dist.metadata["Name"]: dist.version
+        for dist in metadata.distributions()
+        if _normalize(dist.metadata["Name"]) != own
+    }
+    if not installed:
+        _fail("no dependencies installed next to the package")
+    mismatches = constraint_mismatches(constraints.read_text("utf-8"), installed)
+    if mismatches:
+        _fail(f"installed versions differ from the constraints: {mismatches}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
         "--repo", type=Path, required=True, help="the checkout the wheel was built from"
     )
     parser.add_argument("--wheel", type=Path, required=True, help="the built .whl file")
+    parser.add_argument(
+        "--constraints", type=Path, help="constraints.txt the wheel was installed with"
+    )
     args = parser.parse_args()
     repo = args.repo.resolve()
     package = _check_import(repo)
@@ -105,6 +151,8 @@ def main() -> None:
     _check_profiles(repo)
     _check_wheel_contents(args.wheel)
     _check_persona()
+    if args.constraints:
+        _check_constraints(args.constraints)
     print(f"check_wheel: ok ({len(assets.match_names())} match files, {len(PROFILES)} profiles)")
 
 
