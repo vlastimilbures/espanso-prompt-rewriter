@@ -4,7 +4,7 @@
 - Use Python 3.12, uv, type hints, pathlib, and explicit timeouts.
 - Never place API keys, customer data, credentials, or confidential prompts in source, tests, logs, or commits.
 - Keep Espanso matches in espanso/match and behavior settings in espanso/config.
-- Espanso match commands must start with the quoted "__PROMPT_WORKFLOW__" placeholder and quote nothing else; install scripts substitute the absolute CLI path.
+- Espanso matches call the CLI from `type: script` vars whose `args` list starts with "__PROMPT_WORKFLOW__" (never `type: shell`); install scripts substitute the absolute CLI path. The CLI must never write to stderr.
 - Preserve existing triggers unless a migration note and test are added.
 - Route every call that can leave the machine through the redaction gate: build providers with `factory.make_provider()`, never bypass it without an explicit override flag.
 - Strip model reasoning (<think> blocks) before returning text to Espanso.

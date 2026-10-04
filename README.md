@@ -430,6 +430,7 @@ uv run python scripts/bench_models.py --system-prompt-file candidate.md   # A/B 
 
 | Symptom | Fix |
 |---------|-----|
+| `[Espanso]: An error occurred during rendering…` instead of a rewrite | Run `espanso log`. Usually the CLI path in the match files is stale (re-run the installer) or the CLI wrote to stderr. |
 | Trigger does not expand | Run `espanso status`, check the match files are in `$(espanso path config)/match`, re-run the installer. |
 | `[prompt-workflow: OPENROUTER_API_KEY is not configured]` | The key is missing from `.env`, or `.env` is not in one of the [places the CLI looks](#configuration). |
 | `[prompt-workflow: OpenRouter returned HTTP 401]` | Wrong key. Replace it in `.env`. |

@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import re
 import sys
+import warnings
 from collections.abc import Callable
 
 import pyperclip
@@ -42,6 +43,9 @@ def _emit(text: str) -> None:
 def _main() -> None:
     """Espanso-invoked prompt rewriter. Keeps ``improve`` as an explicit subcommand
     so the Espanso match files and docs (``prompt-workflow improve ...``) resolve."""
+    # Espanso runs the CLI as a `type: script` var, which fails on any stderr output, so a
+    # library warning must not turn a good rewrite into Espanso's generic error.
+    warnings.simplefilter("ignore")
     # A piped stdout uses the ANSI code page on Windows, which lacks many letters (Czech ř,
     # Vietnamese ố): printing such a rewrite would crash into a blank expansion.
     for stream in (sys.stdin, sys.stdout):

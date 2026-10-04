@@ -112,21 +112,25 @@ espanso-prompt-rewriter/
 
 ### Add a trigger
 
-Add a match to `espanso/match/prompts-llm.yml`. Shell commands start with the quoted
-`__PROMPT_WORKFLOW__` placeholder, which the install scripts replace with the absolute CLI path.
-Quote nothing else: `cmd.exe` mangles a command line holding more than one quoted part.
+Add a match to `espanso/match/prompts-llm.yml`. Call the CLI from a `type: script` var whose
+`args` list starts with the `__PROMPT_WORKFLOW__` placeholder, which the install scripts replace
+with the absolute CLI path. Espanso runs it without a shell and passes each item as one
+argument, so write every item as a quoted string and never use a `type: shell` var: shells
+quote differently on each OS (Espanso uses PowerShell on Windows).
 
 ```yaml
 - trigger: "-ireg-"
   replace: "{{output}}"
   vars:
     - name: output
-      type: shell
+      type: script
       params:
-        cmd: "\"__PROMPT_WORKFLOW__\" improve --provider ollama --profile regulation --source clipboard"
+        args: ["__PROMPT_WORKFLOW__", "improve", "--provider", "ollama", "--profile", "regulation", "--source", "clipboard"]
 ```
 
-`tests/test_yaml.py` checks the placeholder and quoting, and that the profile and provider exist.
+`tests/test_yaml.py` checks the var type and placeholder, runs each call once as a subprocess
+(exit 0 and empty stderr, which a script var needs), and checks that the profile and provider
+exist.
 
 ### Add a setting
 

@@ -7,9 +7,9 @@ matches:
   - trigger: "-p-"
     vars:
       - name: persona
-        type: shell
+        type: script
         params:
-          cmd: "\"__PROMPT_WORKFLOW__\" persona"
+          args: ["__PROMPT_WORKFLOW__", "persona"]
     replace: |
       <CONTEXT>
       {{persona}}

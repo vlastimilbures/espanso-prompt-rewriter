@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Fixed
+- The triggers now call the CLI from Espanso `type: script` vars, which start it directly with
+  no shell. On Windows, Espanso runs `type: shell` vars through PowerShell, which rejects a
+  command line that starts with a quoted path, so every CLI trigger failed there. Re-run the
+  installer to redeploy the match files.
+- The CLI ignores Python warnings, since a script var treats any stderr output as a failure.
+
 ## 0.12.0
 
 ### Changed

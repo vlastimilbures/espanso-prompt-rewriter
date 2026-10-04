@@ -39,10 +39,11 @@ if (-not (Test-Path $Cli)) {
 }
 # Espanso YAML uses forward slashes; normalize for safety inside quotes.
 $CliEscaped = $Cli -replace '\\', '/'
-# The path goes inside a double-quoted YAML string that cmd.exe runs; refuse characters
-# either would interpret there, rather than try to escape them.
+# The path goes inside a double-quoted YAML string (args[0] of a script var, run without a
+# shell); refuse characters YAML or Espanso (%HOME%-style tokens) would interpret there,
+# and the shell metacharacters as well, rather than try to escape them.
 if ($CliEscaped -match '["%^&|<>]') {
-    Write-Error "CLI path contains a character cmd.exe or YAML would interpret: $Cli"
+    Write-Error "CLI path contains a character YAML, Espanso or a shell would interpret: $Cli"
     exit 1
 }
 Write-Host "Using CLI at: $Cli"

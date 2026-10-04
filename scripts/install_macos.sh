@@ -32,11 +32,12 @@ if [ ! -x "$cli_path" ]; then
   echo "Could not locate prompt-workflow binary. Check 'uv tool install' output." >&2
   exit 1
 fi
-# The path goes inside a double-quoted YAML string that the shell runs; refuse characters
-# the shell or YAML would interpret there, rather than try to escape them.
+# The path goes inside a double-quoted YAML string (args[0] of a script var); refuse
+# characters YAML or Espanso would interpret there (Espanso expands %HOME%-style tokens in
+# script args), rather than try to escape them.
 case "$cli_path" in
-  *[\"\$\`\\]*)
-    echo "CLI path contains a quote, \$, backtick or backslash: $cli_path" >&2
+  *[\"\$\`\\%]*)
+    echo "CLI path contains a quote, \$, backtick, backslash or %: $cli_path" >&2
     exit 1
     ;;
 esac

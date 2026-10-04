@@ -1,8 +1,11 @@
-# The quoted CLI placeholder in each cmd below is replaced with the absolute CLI path by
-# the install scripts, because GUI-launched Espanso does not inherit shell PATH. It is
-# quoted so a path with spaces works; keep every other argument unquoted, since cmd.exe
-# mangles a command line that starts with a quote and holds more than one quoted part.
-# The CLI finds .env on its own (the repo checkout, or PROMPT_WORKFLOW_ENV), so no `cd`.
+# Each CLI call below is a `type: script` var: Espanso starts the program in args[0] directly,
+# with no shell, and passes every other list item to it as one argument, verbatim. So there
+# are no quoting rules (cmd.exe, PowerShell and sh all differ), and a form value cannot
+# become shell syntax. Keep every item a quoted string: Espanso drops non-string items.
+# The install scripts replace the CLI placeholder with the absolute CLI path, because
+# GUI-launched Espanso does not inherit shell PATH. A script var fails on any stderr output,
+# so the CLI keeps stderr empty. The CLI finds .env on its own (the repo checkout, or
+# PROMPT_WORKFLOW_ENV), so no `cd`.
 matches:
   # Rewrites the clipboard draft into the golden template (see prompts-template.yml).
   # This is the live cloud trigger: it runs on OpenRouter, so the clipboard
@@ -13,9 +16,9 @@ matches:
     replace: "{{output}}"
     vars:
       - name: output
-        type: shell
+        type: script
         params:
-          cmd: "\"__PROMPT_WORKFLOW__\" improve --provider openrouter --profile default --source clipboard"
+          args: ["__PROMPT_WORKFLOW__", "improve", "--provider", "openrouter", "--profile", "default", "--source", "clipboard"]
 
   # Same rewrite on the pro tier: a reasoning model (OPENROUTER_PRO_MODEL) for hard,
   # multi-part drafts. Slower (~5-8 s) but more rigorous. Same cloud caveats as above.
@@ -23,15 +26,15 @@ matches:
     replace: "{{output}}"
     vars:
       - name: output
-        type: shell
+        type: script
         params:
-          cmd: "\"__PROMPT_WORKFLOW__\" improve --provider openrouter --profile default --tier pro --source clipboard"
+          args: ["__PROMPT_WORKFLOW__", "improve", "--provider", "openrouter", "--profile", "default", "--tier", "pro", "--source", "clipboard"]
 
   # Same rewrite, but a popup picks the model and its settings for this one call.
   # Built on the pro tier, so "default" in each list means the OPENROUTER_PRO_* setting.
   # Each model carries its OpenRouter endpoint pin as model@endpoint (@auto = OpenRouter's
   # own routing), since one pin only serves one vendor's models. Every field is a fixed
-  # choice, never free text, which is what makes {{form1.*}} safe to put unquoted in cmd.
+  # choice, never free text, and each one reaches the CLI as a single argument.
   # Many reasoning models count thinking tokens against the max tokens cap, so pair high
   # effort with 8000+ or the rewrite can come back cut short. Same cloud caveats as above.
   - trigger: "-if-"
@@ -67,25 +70,25 @@ matches:
               values: ["default", "30", "60", "120", "180"]
               default: "default"
       - name: output
-        type: shell
+        type: script
         params:
-          cmd: "\"__PROMPT_WORKFLOW__\" improve --provider openrouter --profile default --tier pro --source clipboard --model {{form1.model}} --effort {{form1.effort}} --max-tokens {{form1.maxtokens}} --timeout {{form1.timeout}}"
+          args: ["__PROMPT_WORKFLOW__", "improve", "--provider", "openrouter", "--profile", "default", "--tier", "pro", "--source", "clipboard", "--model", "{{form1.model}}", "--effort", "{{form1.effort}}", "--max-tokens", "{{form1.maxtokens}}", "--timeout", "{{form1.timeout}}"]
 
   - trigger: "-il-"
     replace: "{{output}}"
     vars:
       - name: output
-        type: shell
+        type: script
         params:
-          cmd: "\"__PROMPT_WORKFLOW__\" improve --provider ollama --profile general --source clipboard"
+          args: ["__PROMPT_WORKFLOW__", "improve", "--provider", "ollama", "--profile", "general", "--source", "clipboard"]
 
   - trigger: "-ilm-"
     replace: "{{output}}"
     vars:
       - name: output
-        type: shell
+        type: script
         params:
-          cmd: "\"__PROMPT_WORKFLOW__\" improve --provider lmstudio --profile general --source clipboard"
+          args: ["__PROMPT_WORKFLOW__", "improve", "--provider", "lmstudio", "--profile", "general", "--source", "clipboard"]
 
   # Claude cloud trigger, disabled by default. It sends clipboard content
   # to the Anthropic API. Uncomment only if company policy permits, and note
@@ -94,6 +97,6 @@ matches:
   #   replace: "{{output}}"
   #   vars:
   #     - name: output
-  #       type: shell
+  #       type: script
   #       params:
-  #         cmd: "\"__PROMPT_WORKFLOW__\" improve --provider anthropic --profile general --source clipboard"
+  #         args: ["__PROMPT_WORKFLOW__", "improve", "--provider", "anthropic", "--profile", "general", "--source", "clipboard"]

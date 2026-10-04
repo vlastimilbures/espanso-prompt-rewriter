@@ -73,9 +73,13 @@ return through `_gate()`.
 
 ### Espanso integration contract
 
-- `espanso/match/prompts-llm.yml` triggers call `"__PROMPT_WORKFLOW__" improve ...`; the install
-  scripts substitute `__PROMPT_WORKFLOW__` with the resolved absolute path to the installed CLI.
-  Only that path is quoted (`cmd.exe` mangles more than one quoted part); there is no `cd`.
+- `espanso/match/prompts-llm.yml` triggers call the CLI from `type: script` vars,
+  `args: ["__PROMPT_WORKFLOW__", "improve", ...]`; the install scripts substitute
+  `__PROMPT_WORKFLOW__` with the resolved absolute path to the installed CLI. Espanso starts
+  `args[0]` with no shell (its default shell on Windows is PowerShell, which cannot run a quoted
+  path followed by arguments), so there are no quoting rules; there is no `cd`. A script var
+  fails on any stderr output, so the CLI ignores warnings (`cli._main`) and must never write to
+  stderr; `tests/test_yaml.py` runs every call as a subprocess to check it.
   The installers deploy `espanso/config/` only with `--with-config` / `-WithConfig`.
 - `espanso/match/prompts-core.yml` holds static, non-LLM form-based snippets (no CLI call).
 - `-i-` (OpenRouter, `default` profile) is the live cloud trigger, and `-ip-` is
