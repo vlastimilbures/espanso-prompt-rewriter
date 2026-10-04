@@ -219,10 +219,9 @@ class Settings:
     openrouter_pro_provider: str = _env("OPENROUTER_PRO_PROVIDER", "openai")
     openrouter_pro_reasoning_effort: str = _env("OPENROUTER_PRO_REASONING_EFFORT", "low")
     pro_timeout: float = _env("PROMPT_PRO_TIMEOUT_SECONDS", "60", _positive_float)
-    # Profile for the pro tier; empty uses PROMPT_PROFILE. The two tiers' models react to
-    # the same prompt wording differently: `default-pro` is `default` without the clause that
-    # flash-lite needs and gpt-6-luna over-applies (see tests/test_prompts.py).
-    pro_profile: str = _env("PROMPT_PRO_PROFILE", "default-pro")
+    # Profile for the pro tier; empty (the default) uses PROMPT_PROFILE, so both tiers send
+    # the same prompt. An escape hatch for a prompt tuned to OPENROUTER_PRO_MODEL.
+    pro_profile: str = _env("PROMPT_PRO_PROFILE", "")
     lmstudio_base_url: str = _env("LMSTUDIO_BASE_URL", "http://localhost:1234/v1")
     lmstudio_model: str = _env("LMSTUDIO_MODEL", "local-model")
     anthropic_base_url: str = _env("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
@@ -269,9 +268,9 @@ class Settings:
         max_tokens: str | None = None,
         timeout: str | None = None,
     ) -> Settings:
-        """Settings for one CLI call: for_tier(), then the per-call overrides. The pro
-        profile is tuned for OPENROUTER_PRO_MODEL, so a pro call that runs another model
-        (one picked in the -if- popup) uses PROMPT_PROFILE instead."""
+        """Settings for one CLI call: for_tier(), then the per-call overrides. A set
+        PROMPT_PRO_PROFILE is meant for OPENROUTER_PRO_MODEL, so a pro call that runs another
+        model (one picked in the -if- popup) uses PROMPT_PROFILE instead."""
         cfg = self.for_tier(tier).with_overrides(
             model=model, effort=effort, max_tokens=max_tokens, timeout=timeout
         )

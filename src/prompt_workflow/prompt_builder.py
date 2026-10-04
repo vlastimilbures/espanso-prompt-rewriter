@@ -18,6 +18,10 @@ def _load_profiles() -> dict[str, str]:
 
 PROFILES: dict[str, str] = _load_profiles()
 
+# Retired profile names that still resolve, so an existing .env or --profile keeps working.
+# `default-pro` was `default` minus one clause; one prompt now serves both tiers (#44).
+ALIASES = {"default-pro": "default"}
+
 # Replaced in a profile by the rule for how CONTEXT opens (see PROMPT_PERSONA).
 PERSONA_TOKEN = "{{PERSONA_RULE}}"  # noqa: S105 - a template placeholder, not a secret
 
@@ -41,7 +45,7 @@ def render(template: str, persona: str = "") -> str:
 
 def system_prompt(profile: str, persona: str = "") -> str:
     try:
-        template = PROFILES[profile]
+        template = PROFILES[profile if profile in PROFILES else ALIASES.get(profile, profile)]
     except KeyError as exc:
         known = ", ".join(PROFILES)
         raise ValueError(f"Unknown profile: {safe_repr(profile)}. Choose from: {known}") from exc

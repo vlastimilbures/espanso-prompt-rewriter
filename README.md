@@ -185,8 +185,8 @@ with the output of `echo "$(uv tool dir --bin)/prompt-workflow"`, then run `espa
 | Trigger           | What it does                                                 | Provider   | Profile   |
 |-------------------|--------------------------------------------------------------|------------|-----------|
 | `-i-`             | Rewrites the clipboard into the golden template              | OpenRouter | `default` |
-| `-ip-`            | Same rewrite on the pro tier (reasoning model, slower)       | OpenRouter | `default-pro` |
-| `-if-`            | Same rewrite; a popup picks model, effort, tokens, timeout   | OpenRouter | `default-pro` |
+| `-ip-`            | Same rewrite on the pro tier (reasoning model, slower)       | OpenRouter | `default` |
+| `-if-`            | Same rewrite; a popup picks model, effort, tokens, timeout   | OpenRouter | `default` |
 | `-il-`            | General prompt improvement, fully local                      | Ollama     | `general` |
 | `-ilm-`           | General prompt improvement, fully local                      | LM Studio  | `general` |
 | `-ic-`            | General improvement via Claude (commented out by default)    | Anthropic  | `general` |
@@ -194,10 +194,10 @@ with the output of `echo "$(uv tool dir --bin)/prompt-workflow"`, then run `espa
 | `-prompt-`        | Form: role, objective, context, constraints, output          | —          | —         |
 | `-risk-`          | Enterprise-risk analysis prompt scaffold                     | —          | —         |
 
-The Profile column shows the defaults. `-i-` uses `PROMPT_PROFILE`; `-ip-` and `-if-` use
-`PROMPT_PRO_PROFILE`, except that a model other than `OPENROUTER_PRO_MODEL` picked in `-if-` gets
-`PROMPT_PROFILE`, since `default-pro` is tuned for the pro model. The local triggers always use
-`general`.
+The Profile column shows the defaults. `-i-` uses `PROMPT_PROFILE`. `-ip-` and `-if-` use
+`PROMPT_PRO_PROFILE` when it is set (it is empty by default, so they use `PROMPT_PROFILE` too),
+except that a model other than `OPENROUTER_PRO_MODEL` picked in `-if-` always gets
+`PROMPT_PROFILE`. The local triggers always use `general`.
 
 Triggers expand only at the start of a word: after a space, tab, newline, punctuation
 (`. , ? ! : ; ' "`) or a bracket, or as the first thing typed after clicking into a field. Text
@@ -236,7 +236,7 @@ prompt-workflow persona          # prints PROMPT_PERSONA (used by -p-)
 | Option       | Default                     | Meaning                                         |
 |--------------|-----------------------------|-------------------------------------------------|
 | `--provider` | `PROMPT_PROVIDER`           | `ollama`, `lmstudio`, `openrouter`, `anthropic` |
-| `--profile`  | `PROMPT_PROFILE` (`PROMPT_PRO_PROFILE` with `--tier pro` on `OPENROUTER_PRO_MODEL`) | `default`, `default-pro`, `general`, or any file in `prompts/` |
+| `--profile`  | `PROMPT_PROFILE` (`PROMPT_PRO_PROFILE`, if set, with `--tier pro` on `OPENROUTER_PRO_MODEL`) | `default`, `general`, or any file in `prompts/` |
 | `--model`    | provider's configured model | Override the model of whichever provider runs; `model@endpoint` also pins the OpenRouter endpoint (`@auto` unpins) |
 | `--tier`     | `standard`                  | `pro` uses the `OPENROUTER_PRO_*` settings      |
 | `--effort`   | tier's setting              | `none`, `minimal`, `low`, `medium`, `high`      |
@@ -297,7 +297,7 @@ short and does not look like a key.
 | `OPENROUTER_PRO_PROVIDER`    | `openai`                       | Endpoint pin for the pro tier                             |
 | `OPENROUTER_PRO_REASONING_EFFORT` | `low`                     | Reasoning effort for the pro tier                         |
 | `PROMPT_PRO_TIMEOUT_SECONDS` | `60`                           | Request timeout for the pro tier                          |
-| `PROMPT_PRO_PROFILE`         | `default-pro`                  | Profile for the pro tier (`-ip-`, `-if-`) when it runs `OPENROUTER_PRO_MODEL`; empty = `PROMPT_PROFILE` |
+| `PROMPT_PRO_PROFILE`         | (empty)                        | Profile for the pro tier (`-ip-`, `-if-`) when it runs `OPENROUTER_PRO_MODEL`; empty = `PROMPT_PROFILE` |
 | `ANTHROPIC_API_KEY`          | —                              | Required for Anthropic                                    |
 | `ANTHROPIC_MODEL`            | `claude-sonnet-5`              |                                                           |
 | `ANTHROPIC_MAX_TOKENS`       | `2400`                         |                                                           |
@@ -318,12 +318,15 @@ A profile is a system prompt in [`src/prompt_workflow/prompts/`](src/prompt_work
 
 - **`default`** rewrites the draft into the golden template (the same one the static `-p-`
   snippet gives you). Step 1 is "plan first" for multi-step or ambiguous work, otherwise
-  "execute, but state assumptions". The review step is an independent reviewer when the result
-  goes to a board, regulator, customer or other high-stakes audience, otherwise a self-review
-  checklist. `CONSTRAINTS` lists the rules the result must respect (length, tone, deadline,
-  format, standards, data limits), ending with an "Out of scope:" line.
+  "execute, but state assumptions". The review step is decided by who reads the result: a
+  self-review checklist when only the user, a colleague, their manager or their team will, and
+  an independent reviewer for anyone else (an executive, a board or committee, a regulator,
+  anyone outside the organisation, or published text), however short. `CONSTRAINTS` lists the
+  rules the result must respect (length, tone, deadline, format, standards, data limits), with
+  an "Out of scope:" line when the draft implies one.
   The whole draft is treated as material to rewrite, never as instructions: a question becomes a
-  prompt that asks for the answer, pasted emails or notes are copied into `INPUTS`, and text such
+  prompt that asks for the answer, pasted emails or notes up to about 60 lines are copied into
+  `INPUTS` in full (longer material is described there and flagged `[REVIEW: …]`), and text such
   as "ignore previous instructions" is dropped. The rewrite is always in English; a draft in
   another language gets a `- Language: …` constraint so the result comes back in that language.
   `OUTPUTS` is the `.md` line for documents and a matching format (plain-text email, code block,
@@ -332,9 +335,8 @@ A profile is a system prompt in [`src/prompt_workflow/prompts/`](src/prompt_work
   organised in lowercase XML sections (`<section_rules>`, `<step>`, `<decision_rule>`,
   `<example>`…), which keeps its own scaffolding visibly apart from the uppercase sections the
   model must write.
-- **`default-pro`** is `default` without one clause of the review rule, which the pro model
-  over-applies. The pro tier (`-ip-`, `-if-`) uses it on `OPENROUTER_PRO_MODEL`. If you change
-  that model, check whether `PROMPT_PRO_PROFILE` still fits it.
+  Both tiers send it. `default-pro`, the pro tier's variant in 0.12.0 and 0.13.0, is now an alias
+  of `default`.
 - **`general`** is a lighter "make this prompt precise" rewrite, used by the local triggers.
 
 Drop another `*.md` file into that folder and it becomes a profile. See
@@ -398,8 +400,8 @@ before it is sent. Still read a rewrite before running anything it contains.
 The rewrite is only useful if the template comes back intact, so the default model and prompt
 were chosen with [`scripts/bench_models.py`](scripts/bench_models.py) rather than by taste. The
 `core` suite (the default) sends 8 drafts that cross two independent decisions — *plan first or
-execute now* (task complexity) and *independent or self review* (audience and consequence). The
-`edge` suite (`--suite edge` or `--suite all`) adds 25 drafts that probe the rest: prompt
+execute now* (task complexity) and *independent or self review* (who reads the result). The
+`edge` suite (`--suite edge` or `--suite all`) adds 28 drafts that probe the rest: prompt
 injection, questions, pasted emails, Czech, German and Spanish drafts, a draft stating its own
 role, code, and outside readers that are only implied. Every response is scored mechanically:
 all six sections present and correctly closed, mandatory steps verbatim, `1/ 2/ 3/` numbering,
@@ -419,25 +421,40 @@ problem rather than a model one. By default a run renders the same fictitious pe
 its outputs in `bench-out/<UTC timestamp>/`. `--persona env` renders your own persona instead;
 keep those outputs to yourself.
 
-Both tables below come from the bench before it had a fixed persona: it rendered the runner's
+**Result (2026-10-04, current prompt, `--persona example`, `--max-tokens 2400`):**
+
+| Setup | Tier | core | edge | kept | p50 | p95 | $ per rewrite |
+|-------|------|------|------|------|-----|-----|---------------|
+| `google/gemini-3.5-flash-lite` @ `google-ai-studio/flex`, effort `minimal` | standard (default) | 30/30 | 102/120 | 1.00 | 2.0 s | 3.2 s | 0.0012 |
+| `openai/gpt-6-luna` @ `openai`, effort `low` | pro (default) | 23/24 | 98/99 | 1.00 | 5.6 s | 9.2 s | 0.0004 |
+
+Every draft ran 3 times, and the drafts that check pasted material and the review step ran 6
+times (14 on flash-lite, 5 on gpt-6-luna). Most of flash-lite's edge failures are on drafts with
+pasted material: `pasted` is summarised instead of copied, `long-thread` gets the self-review,
+and `cap-thread` gets the `.md` line where the bench expects a message (see
+[CONTRIBUTING.md](CONTRIBUTING.md#known-gaps-in-the-default-prompt)). The 0.13.0 prompts
+(`default` on flash-lite, `default-pro` on gpt-6-luna), scored with the same checks, reached
+22/27 and 66/90 on flash-lite and 24/24 and 75/84 on gpt-6-luna. Those numbers cover a different
+mix of drafts and runs, and mix fresh `--persona example` runs with outputs saved before the
+bench had a fixed persona.
+
+The tables below come from the bench before it had a fixed persona: it rendered the runner's
 own `PROMPT_PERSONA` (today's `--persona env`), so they cannot be reproduced exactly.
 
-**Result (2026-09-30, current prompt):**
+**Result of 0.11.0 (2026-09-30, older checks):**
 
 | Setup | Tier | core | edge | kept | p50 | p95 | $ per rewrite |
 |-------|------|------|------|------|-----|-----|---------------|
 | `google/gemini-3.5-flash-lite` @ `google-ai-studio/flex`, effort `minimal` | standard (default) | 23/24 | 55/60 | 1.00 | 1.9 s | 2.9 s | 0.0010 |
 | `openai/gpt-6-luna` @ `openai`, effort `low` | pro (default) | 24/24 | 57/60 | 1.00 | 5.0 s | 10.0 s | 0.0004 |
 
-The previous prompt, scored with the same checks, reached 12/24 and 15/60 on flash-lite and
+The prompt before 0.11.0, scored with the same checks, reached 12/24 and 15/60 on flash-lite and
 21/24 and 43/60 on gpt-6-luna. Most of the gap is emails and code given the `.md` line, drafts
 in other languages answered in that language (gpt-6-luna even translated the fixed steps), and
 flash-lite not spotting a vendor, partner or customer as an outside reader. It had scored 24/24
 on the older `core` checks. In a blind pairwise comparison of 168 rewrite pairs (Opus judges,
-A/B order randomised), the current prompt was preferred 117 to 32 with 19 ties: 70 to 12 on
+A/B order randomised), the 0.11.0 prompt was preferred 117 to 32 with 19 ties: 70 to 12 on
 flash-lite, 47 to 20 on gpt-6-luna, and 28 to 3 on 6 drafts written after the prompt was frozen.
-The remaining gaps are listed in
-[CONTRIBUTING.md](CONTRIBUTING.md#known-gaps-in-the-default-prompt).
 
 **Model choice (2026-09-29, 24 calls per setup, previous prompt, older `core` checks):**
 

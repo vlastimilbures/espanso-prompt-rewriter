@@ -73,7 +73,10 @@ def improve(
     provider: str | None = typer.Option(None, help=", ".join(PROVIDER_NAMES)),
     profile: str | None = typer.Option(
         None,
-        help="Defaults to PROMPT_PROFILE (PROMPT_PRO_PROFILE with --tier pro on the pro model)",
+        help=(
+            "Defaults to PROMPT_PROFILE (PROMPT_PRO_PROFILE, if set, with --tier pro on the pro "
+            "model)"
+        ),
     ),
     model: str | None = typer.Option(
         None, help="Override the model for this call; slug@endpoint also pins the endpoint"

@@ -79,8 +79,7 @@ espanso-prompt-rewriter/
 │   ├── redaction.py              the gate's sensitive-content patterns
 │   ├── prompt_builder.py         loads profiles, fills in the persona rule
 │   ├── prompts/
-│   │   ├── default.md            golden-template rewrite (-i-)
-│   │   ├── default-pro.md        default minus one review clause (-ip-, -if-)
+│   │   ├── default.md            golden-template rewrite (-i-, -ip-, -if-)
 │   │   └── general.md            lighter "make this precise" rewrite (local triggers)
 │   └── providers/
 │       ├── base.py               HTTP call, error mapping, <think> stripping
@@ -203,64 +202,82 @@ party"). Check the per-draft table in the report, not only the total.
 
 ### Known gaps in the default prompt
 
-The `default` profile (standard tier, flash-lite) and `default-pro` (pro tier, gpt-6-luna) differ
-by one review-rule clause; `tests/test_prompts.py` keeps them otherwise identical, so edit both
-together. The 2026-10-02 rework (see `docs/prompt-candidates/PLAN.md`) closed the old gaps 1–4
-and 7: fixed wordings are copied word for word, document steps name their sections, method
-choices are stated as assumptions, a message to a named person at another organisation gets the
-independent review, and the self-review lines match the format in `OUTPUTS`. Still open:
+Both tiers send the `default` profile (flash-lite on the standard tier, gpt-6-luna on the pro
+tier); `default-pro` is an alias of it. The 2026-10-02 rework (see
+`docs/prompt-candidates/PLAN.md`) closed the old gaps 1–4 and 7: fixed wordings are copied word
+for word, document steps name their sections, method choices are stated as assumptions, a
+message to a named person at another organisation gets the independent review, and the
+self-review lines match the format in `OUTPUTS`. The gaps it left, and their state after the
+2026-10 round (its bench runs use `--persona example`):
 
-1. **Published text on flash-lite.** "short answer for our help-center FAQ…" gets the
-   self-review in about half the runs (a fresh FAQ wording: 1 of 5; the previous prompt 5 of
-   5). The word "short" seems to pull it towards (b). Adding "and 'short'" to the length rule
-   gave mixed results over 3 runs and was not shipped.
-2. **Self-review drafts on gpt-6-luna.** A script or query "for me" (`outliers`, `sql`) and the
-   team `memo` still get the independent review in 1–2 runs of 3, as with the previous prompt.
+1. **Published text on flash-lite** (closed 2026-10). The review rule now names its readers
+   (only the user, a colleague, their manager or their team take the self-review; everyone
+   else, including the CEO and published text, takes the independent review), and says that
+   "quick", "short" and "brief" never decide it. Over 6 runs each, flash-lite gives `faq` and
+   `quick-ceo` the independent review 6/6 (the 0.13.0 prompt: 0/6 and 1/6), and `light`,
+   `teams-jana`, `memo`, `slack`, `sql`, `outliers` and `code` the self-review 6/6.
+2. **Self-review drafts on gpt-6-luna** (mostly closed). With a fixed fictitious persona,
+   `outliers`, `sql` and `memo` get the self-review in every run. Over 123 calls, gpt-6-luna chose
+   the wrong review branch once (`light`, 1 of 3).
 3. **Half-answers in work steps on flash-lite.** For "what's the difference between IFRS 9
    stage 2 and stage 3", flash-lite writes the answer into the steps, sometimes wrongly. Naming
    the aspects to cover is welcome; stating facts is not. Watch it on `question`.
-4. **Injection meta-commentary on flash-lite.** Instead of dropping "ignore previous
-   instructions", flash-lite sometimes writes a CONTEXT about "an instruction that attempts to
-   override my role".
-5. **Undecided review rules.** Two edge drafts stay unscored on the review branch: a one-page PRD
-   for a fintech feature (money or compliance consequence?) and an incident summary for the
-   user's manager. Decide the rule, then score them.
-6. **Persona bleed.** With `PROMPT_PERSONA` set, near-empty drafts pick up the persona's domain:
-   "help with the report" became a report on "risk management metrics". A design trade-off,
-   not a bug.
+4. **Injection meta-commentary on flash-lite** (not reproduced). Instead of dropping "ignore
+   previous instructions", flash-lite sometimes wrote a CONTEXT about "an instruction that
+   attempts to override my role". With a fixed fictitious persona it did not happen in 9 runs of
+   `injection` and `pasted-injection` (2026-10). Watch it if a persona is set.
+5. **Unscored review branches.** Two edge drafts are not scored on the review branch: a one-page
+   PRD for a fintech feature and `outage`, an incident summary for the user's manager. The
+   2026-10 rule decides by reader, so `outage` should take the self-review; who reads a PRD is
+   still open. Score both once that is settled.
+6. **Persona bleed** (depends on the persona). With `PROMPT_PERSONA` set, near-empty drafts
+   can pick up the persona's domain: "help with the report" became a report on "risk management
+   metrics". It did not reproduce with a neutral persona (`vague` and a near-empty draft, 12
+   gpt-6-luna and 3 flash-lite runs), so it likely depends on the persona's domain. A design
+   trade-off, not a bug; check it with `--persona env` on your own machine.
 7. **Draft delimiting in the CLI.** Sending the draft wrapped in `<draft>…</draft>` gave a
    small, consistently positive but not significant gain once the prompt already said the
    whole message is the draft. If adopted, escape `</draft>` inside drafts.
-8. **Prompt length.** The rework made the system prompt about 40% longer (about 3,900 input
-   tokens per call); cost per call rose about 15% on flash-lite and is flat on gpt-6-luna.
-9. **The bench runs `default` on every model.** Without `--system-prompt-file`,
-   `scripts/bench_models.py` scores gpt-6-luna on `default`, not `default-pro`; pass
-   `--system-prompt-file src/prompt_workflow/prompts/default-pro.md` for the pro model.
-10. **Pasted material dropped (#42).** A pasted thread over about 20 lines is described in
-    `INPUTS` instead of copied, and flash-lite often summarises even a short pasted email. The
-    bench's material check fails `long-thread` on every model and `pasted` on flash-lite.
+8. **Prompt length** (closed 2026-10). The 2026-09 and 2026-10-02 reworks made the system
+   prompt about 40% longer (about 3,900 input tokens per call). Against the shorter prompt, p50
+   latency stayed at 2.1 s on flash-lite and fell from 7.6 s to 6.6 s on gpt-6-luna, and the cost
+   per 1,000 calls rose from $0.96 to $1.13 on flash-lite and from $0.34 to $0.35 on gpt-6-luna.
+   Length does not drive latency; cost rose about 18% on flash-lite and is flat on gpt-6-luna.
+9. **The bench runs `default` on every model** (closed 2026-10). Both tiers now send `default`,
+   so a plain `--suite all` run scores what ships; `tests/test_bench.py` checks that the bench's
+   profile is the one the CLI uses.
+10. **Pasted material on flash-lite (#42).** The prompt now copies pasted material up to about
+    60 lines in full. gpt-6-luna copies it in every run (`pasted`, `outage`, `pasted-injection`,
+    the 35-line `long-thread` and the 57-line `cap-thread`, 6/6 each). flash-lite copies
+    `outage`, `pasted-injection` (6/6), `long-thread` and `cap-thread` (5/6), but still
+    summarises the short email in `pasted` (5 of 6 runs). It also gives `long-thread` ("summarise
+    this thread for me and draft my reply to Tomasz") the self-review in 6 of 6 runs, and
+    `cap-thread` (a 5-bullet summary for the user's manager) the `.md` line in 6 of 6, where the
+    bench expects a message. The 0.13.0 prompt did the same (`long-thread` 2 of 3, `cap-thread` 3
+    of 3). The `OUTPUTS` rule treats a summary as a document, so the `cap-thread` failure may be
+    the bench's expectation rather than the model's.
 
 ### Next steps for the default prompt
 
-Limits of the 2026-10-02 evaluation, and what to do next:
+Limits of the 2026-10-02 and 2026-10 evaluations, and what to do next:
 
-1. **Re-judge the shipped prompts blind on new drafts.** The final `default` and `default-pro`
-   were checked mechanically only; the blind ranking was on I2. The revisions were tuned on the
+1. **Re-judge the shipped prompt blind on new drafts.** The 2026-10-02 `default` and
+   `default-pro`, and the merged `default` of 2026-10, were checked mechanically only; the blind
+   ranking was on I2. The revisions were tuned on the
    same 32 drafts, and `landlord` is no longer held out. Write 6–8 new drafts (outside emails,
    published text, internal memos, "for me" scripts) before changing anything else, and judge
    the current prompts against the previous release on both tiers.
 2. **Use more runs per draft.** At 3 runs, a single draft flips between 0/3 and 2/3 from noise
    alone (seen on `big-personal` and `memo`). Re-check any single-draft change at 6 runs or more
    before acting on it.
-3. **Fix gap 1 (published FAQ text on flash-lite)** with a positive trigger that does not
-   depend on the word "short", and verify it against `quick-ceo` and `memo`, which moved when
-   it was last tried.
-4. **Let the bench follow the tier profiles.** Make `scripts/bench_models.py` pick
-   `default-pro` for the pro model by default (gap 9), so a plain `--suite all` run scores what
-   ships.
-5. **Merge the two profiles again if possible.** One prompt per tier doubles the bench and
-   review work. Retry a single wording that serves both models once the review rule has a more
-   robust form (for example the yes/no outside-reader question, which failed on flash-lite in
-   round 1 when combined with the long rule list).
+3. **Fix gap 1 (published FAQ text on flash-lite).** Done in 2026-10: the review rule names
+   its readers, and `quick-ceo` and `memo` held at 6/6.
+4. **Fix gap 10 on flash-lite.** Find a wording that makes flash-lite copy a short pasted
+   email and give a reply to an outside sender the independent review when the draft also says
+   "for me". Check `pasted`, `long-thread` and `cap-thread` at 6 runs or more, and decide
+   whether a summary for the user's manager should get the `.md` line.
+5. **Keep one profile.** The profiles were merged in 2026-10 (gap 9). Before splitting them
+   again, show that no single wording serves both models: one prompt per tier doubles the bench
+   and review work.
 6. **Watch the prompt length.** The prompt is now about 3,900 input tokens; check latency on the
    pro tier (6–9 s) after any further additions.

@@ -48,8 +48,8 @@ Espanso does not inherit shell PATH):
   cwd, so a planted `.env` cannot redirect the base URL or enable the override. This matters
   because Espanso runs the CLI as a GUI-spawned subprocess without an inherited login-shell
   environment. `tests/conftest.py` points `PROMPT_WORKFLOW_ENV` at a temp file per test.
-- `prompt_builder.py` — `PROFILES` maps a profile name (`default`, `default-pro`, `general`) to a system
-  prompt used to instruct the rewrite. `render()` fills the `{{PERSONA_RULE}}` token from
+- `prompt_builder.py` — `PROFILES` maps a profile name (`default`, `general`) to a system
+  prompt used to instruct the rewrite; `ALIASES` keeps the retired `default-pro` resolving to `default`. `render()` fills the `{{PERSONA_RULE}}` token from
   `PROMPT_PERSONA` (also printed by the `persona` subcommand for the `-p-` snippet). `default` (the
   `PROMPT_PROFILE` fallback) rewrites the draft into the golden template kept in
   `espanso/match/prompts-template.yml` (`CONTEXT / GOAL / INSTRUCTIONS / CONSTRAINTS / INPUTS / OUTPUTS`),
@@ -62,10 +62,9 @@ Espanso does not inherit shell PATH):
   matched by `scripts/bench_models.py` and `tests/test_bench.py` (which also checks the `-p-`
   template in `prompts-template.yml`); change them together, and
   re-run the benchmark (`--suite all --system-prompt-file`) on both default models before
-  shipping a prompt change. `default-pro` (the pro tier's profile, via `PROMPT_PRO_PROFILE`) is
-  `default` minus one review-rule clause, enforced by `tests/test_prompts.py`; edit both, and
-  bench gpt-6-luna with `--system-prompt-file .../default-pro.md`. Open weaknesses are listed in CONTRIBUTING.md ("Known gaps in the
-  default prompt").
+  shipping a prompt change. Both tiers send `default` (`PROMPT_PRO_PROFILE` is empty by
+  default), so one prompt serves flash-lite and gpt-6-luna; the bench scores it on both. Open
+  weaknesses are listed in CONTRIBUTING.md ("Known gaps in the default prompt").
 
 ### Data-protection gate
 
@@ -96,7 +95,7 @@ overrides any `--provider` a trigger passes; `PROMPT_PROVIDER` only sets the bar
   word separator (space, punctuation, bracket, newline), never inside a word such as
   `a[n-i-1]`; `tests/test_yaml.py` enforces it.
 - `-i-` (OpenRouter, `PROMPT_PROFILE`) is the live cloud trigger, and `-ip-` is
-  the same rewrite with `--tier pro` (reasoning model, `PROMPT_PRO_PROFILE`). Only `-il-`,
+  the same rewrite with `--tier pro` (reasoning model, `PROMPT_PRO_PROFILE` if set). Only `-il-`,
   `-ilm-` and the commented `-ic-` pass `--profile general`; `tests/test_triggers.py` replays every trigger's real
   command and checks its provider, profile and tier. `-if-` puts an Espanso form
   (choice dropdowns) in front of the pro tier and passes the picks as `--model model@endpoint

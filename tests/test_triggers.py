@@ -37,8 +37,8 @@ COMMANDS = _improve_commands()
 # trigger -> (provider, profile, tier) with no profile settings in the environment.
 EXPECTED = {
     "-i-": ("openrouter", "default", "standard"),
-    "-ip-": ("openrouter", "default-pro", "pro"),
-    "-if-": ("openrouter", "default-pro", "pro"),
+    "-ip-": ("openrouter", "default", "pro"),
+    "-if-": ("openrouter", "default", "pro"),
     "-il-": ("ollama", "general", "standard"),
     "-ilm-": ("lmstudio", "general", "standard"),
 }
@@ -102,11 +102,11 @@ def test_trigger_request(stub_provider, trigger):
         assert cfg.timeout == base.timeout
 
 
-# -if- model choice -> profile. The pro profile follows the pro model: every other model
-# gets PROMPT_PROFILE.
+# -if- model choice -> profile with the shipped settings: one prompt for every model. A set
+# PROMPT_PRO_PROFILE applies to the pro model only (test_profile_settings_reach_triggers).
 IF_MODEL_PROFILES = {
-    "openai/gpt-6-luna@openai": "default-pro",
-    "openai/gpt-6-luna@auto": "default-pro",
+    "openai/gpt-6-luna@openai": "default",
+    "openai/gpt-6-luna@auto": "default",
     "google/gemini-3.8-flash@google-ai-studio": "default",
     "google/gemini-3.5-flash-lite@google-ai-studio/flex": "default",
 }
@@ -143,6 +143,13 @@ def test_if_model_choices_are_covered():
             {"model": "google/gemini-3.5-flash-lite@google-ai-studio/flex"},
             "general",
         ),
+        (
+            {"PROMPT_PRO_PROFILE": "general"},
+            "-if-",
+            {"model": "google/gemini-3.8-flash@google-ai-studio"},
+            "default",
+        ),
+        ({"PROMPT_PRO_PROFILE": "default-pro"}, "-ip-", {}, "default"),
         ({"PROMPT_PROFILE": "default-pro"}, "-il-", {}, "general"),
     ],
     ids=[
@@ -152,6 +159,8 @@ def test_if_model_choices_are_covered():
         "ip-empty-pro-profile-falls-back",
         "if-pro-profile",
         "if-other-model-profile",
+        "if-other-model-loses-pro-profile",
+        "ip-retired-default-pro",
         "il-keeps-general",
     ],
 )

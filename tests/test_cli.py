@@ -245,7 +245,7 @@ def test_improve_pro_tier(stub_provider):
     _, cfg = stub_provider.built[0]
     assert cfg.openrouter_model == cfg.openrouter_pro_model
     assert cfg.openrouter_reasoning_effort == cfg.openrouter_pro_reasoning_effort
-    assert stub_provider.calls[0]["system_prompt"] == system_prompt("default-pro")
+    assert stub_provider.calls[0]["system_prompt"] == system_prompt("default")
 
 
 # The -if- popup's options reach make_provider as settings: the model slug without its

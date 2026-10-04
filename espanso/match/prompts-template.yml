@@ -15,7 +15,7 @@ matches:
     replace: |
       <CONTEXT>
       {{persona}}
-      I want to [XXX]. [Constraints etc.]
+      I want to [XXX].
       </CONTEXT>
 
       <GOAL>

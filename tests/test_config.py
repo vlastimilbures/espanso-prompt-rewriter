@@ -56,9 +56,7 @@ def test_for_tier(monkeypatch):
     assert (pro.openrouter_model, pro.openrouter_provider) == ("x/pro", "openai")
     assert (pro.openrouter_reasoning_effort, pro.timeout) == ("low", 60.0)
     assert pro.persona == settings.persona
-    assert pro.profile == "default-pro"
-    monkeypatch.setenv("PROMPT_PRO_PROFILE", "")
-    assert Settings().for_tier("pro").profile == settings.profile  # empty: same profile
+    assert pro.profile == settings.profile == "default"  # empty by default: one prompt
     monkeypatch.setenv("PROMPT_PRO_PROFILE", "general")
     assert Settings().for_tier("pro").profile == "general"
     assert Settings().for_tier("standard").profile == settings.profile
@@ -74,8 +72,10 @@ def test_for_call(monkeypatch):
     assert settings.for_call("pro", model="default") == settings.for_tier("pro")
     assert settings.for_call("standard", model="x/m").profile == "general"
     assert settings.for_call("pro") == settings.for_tier("pro")
+    monkeypatch.setenv("PROMPT_PRO_PROFILE", "default")
+    settings = Settings()
     assert settings.for_call("pro", model=f"{settings.openrouter_pro_model}@auto").profile == (
-        "default-pro"
+        "default"
     )
     other = settings.for_call("pro", model="x/m@y", effort="high")
     assert (other.openrouter_model, other.openrouter_provider) == ("x/m", "y")

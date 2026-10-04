@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+Upgrading: re-run the installer (`./scripts/install_macos.sh` or
+`.\scripts\install_windows.ps1`) to deploy the `-p-` template fix. If your `.env` sets
+`PROMPT_PRO_PROFILE=default-pro`, remove the line or leave it empty: both tiers now send
+`default`, and `default-pro` only still works as an alias. If you set `PROMPT_PROFILE`, `-ip-`
+and `-if-` now use it too, unless `PROMPT_PRO_PROFILE` is set.
+
 ### Added
 - The bench checks that sentences from the start, middle and end of pasted material reach
   `INPUTS` word for word (`pasted material not copied`) on `pasted`, `outage`,
@@ -14,6 +20,8 @@ All notable changes to this project are documented here. The format follows
   and on flash-lite `pasted` in 6 of 6.
 - `scripts/bench_models.py --max-tokens` sets the output cap per call (default 6000), so a run
   can score what a trigger returns under the CLI's `OPENROUTER_MAX_TOKENS`.
+- The bench has three new edge drafts: `cap-thread` (a 57-line thread, just under the copy
+  limit), `supplier` and `status-page` (outside readers in a short text).
 
 ### Changed
 - The bench's `kept` metric matches a key only at the start of a word, and an acronym only in
@@ -26,13 +34,35 @@ All notable changes to this project are documented here. The format follows
   SHA-256 of the template and, for the shared personas, of the rendered system prompt, persona
   mode, temperature, models, drafts, runs) and goes to `bench-out/<UTC timestamp>/` unless
   `--outdir` is given. It refuses an `--outdir` that is not empty.
+- The `default` prompt, after the 2026-10 review:
+  - pasted material up to about 60 lines (was about 20) is copied into `INPUTS` in full,
+    keeping its line breaks, because the other assistant never sees the original draft (#42);
+  - the review step is decided only by who reads the result: the user, a colleague, their
+    manager or their team take the self-review, and everyone else, including the CEO and
+    published text, the independent review; "quick", "short" and "brief" never decide it (#43);
+  - the `- Out of scope:` bullet appears only when the draft implies concrete exclusions, and
+    the first example no longer invents a one-page length or a `.md` output (#50).
+
+  With `--persona example` and `--max-tokens 2400` (3 runs per draft, 6 on 14 drafts on
+  flash-lite and 5 on gpt-6-luna), flash-lite passes 30/30 core and 102/120 edge, and gpt-6-luna
+  23/24 core and 98/99 edge. The 0.13.0 prompts scored 22/27 and 66/90 on flash-lite and 24/24
+  and 75/84 on gpt-6-luna with the same checks, on a different mix of drafts and runs, partly
+  from outputs saved before the bench had a fixed persona. flash-lite still summarises a short pasted email and
+  gives a reply to an outside sender the self-review when the draft says "for me" (see
+  CONTRIBUTING's known gap 10).
+- Both tiers send `default`: `PROMPT_PRO_PROFILE` is now empty by default, so `-ip-` and `-if-`
+  use `PROMPT_PROFILE` like `-i-` (#44). A plain bench run now scores what every OpenRouter
+  trigger sends (#61).
+- The `-p-` template no longer puts a `[Constraints etc.]` placeholder in `CONTEXT` (#50).
+
+### Deprecated
+- The `default-pro` profile is an alias of `default` and will be removed in a later release.
+  Set `PROMPT_PRO_PROFILE` empty, or to a profile of your own.
 
 ### Fixed
 - The bench output directories that the docs suggest (`--outdir bench-A`) were not gitignored,
   so `git add .` could commit outputs that carried the runner's persona. Every `bench-*/`
   directory is now ignored, and a test checks each documented `--outdir`.
-
-### Fixed
 - A rewrite whose `<CONTEXT>` section the model closed with `</GOAL>` right before `<GOAL>` (a
   slip seen only on flash-lite) is now repaired before it is pasted. Only that exact pattern in
   the rewrite's first section is changed; other malformed output, and tags inside pasted
