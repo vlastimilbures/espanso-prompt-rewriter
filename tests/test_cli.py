@@ -86,6 +86,23 @@ def test_output_has_no_trailing_newline(stub_provider):
     assert result.stdout == "clean output"
 
 
+# A golden-template rewrite gets flash-lite's <CONTEXT>...</GOAL> slip repaired; any other
+# profile's output is pasted as returned.
+@pytest.mark.parametrize(
+    ("args", "repaired"),
+    [([], True), (["--tier", "pro"], True), (["--profile", "general"], False)],
+)
+def test_improve_repairs_context_goal_slip(monkeypatch, stub_provider, args, repaired):
+    copied = []
+    monkeypatch.setattr(cli.pyperclip, "copy", copied.append)
+    slip = "<CONTEXT>\nI want X.\n</GOAL>\n\n<GOAL>\nX.\n</GOAL>"
+    stub_provider.result = slip
+    result = improve(*args, "--copy", "--source", "argument", "--text", "draft")
+    expected = slip.replace("X.\n</GOAL>", "X.\n</CONTEXT>", 1) if repaired else slip
+    assert result.stdout == expected
+    assert copied == [expected]
+
+
 # An unknown --provider still yields an inline marker with exit 0, not a Typer usage
 # error on stderr (why the options are plain strings rather than Enum choices).
 def test_unknown_provider_reports_inline():

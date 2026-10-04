@@ -32,6 +32,14 @@ All notable changes to this project are documented here. The format follows
   so `git add .` could commit outputs that carried the runner's persona. Every `bench-*/`
   directory is now ignored, and a test checks each documented `--outdir`.
 
+### Fixed
+- A rewrite whose `<CONTEXT>` section the model closed with `</GOAL>` right before `<GOAL>` (a
+  slip seen only on flash-lite) is now repaired before it is pasted. Only that exact pattern in
+  the rewrite's first section is changed; other malformed output, and tags inside pasted
+  material, are pasted as returned. Of 4,842 saved bench rewrites (local, not in the repo), the
+  repair fixed all 29 with the slip and left every well-formed one unchanged. The bench scores
+  the repaired text, keeps the raw one as `*.raw`, and reports the count in a `rep` column.
+
 ## 0.13.0
 
 Upgrading: re-run the installer (`./scripts/install_macos.sh` or

@@ -10,7 +10,7 @@ import typer
 
 from .config import EFFORTS, KEEP, TIERS, Settings
 from .factory import PROVIDER_NAMES, make_provider
-from .prompt_builder import system_prompt
+from .prompt_builder import TEMPLATE_MARKER, repair_template_tags, system_prompt
 from .providers.base import ProviderError
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
@@ -106,11 +106,11 @@ def improve(
         # Data-protection gate: make_provider wraps anything that can send the draft off this
         # machine in GatedProvider, so it cannot be bypassed. The result is cleaned here too
         # because --copy puts it on the clipboard.
-        result = _clean(
-            make_provider(provider or cfg.provider, cfg).generate(
-                draft, system_prompt(profile or cfg.profile, cfg.persona)
-            )
-        )
+        system = system_prompt(profile or cfg.profile, cfg.persona)
+        result = make_provider(provider or cfg.provider, cfg).generate(draft, system)
+        if TEMPLATE_MARKER in system:
+            result = repair_template_tags(result)
+        result = _clean(result)
         if copy:
             _clipboard(pyperclip.copy, result)
     except Exception as exc:

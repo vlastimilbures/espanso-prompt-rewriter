@@ -492,3 +492,30 @@ def test_git_state(monkeypatch):
     assert isinstance(dirty, bool) or sha == "unknown"
     monkeypatch.setattr(bench.shutil, "which", lambda _: None)
     assert bench.git_state() == ("unknown", None)
+
+
+# A run with flash-lite's <CONTEXT>...</GOAL> slip is scored as the CLI would paste it, and
+# counted as repaired in the report.
+def test_run_one_scores_repaired_text(fake_http, monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k")
+    slipped = GOOD.replace("board paper.\n</CONTEXT>", "board paper.\n</GOAL>", 1)
+    assert "mismatched closing tag" in bench.check(slipped, True, True)
+    fake_http.reply({"choices": [{"message": {"content": slipped}}]})
+    result = bench.run_one(Settings(), "a/b", "board", 1, tmp_path, bench.Budget(1.0))
+    assert result.ok, result.failed
+    assert result.repaired
+    assert (tmp_path / "a_b__board__1.txt").read_text() == GOOD
+    assert (tmp_path / "a_b__board__1.raw").read_text() == slipped
+    bench.report([result], bench.Budget(1.0))
+    out = capsys.readouterr().out
+    assert "a/b board#1" in out.split("repaired")[-1]
+    row = next(ln for ln in out.splitlines() if ln.startswith("a/b "))
+    assert row.split()[1:3] == ["1/1", "1"]  # pass, rep
+
+
+def test_run_one_well_formed_is_not_repaired(fake_http, monkeypatch, tmp_path):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k")
+    fake_http.reply({"choices": [{"message": {"content": GOOD}}]})
+    result = bench.run_one(Settings(), "a/b", "board", 1, tmp_path, bench.Budget(1.0))
+    assert not result.repaired
+    assert not list(tmp_path.glob("*.raw"))

@@ -3,7 +3,12 @@ from pathlib import Path
 
 import pytest
 
-from prompt_workflow.prompt_builder import PROFILES, system_prompt
+from prompt_workflow.prompt_builder import (
+    PROFILES,
+    TEMPLATE_MARKER,
+    repair_template_tags,
+    system_prompt,
+)
 
 
 # Unknown profile names raise ValueError instead of KeyError.
@@ -90,3 +95,50 @@ def test_no_hardcoded_persona_in_shipped_files():
         for sentence in re.findall(r"I am working as [^.\n]*", path.read_text(encoding="utf-8")):
             allowed = sentence.endswith("[role] in [company]") or "Example Corp" in sentence
             assert allowed, (path, sentence)
+
+
+# Every golden-template profile carries the marker the CLI keys the tag repair on, so an edit
+# that drops it cannot switch the repair off unnoticed.
+@pytest.mark.parametrize("name", list(PROFILES))
+def test_template_marker(name):
+    assert (TEMPLATE_MARKER in PROFILES[name]) == ("<CONTEXT>" in PROFILES[name])
+    assert (TEMPLATE_MARKER in PROFILES[name]) == name.startswith("default")
+
+
+SLIP = "<CONTEXT>\nI want a memo.\n</GOAL>\n\n<GOAL>\nA memo.\n</GOAL>\n\n<INSTRUCTIONS>"
+
+
+FIXED = SLIP.replace("memo.\n</GOAL>", "memo.\n</CONTEXT>", 1)
+
+
+# flash-lite's <CONTEXT>...</GOAL> slip is closed with </CONTEXT>; nothing else changes.
+def test_repair_template_tags():
+    assert repair_template_tags(SLIP) == FIXED
+    assert repair_template_tags("Note.\n" + SLIP) == "Note.\n" + FIXED
+    crlf = SLIP.replace("\n", "\r\n")
+    assert repair_template_tags(crlf) == FIXED.replace("\n", "\r\n")
+
+
+# Only the rewrite's own first section is repaired: the same slip in pasted material (a user
+# asking why a rewrite looks broken) is copied as it is.
+def test_repair_leaves_pasted_slip():
+    inputs = f"<INPUTS>\n{SLIP}\n</INPUTS>"
+    assert repair_template_tags(FIXED + "\n" + inputs) == FIXED + "\n" + inputs
+    assert repair_template_tags(SLIP + "\n" + inputs) == FIXED + "\n" + inputs
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        SLIP.replace("memo.\n</GOAL>", "memo.\n</CONTEXT>", 1),  # well formed
+        SLIP.replace("\n\n<GOAL>", "\n\nmore\n<GOAL>", 1),  # not right before <GOAL>
+        SLIP.replace("I want a memo.", "I want a memo.\n</CONTEXT>"),  # CONTEXT already closed
+        SLIP.replace("</GOAL>\n\n<GOAL>", "</INPUTS>\n\n<GOAL>", 1),  # another wrong tag
+        # A well-formed CONTEXT that mentions the tags.
+        "<CONTEXT>\nIt writes </GOAL>\n<GOAL>\nthere.\n</CONTEXT>\n\n<GOAL>\nA.\n</GOAL>",
+        "<CONTEXT>\nI want </GOAL>\n\n<GOAL>\nA.\n</GOAL>",  # tag not on its own line
+        SLIP.replace("I want a memo.", "<GOAL>\nI want a memo."),  # another malformation
+    ],
+)
+def test_repair_template_tags_leaves_other_text(text):
+    assert repair_template_tags(text) == text

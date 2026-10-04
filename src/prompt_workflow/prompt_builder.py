@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from importlib.resources import files
 
 from .redaction import safe_repr
@@ -45,3 +46,25 @@ def system_prompt(profile: str, persona: str = "") -> str:
         known = ", ".join(PROFILES)
         raise ValueError(f"Unknown profile: {safe_repr(profile)}. Choose from: {known}") from exc
     return render(template, persona)
+
+
+# Present in every profile that emits the golden template (CONTEXT ... OUTPUTS).
+TEMPLATE_MARKER = "<output_template>"
+
+# flash-lite sometimes closes CONTEXT with the next section's tag, "<CONTEXT>...</GOAL>" right
+# before "<GOAL>", a decoding slip that comes and goes with unrelated wording changes. Only
+# that exact pattern is repaired, and only in the rewrite's first section, with each tag on its
+# own line: any other malformed output, and tags inside pasted material, stay as they are.
+_CONTEXT_CLOSED_AS_GOAL = re.compile(
+    r"(<CONTEXT>(?:(?!</CONTEXT>|</?GOAL>).)*?\n[ \t]*)</GOAL>([ \t]*\r?\n\s*<GOAL>[ \t]*\r?\n)",
+    re.DOTALL,
+)
+
+
+def repair_template_tags(text: str) -> str:
+    """Close a CONTEXT section that the model closed with </GOAL> just before <GOAL>."""
+    start = text.find("<CONTEXT>")
+    slip = _CONTEXT_CLOSED_AS_GOAL.match(text, start) if start >= 0 else None
+    if slip is None:
+        return text
+    return text[: slip.end(1)] + "</CONTEXT>" + text[slip.start(2) :]
