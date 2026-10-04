@@ -6,6 +6,23 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Security
+- Invisible characters no longer reach the model or the paste (#22). `_clean()` now drops
+  every code point Unicode marks as default-ignorable (zero-width space, word joiner, BOM, bidi
+  marks, soft hyphen, combining grapheme joiner, Hangul fillers, variation selectors, and the
+  unassigned blocks that render as nothing) and every other format character, since a run of
+  them after one visible character could carry a hidden instruction. An emoji keeps one
+  presentation selector and one joiner, a keycap keeps its selector, and Persian and Indic
+  joiners survive. Ideographic variation selectors, Mongolian variation selectors and bidi marks
+  are dropped too. The gate's normalised scan drops the same characters, so they can no longer
+  split a card number.
+
+### Changed
+- Carriage returns, vertical tabs, form feeds, NEL and the Unicode line and paragraph
+  separators become newlines instead of disappearing.
+- A draft over 50,000 characters is refused before it is cleaned, so a pasted multi-megabyte
+  log no longer stalls the expansion.
+
 ## 0.15.0
 
 Upgrading: `OPENROUTER_REASONING_EFFORT` and `OPENROUTER_PRO_REASONING_EFFORT` are now checked

@@ -224,13 +224,24 @@ def test_detects_card_before_non_luhn_digit_run():
 
 
 # Separators copied from web pages and PDFs cannot split a card number: no-break space,
-# zero-width space, soft hyphen and fullwidth digits are folded before scanning.
+# zero-width space, soft hyphen, variation selectors, Hangul fillers and fullwidth digits are
+# folded before scanning.
 @pytest.mark.parametrize(
     "text",
     [
         "card 4111\u00a01111\u00a01111\u00a01111",
         "card 4111\u200b1111\u200b1111\u200b1111",
         "card 4111\u00ad1111\u00ad1111\u00ad1111",
+        "card 4111\ufe0f1111\ufe0f1111\ufe0f1111",
+        "card 4111\U000e01011111\U000e01011111\U000e01011111",
+        "card 4111\u31641111\u31641111\u31641111",
+        "card 4111\uffa01111\uffa01111\uffa01111",
+        "card 4111\u034f1111\u034f1111\u034f1111",
+        "card 4111\u180b1111\u180b1111\u180b1111",
+        "card 4111\u17b41111\u17b41111\u17b41111",
+        "card 4111\ufff01111\ufff01111\ufff01111",
+        "card 4111\U000e02001111\U000e02001111\U000e02001111",
+        "card 4111\u28001111\u28001111\u28001111",
         # Fullwidth digits U+FF10..FF19.
         "card "
         + "4111 1111 1111 1111".translate({ord(d): ord(d) + 0xFF10 - 0x30 for d in "0123456789"}),
@@ -263,8 +274,9 @@ def test_custom_pattern_matches_raw_text():
         "token=" * 30_000,
         "_token='" * 30_000,
         "-----BEGIN " + "A " * 100_000,
+        "4\ufe0f" * 100_000,
     ],
-    ids=["dots", "dashes", "bearer", "assignments", "prefixed-assignments", "pem"],
+    ids=["dots", "dashes", "bearer", "assignments", "prefixed-assignments", "pem", "selectors"],
 )
 def test_scan_is_fast_on_adversarial_input(text):
     started = time.perf_counter()

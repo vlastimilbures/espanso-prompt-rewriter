@@ -25,8 +25,12 @@ Espanso does not inherit shell PATH):
   stack trace or blank expansion, since Espanso has no good way to surface a nonzero exit /
   stderr to the user. A golden-template rewrite (its profile contains `<output_template>`, which
   `tests/test_prompts.py` ties to `<CONTEXT>`) first goes through
-  `prompt_builder.repair_template_tags()`, which fixes only the `<CONTEXT>…</GOAL>` slip. Everything printed goes through `_emit()`, which strips control, bidi and
-  Unicode tag characters (the draft gets the same `_clean()`); stdin/stdout are reconfigured to
+  `prompt_builder.repair_template_tags()`, which fixes only the `<CONTEXT>…</GOAL>` slip. Everything printed goes through `_emit()`, which strips control characters, every
+  default-ignorable code point (`redaction.DEFAULT_IGNORABLE`) and every other format character
+  except the visible prepended concatenation marks, maps other line breaks to `\n`, and keeps a
+  selector/joiner run only as one selector plus one joiner after a visible character (after
+  ASCII, only a keycap's selector) (the draft gets the same `_clean()`; the length limit is
+  checked before cleaning); stdin/stdout are reconfigured to
   UTF-8 because Windows pipes default to the ANSI code page. `--tier pro` swaps in the
   `OPENROUTER_PRO_*` settings and `PROMPT_PRO_PROFILE` (if set) via `Settings.for_tier()`; `--model`/`--effort`/`--max-tokens`/
   `--timeout` are applied by `Settings.with_overrides()` (`--model` sets every provider's model),
