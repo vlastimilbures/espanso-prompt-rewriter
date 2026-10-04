@@ -56,12 +56,12 @@ def test_improve_error_marker(stub_provider, exc, expected):
 
 
 # A bad setting fails before any provider is built, with the same marker shape.
+SETTINGS_ERROR = b"[prompt-workflow: PROMPT_LOCAL_ONLY must be true or false, got 'maybe']"
+
+
 def test_improve_settings_error_marker(monkeypatch, stub_provider):
     monkeypatch.setenv("PROMPT_LOCAL_ONLY", "maybe")
-    result = runner.invoke(app, IMPROVE)
-    assert result.exit_code == 0
-    assert result.stdout_bytes.startswith(b"[prompt-workflow: PROMPT_LOCAL_ONLY ")
-    assert result.stdout_bytes.endswith(b"]")
+    _golden(IMPROVE, SETTINGS_ERROR)
     assert not stub_provider.built
 
 
@@ -107,38 +107,72 @@ def test_persona_placeholder_when_settings_fail(monkeypatch):
 
 
 # Runs the trigger commands in a fresh interpreter, the way Espanso does, with the real
-# provider and gate over httpx.MockTransport, then lists every module they imported.
+# provider and gate over httpx.MockTransport, then lists every module they imported. Each
+# scenario takes a different branch (clipboard, gate, provider error, settings error), since a
+# heavy import can hide in any of them. The clipboard and its concealed-item probe are stubbed:
+# a test never touches the real clipboard.
 _TRIGGER_RUN = """
 import sys
 started = set(sys.modules)
 import json
+import os
 from pathlib import Path
 
 import httpx
 
+import prompt_workflow.cli as cli
+from prompt_workflow.providers import base
+
 real_client = httpx.Client
+status = [200]
+
+
+def handler(request):
+    if status[0] != 200:
+        return httpx.Response(status[0], json={"error": {"message": "down"}})
+    if "/api/chat" in str(request.url):
+        return httpx.Response(200, json={"message": {"content": "local"}, "done_reason": "stop"})
+    choice = {"message": {"content": "cloud"}, "finish_reason": "stop"}
+    return httpx.Response(200, json={"choices": [choice]})
 
 
 def client(*args, **kwargs):
-    reply = {"message": {"content": "improved"}, "done_reason": "stop"}
-    transport = httpx.MockTransport(lambda request: httpx.Response(200, json=reply))
-    return real_client(*args, **{**kwargs, "transport": transport})
+    return real_client(*args, **{**kwargs, "transport": httpx.MockTransport(handler)})
 
 
 httpx.Client = client
-from prompt_workflow.cli import app
+base._sleep = lambda seconds: None
+cli.is_concealed = lambda: None
+cli.pyperclip.paste = lambda: "rewrite this draft"
+cli.pyperclip.copy = lambda text: None
 
-improve = ["improve", "--provider", "ollama", "--source", "argument", "--text", "x"]
+local = ["improve", "--provider", "ollama", "--source", "argument", "--text", "x"]
+cloud = ["improve", "--provider", "openrouter", "--source", "clipboard"]
+scenarios = [
+    (local, {}, 200),
+    (cloud, {}, 200),
+    (cloud, {}, 500),
+    (cloud, {"PROMPT_LOCAL_ONLY": "maybe"}, 200),
+    (["persona"], {}, 200),
+    (["persona"], {"PROMPT_LOCAL_ONLY": "maybe"}, 200),
+]
 codes = []
-for argv in (improve, ["persona"]):
+for argv, env, code in scenarios:
+    os.environ.pop("PROMPT_LOCAL_ONLY", None)
+    os.environ.update(env)
+    status[0] = code
     try:
-        app(argv)
+        cli.app(argv)
     except SystemExit as exc:
         codes.append(exc.code)
-    sys.stdout.write("|")
+    sys.stdout.write("\\x1e")
     sys.stdout.flush()
-added = sorted(set(sys.modules) - started)
-Path(sys.argv[1]).write_text(json.dumps({"codes": codes, "added": added}), encoding="utf-8")
+result = {
+    "codes": codes,
+    "added": sorted(set(sys.modules) - started),
+    "loaded": sorted(sys.modules),
+}
+Path(sys.argv[1]).write_text(json.dumps(result), encoding="utf-8")
 """
 
 # Never on the trigger path: the Textual interface (#93), config writers (#84), the keyring
@@ -146,10 +180,14 @@ Path(sys.argv[1]).write_text(json.dumps({"codes": codes, "added": added}), encod
 # loaded today: Typer imports it only for help and usage errors.
 FORBIDDEN = ("textual", "rich.console", "sqlite3", "_sqlite3", "tomli_w", "tomlkit", "keyring")
 
-# Modules the trigger run adds to a bare interpreter: about 290 on macOS, Python 3.12 and 3.14
-# (see "Trigger start-up budget" in CONTRIBUTING.md). A coarse ceiling, not a timing: a new
+# Modules the trigger scenarios add to a bare interpreter: 293 on Python 3.12 and 294 on 3.14,
+# macOS (see "Trigger start-up budget" in CONTRIBUTING.md). A coarse ceiling, not a timing: a new
 # dependency tree on the trigger path crosses it; ordinary growth does not.
 MODULE_CEILING = 400
+
+# Variables that would make the child load modules before the script runs (coverage's .pth
+# hook preloads sqlite3) or from somewhere else, which would hide or fake an import.
+_PRELOADING = ("COVERAGE_PROCESS_START", "COVERAGE_PROCESS_CONFIG", "PYTHONSTARTUP", "PYTHONPATH")
 
 
 @pytest.fixture(scope="module")
@@ -157,8 +195,11 @@ def trigger_run(tmp_path_factory):
     tmp = tmp_path_factory.mktemp("trigger")
     (tmp / ".env").write_text("", encoding="utf-8")
     # Module-scoped, so conftest's per-test isolation has not run yet: drop every setting here.
-    env = {key: value for key, value in os.environ.items() if key not in env_names()}
+    dropped = {*env_names(), *_PRELOADING}
+    env = {key: value for key, value in os.environ.items() if key not in dropped}
     env["PROMPT_WORKFLOW_ENV"] = str(tmp / ".env")
+    # Built at runtime, so no key-shaped literal lands in the repo.
+    env["OPENROUTER_API_KEY"] = "-".join(("test", "key"))
     out = tmp / "modules.json"
     proc = subprocess.run(
         [sys.executable, "-c", _TRIGGER_RUN, str(out)],
@@ -169,22 +210,35 @@ def trigger_run(tmp_path_factory):
         check=False,
     )
     assert proc.returncode == 0, proc.stderr.decode("utf-8", "replace")
-    return proc.stdout, json.loads(out.read_text(encoding="utf-8"))
+    return proc.stdout.split(b"\x1e"), json.loads(out.read_text(encoding="utf-8"))
 
 
-# The real process prints the same bytes as the in-process runner and exits 0 for both.
+# The real process prints the same contract as the in-process runner and exits 0 every time.
 def test_trigger_run_output(trigger_run):
-    stdout, data = trigger_run
-    assert stdout == b"improved|" + PLACEHOLDER + b"|"
-    assert data["codes"] == [0, 0]
+    outputs, data = trigger_run
+    local, cloud, cloud_error, settings_error, persona, persona_fallback, rest = outputs
+    assert (local, cloud, persona, persona_fallback, rest) == (
+        b"local",
+        b"cloud",
+        PLACEHOLDER,
+        PLACEHOLDER,
+        b"",
+    )
+    assert cloud_error.startswith(b"[prompt-workflow: ")
+    assert cloud_error.endswith(b"]")
+    assert settings_error == SETTINGS_ERROR
+    assert data["codes"] == [0] * 6
 
 
+# Checked against everything loaded, not only what the run added, so a module loaded before
+# the script started cannot make the check pass vacuously.
 @pytest.mark.parametrize("module", FORBIDDEN)
 def test_trigger_path_does_not_import(trigger_run, module):
     _, data = trigger_run
-    assert not [m for m in data["added"] if m == module or m.startswith(module + ".")]
+    assert not [m for m in data["loaded"] if m == module or m.startswith(module + ".")]
 
 
 def test_trigger_path_module_count(trigger_run):
     _, data = trigger_run
-    assert len(data["added"]) <= MODULE_CEILING, len(data["added"])
+    added = len(data["added"])
+    assert added <= MODULE_CEILING, f"the trigger run added {added} modules"

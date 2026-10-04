@@ -73,7 +73,7 @@ average about 14, so on the high side), CLI 0.15.0:
 | --- | --- | --- |
 | `import prompt_workflow.cli`, cumulative (`-X importtime`) | 128–138 ms | 164–207 ms |
 | `prompt-workflow persona`, wall time (median of 15) | 185 ms | 238 ms |
-| Modules a trigger run adds to a bare interpreter | 293 | 294 |
+| Modules the guarded trigger runs add to a bare interpreter | 293 | 294 |
 
 The largest parts of the import are `importlib.metadata` (about 50 ms, for `__version__` in
 `prompt_workflow/__init__.py`), httpx (about 30 ms) and Typer (about 19 ms). CI runner numbers
@@ -92,11 +92,12 @@ The second line runs through `python -m`, as the installed `prompt-workflow` scr
 apart from the launcher. Run either several times on an idle machine and take the median.
 
 `tests/test_trigger_contract.py` guards the budget without timing anything, since wall-clock
-tests flake on a loaded machine. It runs `improve` and `persona` in a fresh interpreter and
-fails if they import `textual`, `rich.console`, `sqlite3`, `tomli_w`, `tomlkit` or `keyring`,
-or more than `MODULE_CEILING` (400) modules. A new heavy dependency belongs behind a lazy
-import in the command that needs it, never on the trigger path. Raise the ceiling only with
-new measurements here.
+tests flake on a loaded machine. It runs `improve` and `persona` in a fresh interpreter
+(clipboard and argument input, a local and a cloud provider, a provider error and a settings
+error) and fails if any of them imports `textual`, `rich.console`, `sqlite3`, `tomli_w`,
+`tomlkit` or `keyring`, or if they add more than `MODULE_CEILING` (400) modules. A new heavy
+dependency belongs behind a lazy import in the command that needs it, never on the trigger
+path. Raise the ceiling only with new measurements here.
 
 ## Project layout
 
