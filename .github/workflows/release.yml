@@ -4,7 +4,7 @@ name: release
 # annotated tag v<version> and a GitHub Release with that version's CHANGELOG notes.
 #
 # A release happens only for a commit on main whose pyproject version has no tag yet:
-# - manual dispatch, unless dry-run is ticked (a dry run builds and tests, nothing more);
+# - manual dispatch with dry-run unticked (dry-run is the default: it builds and tests, nothing more);
 # - a push to main, only while the repository variable RELEASE_ON_PUSH is "true", so merging
 #   a branch never releases by surprise.
 on:
@@ -15,7 +15,7 @@ on:
       dry-run:
         description: "Build and test the artifacts only: no attestation, tag or Release"
         type: boolean
-        default: false
+        default: true
 permissions: {}
 concurrency:
   group: release-${{ github.ref }}
