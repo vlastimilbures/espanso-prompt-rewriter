@@ -403,7 +403,8 @@ def test_secrets_file_is_private_to_the_user_on_windows(saved_mode):
     path = saved_mode / "secrets.toml"
     sid = config_files.current_user_sid()
     dacl = config_files._read_dacl(path)
-    assert config_files.only_user(dacl, sid), dacl
+    alias = config_files._canonical_dacl(f"D:P(A;;FA;;;{sid})").rpartition(";")[2].rstrip(")")
+    assert config_files.only_user(dacl, (sid, alias)), dacl
     assert dacl.count("(") == 1, dacl
     whoami = Path(os.environ.get("SYSTEMROOT", r"C:\Windows")) / "System32" / "whoami.exe"
     me = subprocess.run([str(whoami)], capture_output=True, timeout=30, check=True).stdout
@@ -419,6 +420,8 @@ SID = "S-1-5-21-1-2-3-1001"
     ("sddl", "private"),
     [
         (f"D:P(A;;FA;;;{SID})", True),
+        ("D:P(A;;FA;;;LA)", True),
+        ("D:P(A;;FA;;;LA)(A;;FA;;;BA)", False),
         (f"D:PAI(A;;FA;;;{SID})", True),
         (f"D:P(A;;FA;;;{SID})(A;;FA;;;SY)", False),
         (f"D:P(A;;FA;;;{SID})(A;;FA;;;BA)(A;;FA;;;OW)", False),
@@ -429,6 +432,8 @@ SID = "S-1-5-21-1-2-3-1001"
     ],
     ids=[
         "user",
+        "alias",
+        "alias-and-admins",
         "auto-inherited-flag",
         "system",
         "python-0o700",
@@ -439,7 +444,7 @@ SID = "S-1-5-21-1-2-3-1001"
     ],
 )
 def test_only_user(sddl, private):
-    assert config_files.only_user(sddl, SID) is private
+    assert config_files.only_user(sddl, (SID, "LA")) is private
 
 
 # restrict_to_user sets a protected single-ACE DACL, reads it back, and refuses anything
@@ -465,6 +470,7 @@ def test_restrict_to_user_refuses_leftovers(saved_mode, monkeypatch, read_back, 
     monkeypatch.setattr(config_files, "current_user_sid", lambda: SID)
     monkeypatch.setattr(config_files, "_set_dacl", lambda path, sddl: applied.append(sddl))
     monkeypatch.setattr(config_files, "_read_dacl", read_dacl)
+    monkeypatch.setattr(config_files, "_canonical_dacl", lambda sddl: sddl)
     with pytest.raises(SecretStoreError, match=error):
         config_store.save_secret("OPENROUTER_API_KEY", SECRET)
     assert applied == [f"D:P(A;;FA;;;{SID})"]
@@ -940,3 +946,18 @@ def test_damaged_marker(saved_mode):
     _write(saved_mode / "migration.json", "{not json")
     with pytest.raises(MigrationError, match="damaged"):
         config_store.plan_rollback()
+
+
+# Windows reports a config dir that is a file as FileExistsError on mkdir: still refused
+# cleanly, with nothing changed.
+def test_backup_folder_failure(saved_mode, project, monkeypatch):
+    repo_env = _write(project / ".env", _example_env())
+    plan = config_store.plan_migration()
+
+    def broken(directory):
+        raise FileExistsError(183, "Cannot create a file when that file already exists")
+
+    monkeypatch.setattr(config_store, "_new_backup_dir", broken)
+    with pytest.raises(MigrationError, match="cannot create the backup folder"):
+        config_store.apply_migration(consent=plan.token)
+    assert repo_env.read_text("utf-8") == _example_env()

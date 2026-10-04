@@ -251,10 +251,28 @@ def _set_dacl(path: Path, sddl: str) -> None:
         kernel.LocalFree(descriptor)
 
 
+def _to_sddl(advapi: Any, kernel: Any, descriptor: Any) -> str:
+    """Windows: the DACL part of a security descriptor in SDDL."""
+    import ctypes
+    from ctypes import c_void_p, wintypes
+
+    text = wintypes.LPWSTR()
+    _check(
+        advapi.ConvertSecurityDescriptorToStringSecurityDescriptorW(
+            descriptor, _SDDL_REVISION_1, _DACL_SECURITY_INFORMATION, ctypes.byref(text), None
+        ),
+        "ConvertSecurityDescriptorToStringSecurityDescriptorW",
+    )
+    try:
+        return str(text.value or "")
+    finally:
+        kernel.LocalFree(ctypes.cast(text, c_void_p))
+
+
 def _read_dacl(path: Path) -> str:
     """Windows: the DACL of ``path`` in SDDL, e.g. ``D:P(A;;FA;;;S-1-5-21-…)``."""
     import ctypes
-    from ctypes import c_void_p, wintypes
+    from ctypes import c_void_p
 
     advapi, kernel = _win32()
     descriptor = c_void_p()
@@ -271,45 +289,66 @@ def _read_dacl(path: Path) -> str:
     if error:
         raise OSError(error, "GetNamedSecurityInfoW")
     try:
-        text = wintypes.LPWSTR()
-        _check(
-            advapi.ConvertSecurityDescriptorToStringSecurityDescriptorW(
-                descriptor, _SDDL_REVISION_1, _DACL_SECURITY_INFORMATION, ctypes.byref(text), None
-            ),
-            "ConvertSecurityDescriptorToStringSecurityDescriptorW",
-        )
-        try:
-            return str(text.value or "")
-        finally:
-            kernel.LocalFree(ctypes.cast(text, c_void_p))
+        return _to_sddl(advapi, kernel, descriptor)
     finally:
         kernel.LocalFree(descriptor)
 
 
-def only_user(sddl: str, sid: str) -> bool:
-    """The SDDL DACL is protected (inherits nothing) and every entry allows ``sid`` alone."""
+def _canonical_dacl(sddl: str) -> str:
+    """Windows: ``sddl`` as Windows writes it back. SDDL output names some SIDs by alias
+    (LA for the built-in Administrator, which a CI runner account may be), so the read-back
+    DACL is compared with this rather than with the SID string."""
+    import ctypes
+    from ctypes import c_void_p
+
+    advapi, kernel = _win32()
+    descriptor = c_void_p()
+    _check(
+        advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            sddl, _SDDL_REVISION_1, ctypes.byref(descriptor), None
+        ),
+        "ConvertStringSecurityDescriptorToSecurityDescriptorW",
+    )
+    try:
+        return _to_sddl(advapi, kernel, descriptor)
+    finally:
+        kernel.LocalFree(descriptor)
+
+
+def only_user(sddl: str, sids: str | tuple[str, ...]) -> bool:
+    """The SDDL DACL is protected (inherits nothing), has at least one entry, and every entry
+    allows one of ``sids`` (the user's SID string, or its SDDL alias)."""
+    allowed = (sids,) if isinstance(sids, str) else sids
     found = re.fullmatch(r"D:([A-Z]*)((?:\([^()]*\))+)", sddl)
     if not found or "P" not in found.group(1):
         return False
     aces = [ace.split(";") for ace in re.findall(r"\(([^()]*)\)", found.group(2))]
-    return all(len(ace) == 6 and ace[0] == "A" and ace[5] == sid for ace in aces)
+    return all(len(ace) == 6 and ace[0] == "A" and ace[5] in allowed for ace in aces)
 
 
 def restrict_to_user(path: Path) -> None:
     """Windows: give ``path`` a protected DACL with one entry, full access for the current
     user, so no other account or group (not SYSTEM, not Administrators, nothing inherited)
-    is granted access. Then reads the DACL back and refuses anything else. Called while the
-    file is still empty. Raises SecretStoreError; there is no fallback."""
+    is granted access. Then reads the DACL back and refuses anything else, naming the DACL
+    it found (SIDs, no secret). Called while the file is still empty, with no handle open.
+    Raises SecretStoreError; there is no fallback."""
     try:
         sid = current_user_sid()
         if not sid.startswith("S-1-"):
             raise OSError("no SID")
-        _set_dacl(path, f"D:P(A;;FA;;;{sid})")
+        wanted = f"D:P(A;;FA;;;{sid})"
+        _set_dacl(path, wanted)
         actual = _read_dacl(path)
-    except OSError:
-        raise SecretStoreError(f"could not make {path.name} private to your user") from None
-    if not only_user(actual, sid):
-        raise SecretStoreError(f"{path.name} is still open to other accounts; nothing was written")
+        alias = _canonical_dacl(wanted).rpartition(";")[2].rstrip(")")
+    except OSError as exc:
+        raise SecretStoreError(
+            f"could not make {path.name} private to your user ({exc.strerror or exc})"
+        ) from None
+    if not only_user(actual, (sid, alias)):
+        raise SecretStoreError(
+            f"{path.name} is still open to other accounts ({actual}, expected {sid}); "
+            "nothing was written"
+        )
 
 
 def make_private_dir(directory: Path) -> None:

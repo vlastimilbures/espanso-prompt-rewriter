@@ -301,9 +301,12 @@ def plan_migration(environ: Mapping[str, str] | None = None) -> MigrationPlan:
     for path in config._env_file_candidates(env):
         try:
             data = path.read_bytes()
-        except FileNotFoundError:
-            continue
         except OSError:
+            # Missing, or a parent that is a file (Windows: FileNotFoundError or
+            # FileExistsError, POSIX: NotADirectoryError) is no .env; a real one that cannot
+            # be read stops the migration.
+            if not config_files.is_file(path):
+                continue
             raise MigrationError(f"{path} cannot be read; nothing was migrated") from None
         if pairs is None:
             try:
@@ -428,7 +431,12 @@ def apply_migration(environ: Mapping[str, str] | None = None, *, consent: str) -
     settings_path = config.settings_file(env)
     secrets_path = directory / config_files.SECRETS_FILE
     before = _effective(env)
-    backup, stamp = _new_backup_dir(directory)
+    try:
+        backup, stamp = _new_backup_dir(directory)
+    except OSError as exc:
+        raise MigrationError(
+            f"nothing was migrated: cannot create the backup folder ({exc.strerror or exc})"
+        ) from None
     secrets_copy = None
     targets = {
         s.path: backup / f"{index}-{_label(s.path)}.env.inactive"
