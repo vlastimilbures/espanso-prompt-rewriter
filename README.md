@@ -452,6 +452,7 @@ uv run python scripts/bench_models.py --system-prompt-file candidate.md   # A/B 
 | `[prompt-workflow: … must be an https:// URL]` | A cloud `*_BASE_URL` uses `http`. Switch it to `https`. |
 | `[prompt-workflow: OLLAMA_THINK must be true or false, got …]` (or `must be a number above 0`) | Fix that value in `.env`. A long value, or one that looks like a key, is shown as `<redacted, N chars>`. |
 | `[prompt-workflow: … in .env runs into the next line; add the missing newline]` | Two lines of `.env` were saved as one. Split them. |
+| `[prompt-workflow: … request failed: invalid header value (check the API key)]` | The API key in `.env` contains a line break or another character a key never has. Paste it again. |
 | `-il-` or `-ilm-` says `Blocked cloud call` | `OLLAMA_BASE_URL` / `LMSTUDIO_BASE_URL` points at another machine, or the Ollama model is a cloud model, so the gate applies. Use a model on `localhost` for sensitive drafts. |
 | Reasoning text appears in the output | Set `OLLAMA_THINK=false`. `<think>` blocks are stripped; extend `strip_thinking` in `providers/base.py` for other tag formats. |
 

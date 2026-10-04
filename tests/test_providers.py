@@ -1,4 +1,5 @@
 import json
+import socket
 import threading
 import urllib.request
 from collections.abc import Iterator
@@ -428,3 +429,23 @@ def test_post_json_direct_only_on_loopback(fake_http, url, remote):
     assert kwargs["timeout"] == 5
     assert (kwargs["transport"] is None) is remote
     assert is_loopback(url) is not remote
+
+
+# An API key with a character HTTP forbids in a header (a stray newline) fails without the
+# error repeating the key: httpx's own message quotes the whole header value.
+@pytest.mark.parametrize("name", ["openrouter", "anthropic"])
+def test_bad_header_value_is_not_repeated(monkeypatch, name):
+    for var in ("HTTP_PROXY", "ALL_PROXY", "http_proxy", "all_proxy"):
+        monkeypatch.delenv(var, raising=False)
+    key = "sk-or-v1-" + "cd" * 32 + "\n"
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        url = f"http://127.0.0.1:{listener.getsockname()[1]}"
+        if name == "openrouter":
+            provider: Provider = OpenAICompatibleProvider(url, "m", api_key=key, timeout=2)
+        else:
+            provider = AnthropicProvider(url, "m", key, timeout=2)
+        with pytest.raises(ProviderError, match="invalid header value") as caught:
+            provider.generate("d", "s")
+    assert "cdcd" not in str(caught.value)

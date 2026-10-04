@@ -8,6 +8,8 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from ..redaction import safe_repr
+
 
 class ProviderError(RuntimeError):
     """Raised when a provider cannot produce a result."""
@@ -63,9 +65,15 @@ def post_json(
     except httpx.HTTPStatusError as exc:
         raise ProviderError(f"{label} returned HTTP {exc.response.status_code}") from exc
     except httpx.InvalidURL as exc:
-        raise ProviderError(f"{label} base URL invalid: {exc}") from exc
+        raise ProviderError(f"{label} base URL invalid: {safe_repr(str(exc))}") from exc
     except ValueError as exc:
         raise ProviderError(f"{label} returned invalid JSON") from exc
+    except httpx.LocalProtocolError as exc:
+        # Raised for a header value with characters HTTP forbids; its message quotes the
+        # value, which is the API key, so it is not repeated.
+        raise ProviderError(
+            f"{label} request failed: invalid header value (check the API key)"
+        ) from exc
     except httpx.HTTPError as exc:
         raise ProviderError(f"{label} request failed: {exc}") from exc
 
