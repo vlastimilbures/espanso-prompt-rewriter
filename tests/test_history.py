@@ -69,11 +69,20 @@ ALLOWED = {
 }
 
 
+# These check that a blocked write gives up, so they keep the real budget.
+_REAL_BUDGET_TESTS = {
+    "test_a_locked_database_drops_the_write_within_the_budget",
+    "test_a_write_blocked_everywhere_gives_up",
+    "test_a_stale_sidecar_lock_is_broken_and_a_held_one_times_out",
+}
+
+
 @pytest.fixture(autouse=True)
-def _generous_budget(monkeypatch):
+def _generous_budget(request, monkeypatch):
     # The real ~0.25 s bound drops writes on a loaded CI runner (the first write also creates
-    # the database), which made these tests flaky. Tests that block a write still finish well
-    # inside their 5 s bound; the real constants are checked by reading the code.
+    # the database), which made tests that only check what was stored flaky.
+    if request.node.originalname in _REAL_BUDGET_TESTS:
+        return
     monkeypatch.setattr(history, "_BUDGET", 2.25)
     monkeypatch.setattr(history, "_WRITE_BUDGET", 2.0)
 
