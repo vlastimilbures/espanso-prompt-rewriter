@@ -66,13 +66,17 @@ def _load_dotenv() -> None:
     """Load the first readable .env found, without overriding existing env.
 
     This is intentionally dependency-free so it works even when GUI-launched
-    Espanso does not inherit the interactive shell environment.
+    Espanso does not inherit the interactive shell environment. Only the settings this
+    package reads are exported: any other key (HTTP_PROXY, SSL_CERT_FILE, ...) would
+    change how httpx connects, which is not what a settings file is for.
     """
+    known = set(env_names())
     for candidate in _env_file_candidates():
         pairs = read_env_file(candidate)
         if pairs is not None:
             for key, value in pairs.items():
-                os.environ.setdefault(key, value)
+                if key in known:
+                    os.environ.setdefault(key, value)
             return
 
 

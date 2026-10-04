@@ -254,7 +254,16 @@ The CLI reads the first `.env` it finds in:
 3. `~/.config/prompt-workflow/.env` (`%APPDATA%\prompt-workflow\.env` on Windows).
 
 It never reads a `.env` from the current directory, so running the CLI inside some other
-project cannot change its endpoint or switch off the gate. Values may be quoted, and an unquoted
+project cannot change its endpoint or switch off the gate. Only the settings in the table below
+are read from `.env`; anything else there (such as `HTTPS_PROXY` or `SSL_CERT_FILE`) is ignored.
+
+Cloud calls use the system proxy (macOS System Settings, Windows Internet Options) or the
+`HTTP_PROXY`, `HTTPS_PROXY` and `ALL_PROXY` environment variables. Since Espanso starts the CLI
+without your shell's environment, set such variables for GUI apps (`launchctl setenv` on macOS,
+user environment variables on Windows) rather than in a shell profile. A base URL on this
+machine (`localhost`, `127.0.0.0/8`, `::1`) is always reached directly, never through a proxy.
+
+Values may be quoted, and an unquoted
 value may be followed by a ` # comment`. Quote a value that itself contains ` #`. Booleans are
 `true` or `false`, timeouts and token caps are numbers above 0 (temperature may be 0); anything
 else is reported inline rather than silently ignored.
@@ -332,7 +341,7 @@ Every call that can send the draft off your machine first runs through a regex g
 ([`redaction.py`](src/prompt_workflow/redaction.py)): OpenRouter and Anthropic always, and
 Ollama or LM Studio when their base URL is not `localhost` (or `127.0.0.1`, `::1`) or the Ollama
 model is a cloud model (a `:cloud` or `-cloud` tag, which the local daemon forwards to
-ollama.com). It blocks drafts containing:
+ollama.com). The gate blocks drafts containing:
 
 - payment card numbers (Luhn-checked) and email addresses
 - API keys (OpenRouter, Anthropic, OpenAI, Stripe, GitHub, GitLab, Hugging Face, Slack, Google,

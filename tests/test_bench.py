@@ -253,7 +253,7 @@ def test_call_request_shape(fake_http, monkeypatch):
     assert text == "ok"
     assert body["usage"] == {"cost": 0.01}
     call = fake_http.calls[0]
-    assert fake_http.client_kwargs == [{"timeout": 120}]
+    assert fake_http.client_kwargs == [{"timeout": 120, "transport": None}]
     assert call["headers"]["X-Title"] == "espanso-prompt-rewriter-bench"
     assert call["json"]["model"] == "a/b"
     assert call["json"]["usage"] == {"include": True}

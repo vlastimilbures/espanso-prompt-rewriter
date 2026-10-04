@@ -174,6 +174,22 @@ def test_load_dotenv_explicit_path_does_not_override(tmp_path, monkeypatch):
     assert os.environ["PROMPT_PROVIDER"] == "anthropic"
 
 
+# .env only sets the settings this package reads: a proxy or CA bundle variable there would
+# change how httpx connects, so it is ignored, while real environment variables still apply.
+def test_load_dotenv_exports_only_known_settings(tmp_path, monkeypatch):
+    others = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "SSL_CERT_FILE", "FOO")
+    for name in others:
+        monkeypatch.setenv(name, "x")  # so monkeypatch restores the original state afterwards
+        monkeypatch.delenv(name)
+    lines = [f"{name}=http://127.0.0.1:9" for name in others]
+    (tmp_path / ".env").write_text("\n".join([*lines, "OLLAMA_MODEL=from-file", ""]))
+
+    _load_dotenv()
+
+    assert os.environ["OLLAMA_MODEL"] == "from-file"
+    assert not [name for name in others if name in os.environ]
+
+
 def _no_explicit_env(tmp_path, monkeypatch, project: Path, user: Path) -> None:
     monkeypatch.delenv("PROMPT_WORKFLOW_ENV")
     monkeypatch.setattr(config, "_PROJECT_ROOT", project)

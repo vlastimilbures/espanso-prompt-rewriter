@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import ipaddress
 from collections.abc import Callable
 from urllib.parse import urlsplit
 
 from .config import Settings
 from .gate import GatedProvider
 from .providers.anthropic import AnthropicProvider
-from .providers.base import Provider, ProviderError
+from .providers.base import Provider, ProviderError, is_loopback
 from .providers.ollama import OllamaProvider
 from .providers.openai_compatible import OpenAICompatibleProvider
 from .redaction import compile_extra
@@ -47,21 +46,10 @@ def _require(value: str | None, env_name: str) -> str:
     return value
 
 
-def _is_loopback(url: str) -> bool:
-    """Whether the URL's host is this machine: localhost, 127.0.0.0/8 or ::1."""
-    host = urlsplit(url).hostname or ""
-    if host == "localhost":
-        return True
-    try:
-        return ipaddress.ip_address(host).is_loopback
-    except ValueError:
-        return False
-
-
 def _require_https(url: str, env_name: str) -> str:
     """Refuse to send an API key over plaintext HTTP; a loopback proxy is the exception."""
     scheme = urlsplit(url).scheme
-    if scheme == "https" or (scheme == "http" and _is_loopback(url)):
+    if scheme == "https" or (scheme == "http" and is_loopback(url)):
         return url
     raise ProviderError(f"{env_name} must be an https:// URL")
 
@@ -105,7 +93,7 @@ def make_provider(
             think=cfg.ollama_think,
             temperature=cfg.temperature,
         )
-        local = _is_loopback(cfg.ollama_base_url) and not _is_ollama_cloud(cfg.ollama_model)
+        local = is_loopback(cfg.ollama_base_url) and not _is_ollama_cloud(cfg.ollama_model)
         return ollama if local else _gate(ollama, cfg)
     if name == "lmstudio":
         lmstudio = OpenAICompatibleProvider(
@@ -115,7 +103,7 @@ def make_provider(
             temperature=cfg.temperature,
             label="LM Studio",
         )
-        return lmstudio if _is_loopback(cfg.lmstudio_base_url) else _gate(lmstudio, cfg)
+        return lmstudio if is_loopback(cfg.lmstudio_base_url) else _gate(lmstudio, cfg)
     if name == "openrouter":
         return _gate(
             OpenAICompatibleProvider(

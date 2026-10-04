@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Changed
+- Calls to a base URL on this machine (`localhost`, `127.0.0.0/8`, `::1`; any provider) now
+  connect directly and ignore `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and the system proxy.
+  Remote endpoints still use them.
+- `.env` now sets only the settings in the README's configuration table (except
+  `PROMPT_WORKFLOW_ENV`, which only the real environment can set). Any other variable there, such
+  as `HTTPS_PROXY` or `SSL_CERT_FILE`, is ignored; set it for GUI apps instead (see README).
+
 ## 0.12.0
 
 ### Changed
