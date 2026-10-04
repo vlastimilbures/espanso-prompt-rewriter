@@ -1,4 +1,6 @@
 .env
+# A .env deactivated in place by the config migration (it may hold an API key).
+.env.inactive-*
 .venv/
 __pycache__/
 .pytest_cache/

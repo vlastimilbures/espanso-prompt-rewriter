@@ -159,7 +159,9 @@ espanso-prompt-rewriter/
 │       └── default.yml           optional Espanso settings (--with-config / -WithConfig)
 ├── src/prompt_workflow/          the prompt-workflow CLI
 │   ├── cli.py                    improve and persona commands, the single output sink
-│   ├── config.py                 Settings from the environment and .env
+│   ├── config.py                 Settings from the environment, config.toml or .env
+│   ├── config_files.py           reads config.toml/secrets.toml; atomic, private writes
+│   ├── config_store.py           saves settings and secrets; .env migration and rollback
 │   ├── factory.py                make_provider(): builds providers, decides which are gated
 │   ├── gate.py                   GatedProvider: scans every draft that can leave the machine
 │   ├── clipboard_guard.py        refuses password-manager (concealed) clipboard items
@@ -188,7 +190,7 @@ espanso-prompt-rewriter/
 │   ├── test_trigger_contract.py  exact trigger output, imports and module budget
 │   └── test_docs.py              README and .env.example list every setting
 ├── .github/                      CI (tests, gitleaks), Dependabot, issue and PR templates
-├── .env.example                  every setting with its default; copy to .env
+├── .env.example                  key and persona; every other setting commented out
 ├── CONTRIBUTING.md               setup, checks, how to add a profile/trigger/provider
 ├── SECURITY.md                   how to report a gate bypass or other vulnerability
 └── CHANGELOG.md                  release notes
@@ -244,8 +246,10 @@ pro tier's profile.
 ### Add a setting
 
 Add a field to `Settings` in `src/prompt_workflow/config.py` with `_env("NAME", "default")`, then
-document it in the README configuration table and in `.env.example`. `tests/test_docs.py` fails
-until both are done.
+document it in the README configuration table and in `.env.example` (commented out with its
+default: `# NAME=default`). `tests/test_docs.py` fails until both are done. A setting that holds
+a secret takes `secret=True`: it then stays out of `repr()`, is saved only in the secret store,
+and is never written to `config.toml`.
 
 ### Add a static snippet or form
 

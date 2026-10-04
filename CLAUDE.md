@@ -60,9 +60,15 @@ Espanso does not inherit shell PATH):
   `ValueError` naming the variable; API key fields are `secret` (kept out of `repr()`). Any error
   that quotes a rejected value goes through `redaction.safe_repr()`, since markers are pasted
   into the focused app. `Settings.load()` builds from `ConfigLayers.resolve()`, a pure merge
-  of layers (lowest first): built-in default < the first readable of `$PROMPT_WORKFLOW_ENV`, the
-  editable-install repo root's `.env` (derived from `__file__`), or the user config dir `.env` <
-  the real environment; per-call overrides come after, in `Settings.with_overrides()`. It never
+  of layers (lowest first): built-in default < saved settings < the secret store < the real
+  environment; per-call overrides come after, in `Settings.with_overrides()`. Saved settings
+  are `$PROMPT_WORKFLOW_ENV` alone if set (legacy mode: no TOML, no secret store, exactly as
+  before); else the user config dir's `config.toml` once it exists (then no `.env` is read, so
+  one can never shadow a saved value; repair mode reports a lingering one); else the first
+  readable of the editable-install repo root's `.env` (derived from `__file__`) or the user
+  config dir `.env`. The secret store (`config_files.secret_store()`, today `secrets.toml`; a
+  keyring seam is left as a TODO) holds only `secret_names()`. A broken `config.toml` or store
+  fails closed: `improve` prints the marker, `persona` its placeholder. It never
   writes `os.environ` (a second load sees an edited file; child processes inherit nothing) and
   records each key's source (`default`, `file:<path>`, `env`) and the layers it shadows. Only
   `env_names()` keys are taken, so a `.env` cannot set `HTTPS_PROXY`, `SSL_CERT_FILE` or any
@@ -72,7 +78,23 @@ Espanso does not inherit shell PATH):
   `.env` and lines without `=`, which strict mode skips silently. It deliberately never reads the
   cwd, so a planted `.env` cannot redirect the base URL or enable the override. This matters
   because Espanso runs the CLI as a GUI-spawned subprocess without an inherited login-shell
-  environment. `tests/conftest.py` points `PROMPT_WORKFLOW_ENV` at a temp file per test.
+  environment. `tests/conftest.py` points `PROMPT_WORKFLOW_ENV` at a temp file per test, and
+  `HOME`, `XDG_CONFIG_HOME`, `APPDATA` and `_PROJECT_ROOT` at temp dirs.
+- `config_files.py` — the light read side (on the trigger path: `tomllib` only once a file
+  exists) and `write_atomic()` (temp file in the same dir + `os.replace`; mode 600 from creation
+  on POSIX; on Windows a protected single-ACE DACL for the current user's SID, set via Win32
+  while the file is empty and read back, else `SecretStoreError`; no plaintext fallback).
+  A config dir that is a file or unreadable, or a `config.toml`/`secrets.toml` that is not a
+  regular file, counts as absent; only a real but unreadable file fails closed. The
+  migration marker is written before any change and names every place a `.env` may go.
+- `config_store.py` — services for the management commands (#92), never on the trigger path:
+  `save_settings()` (validates with the field parsers, refuses secrets, a newer
+  `config_version`, and a file changed since its `read_settings()` snapshot, naming the changed
+  keys), `save_secret()`, and the `.env` migration: `plan_migration()` previews (names only),
+  `apply_migration(consent=plan.token)` backs up, writes, verifies by reloading that every
+  effective value is unchanged, then moves each `.env` into `backups/` (rename, never delete)
+  and writes `migration.json`; `plan_rollback()`/`apply_rollback(consent=...)` restore exact
+  bytes. `tomli_w` is imported lazily (forbidden on the trigger path).
 - `history.py` — the local usage history (#88): `HistoryStore` over a per-device SQLite file,
   `config.user_data_dir()/history.sqlite3` (`$XDG_DATA_HOME` or `~/.local/share`,
   `%LOCALAPPDATA%` on Windows; `tests/conftest.py` points both at a temp dir). Metadata only:

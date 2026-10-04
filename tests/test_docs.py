@@ -16,13 +16,14 @@ def _readme_config_rows() -> set[str]:
     return set(re.findall(r"^\| `([A-Z_]+)`", readme, re.MULTILINE))
 
 
-# Every setting is documented in README's configuration table and in .env.example, so a
-# new variable cannot ship undocumented.
+# Every setting is documented in README's configuration table and in .env.example (commented
+# out with its default, except the key and persona), so a new variable cannot ship
+# undocumented.
 @pytest.mark.parametrize("name", env_names())
 def test_setting_is_documented(name):
     assert name in _readme_config_rows(), f"{name} missing from README configuration table"
     example = (REPO / ".env.example").read_text("utf-8")
-    assert re.search(rf"^{name}=", example, re.MULTILINE), f"{name} missing from .env.example"
+    assert re.search(rf"^#? ?{name}=", example, re.MULTILINE), f"{name} missing from .env.example"
 
 
 # The README table documents nothing Settings does not read (PROMPT_WORKFLOW_ENV is read

@@ -28,6 +28,14 @@ def isolated_env(tmp_path, monkeypatch):
     # The usage history and price table go to per-test dirs, never the developer's real ones.
     for key in ("XDG_DATA_HOME", "LOCALAPPDATA"):
         monkeypatch.setenv(key, str(tmp_path / "data"))
+    # The home the config dir would derive from, and the editable-install root, are per-test
+    # temp dirs too: a test that unsets PROMPT_WORKFLOW_ENV can never read, write or migrate
+    # the developer's real files (config.toml, secrets.toml, a repository .env).
+    for name in ("HOME", "USERPROFILE"):
+        monkeypatch.setenv(name, str(tmp_path / "home"))
+    from prompt_workflow import config
+
+    monkeypatch.setattr(config, "_PROJECT_ROOT", tmp_path / "project")
     # Never probe the developer's real clipboard: a concealed item there would fail tests.
     import prompt_workflow.cli as cli
 
