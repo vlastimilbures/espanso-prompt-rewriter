@@ -101,6 +101,9 @@ def make_provider(
 
     ``extra_body``, ``on_response`` and ``title`` only apply to OpenRouter; they let
     scripts/bench_models.py request usage/cost data through the same construction path.
+
+    The ``-> Provider`` return type is also what makes mypy check that every provider class
+    conforms to the Provider protocol.
     """
     remote = _leaves_machine(name, cfg)
     if remote and cfg.local_only:

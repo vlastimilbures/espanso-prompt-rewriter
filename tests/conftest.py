@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
 
@@ -22,90 +24,89 @@ def isolated_env(tmp_path, monkeypatch):
     monkeypatch.setenv("PROMPT_WORKFLOW_ENV", str(tmp_path / ".env"))
 
 
-class FakeResponse:
-    def __init__(self, status_code=200, json_data=None, bad_json=False):
-        self.status_code = status_code
-        self._json = json_data if json_data is not None else {}
-        self._bad_json = bad_json
+# Headers httpx adds to every request on its own; calls[i]["headers"] leaves them out so a
+# test sees what the provider set (plus the Content-Type httpx derives from json=).
+_HTTPX_OWN_HEADERS = frozenset(
+    {"host", "accept", "accept-encoding", "connection", "user-agent", "content-length"}
+)
 
-    def raise_for_status(self):
-        if self.status_code >= 400:
-            raise httpx.HTTPStatusError(
-                "error", request=httpx.Request("POST", "http://x"), response=self
-            )
 
-    def json(self):
-        if self._bad_json:
-            raise ValueError("Expecting value: line 1 column 1")
-        return self._json
+def _response(json_data=None, *, status_code=200, bad_json=False, headers=None) -> httpx.Response:
+    if bad_json:
+        return httpx.Response(status_code, content=b"<html>not json", headers=headers)
+    return httpx.Response(status_code, json={} if json_data is None else json_data, headers=headers)
 
 
 class FakeHttp:
-    """Stands in for httpx.Client: records each POST and replays one response or error."""
+    """Answers every request through httpx.MockTransport, so httpx still builds, encodes and
+    sends each real request (headers, JSON body, timeouts) while nothing reaches the network.
+
+    Replies come from ``queue()`` in order while it lasts, then from ``exc`` if set, then from
+    the last ``reply()``. A queued item is ``_response()`` keyword arguments or an exception.
+    """
 
     def __init__(self):
-        self.response = FakeResponse()
-        self.exc = None
-        self.calls = []
-        self.client_kwargs = []
-
-    def __call__(self, *args, **kwargs):
-        self.client_kwargs.append(kwargs)
-        return self
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        return False
-
-    def post(self, url, **kwargs):
-        self.calls.append({"url": url, **kwargs})
-        if self.exc:
-            raise self.exc
-        return self.response
+        self.requests: list[httpx.Request] = []
+        self.client_kwargs: list[dict] = []
+        self.exc: Exception | None = None
+        self._queue: list = []
+        self._reply: dict = {}
 
     def reply(self, json_data=None, **kwargs):
-        self.response = FakeResponse(json_data=json_data, **kwargs)
+        self._reply = {"json_data": json_data, **kwargs}
         return self
+
+    def queue(self, *items):
+        self._queue.extend(items)
+        return self
+
+    @property
+    def calls(self) -> list[dict]:
+        """Each request as {"url", "json", "headers"}; headers keep the case they were set in."""
+        return [
+            {
+                "url": str(request.url),
+                "json": json.loads(request.content) if request.content else None,
+                "headers": {
+                    key.decode(): value.decode()
+                    for key, value in request.headers.raw
+                    if key.decode().lower() not in _HTTPX_OWN_HEADERS
+                },
+            }
+            for request in self.requests
+        ]
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        if self._queue:
+            item = self._queue.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return _response(**item)
+        if self.exc:
+            raise self.exc
+        # A fresh Response per request: httpx consumes and closes each one.
+        return _response(**self._reply)
 
 
 @pytest.fixture
 def fake_http(monkeypatch):
-    """Patch httpx.Client for every provider; no test may reach the network."""
+    """Patch httpx.Client so every client uses a MockTransport; no test may reach the network.
+
+    The patched client replaces any transport the code passes (post_json gives loopback URLs
+    their own), and refuses a proxy or mount, which would take precedence over the transport.
+    ``client_kwargs`` records the arguments as the code passed them.
+    """
     fake = FakeHttp()
-    monkeypatch.setattr(httpx, "Client", fake)
-    return fake
-
-
-class MockHttp:
-    """Answers every request through httpx.MockTransport, so httpx still builds and sends
-    real requests. Records each one; replies with ``reply`` as JSON and ``status``."""
-
-    def __init__(self):
-        self.requests: list[httpx.Request] = []
-        self.reply: object = {}
-        self.status = 200
-
-    def handler(self, request: httpx.Request) -> httpx.Response:
-        self.requests.append(request)
-        return httpx.Response(self.status, json=self.reply)
-
-
-@pytest.fixture
-def mock_transport(monkeypatch):
-    """Patch httpx.Client so every client uses a MockTransport, so a test using this fixture
-    cannot reach the network. A proxy or mount would take precedence over the transport, so
-    the patched client refuses them."""
-    mock = MockHttp()
     real_client = httpx.Client
 
     def client(*args, **kwargs):
-        assert not {"proxy", "mounts"} & kwargs.keys(), "mock_transport cannot honour a proxy"
-        return real_client(*args, **{**kwargs, "transport": httpx.MockTransport(mock.handler)})
+        assert not {"proxy", "mounts"} & kwargs.keys(), "fake_http cannot honour a proxy"
+        fake.client_kwargs.append(kwargs)
+        return real_client(*args, **{**kwargs, "transport": httpx.MockTransport(fake.handler)})
 
     monkeypatch.setattr(httpx, "Client", client)
-    return mock
+    return fake
 
 
 class StubProvider:
