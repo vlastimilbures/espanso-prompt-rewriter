@@ -14,7 +14,12 @@ from .clipboard_guard import is_concealed
 from .config import EFFORTS, KEEP, TIERS, Settings
 from .factory import PROVIDER_NAMES, make_provider
 from .gate import GatedProvider
-from .prompt_builder import TEMPLATE_MARKER, repair_template_tags, system_prompt
+from .prompt_builder import (
+    TEMPLATE_MARKER,
+    repair_template_tags,
+    strip_outer_fence,
+    system_prompt,
+)
 from .providers.base import ProviderError
 from .redaction import DEFAULT_IGNORABLE
 
@@ -182,9 +187,12 @@ def improve(
         system = system_prompt(profile or cfg.profile, cfg.persona)
         built = make_provider(provider or cfg.provider, cfg, allow_flagged=allow_flagged)
         result = built.generate(draft, system)
+        # Cleaned first, so an invisible character cannot hide a fence from the strip. A reply
+        # wrapped in one code fence would be pasted with the fence (flash-lite wrapped 16 of 36
+        # with the old general profile).
+        result = strip_outer_fence(_clean(result))
         if TEMPLATE_MARKER in system:
             result = repair_template_tags(result)
-        result = _clean(result)
         if copy:
             _clipboard(pyperclip.copy, result)
     except Exception as exc:

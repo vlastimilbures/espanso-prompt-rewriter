@@ -72,7 +72,11 @@ Espanso does not inherit shell PATH):
   re-run the benchmark (`--suite all --system-prompt-file`) on both default models before
   shipping a prompt change. Both tiers send `default` (`PROMPT_PRO_PROFILE` is empty by
   default), so one prompt serves flash-lite and gpt-6-luna; the bench scores it on both. Open
-  weaknesses are listed in CONTRIBUTING.md ("Known gaps in the default prompt").
+  weaknesses are listed in CONTRIBUTING.md ("Known gaps in the default prompt"). `general`
+  (the local triggers) is a short draft-as-data rewrite in the language of the user's request; the bench scores
+  it with `--profile general` via `check_general()`, and `test_general_profile_contract` pins its
+  phrases. `strip_outer_fence()` removes a fence around a whole reply; the CLI and the bench
+  apply it to every profile before the tag repair.
 
 ### Data-protection gate
 

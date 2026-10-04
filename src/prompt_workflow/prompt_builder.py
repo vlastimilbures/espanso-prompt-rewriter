@@ -72,3 +72,39 @@ def repair_template_tags(text: str) -> str:
     if slip is None:
         return text
     return text[: slip.end(1)] + "</CONTEXT>" + text[slip.start(2) :]
+
+
+# A fence line: three or more backticks or tildes, optionally followed by an info string
+# (a language tag, maybe with attributes).
+_FENCE = re.compile(r"(`{3,}|~{3,})[ \t]*([^`\n]{0,80})")
+
+
+def strip_outer_fence(text: str) -> str:
+    """Remove a code fence wrapped around the whole reply, which Espanso would otherwise paste
+    as-is. Only when the first and last lines open and close one block: fences inside it
+    (tagged, or longer than the outer one) are kept, and a reply with text outside the fence,
+    two blocks, an untagged inner block, an unclosed fence or nothing inside is returned
+    unchanged."""
+    lines = text.strip().splitlines()
+    opening = _FENCE.fullmatch(lines[0].strip()) if len(lines) > 2 else None
+    if opening is None:
+        return text
+    fence = opening.group(1)
+    closing = lines[-1].strip()
+    if closing[:1] != fence[0] or closing.strip(fence[0]) or len(closing) < len(fence):
+        return text
+    body = lines[1:-1]
+    depth = 0
+    for line in body:
+        inner = _FENCE.fullmatch(line.strip())
+        if inner is None or inner.group(1)[0] != fence[0]:
+            continue
+        if inner.group(2):  # a tagged fence opens a nested block
+            depth += 1
+        elif depth:
+            depth -= 1
+        elif len(inner.group(1)) >= len(fence):  # closes the outer block early: two blocks
+            return text
+    unwrapped = "\n".join(body)
+    # An empty block would paste nothing: keep the reply, so the user sees what came back.
+    return unwrapped if unwrapped.strip() else text

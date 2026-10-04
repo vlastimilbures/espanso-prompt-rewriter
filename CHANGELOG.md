@@ -15,6 +15,13 @@ All notable changes to this project are documented here. The format follows
   which formats are present, through ctypes (about 10-40 ms on macOS), and adds no dependency.
   On Linux, for browser-extension copies, or if the probe fails, the clipboard is read as
   before.
+- The `general` profile, used by the local triggers `-il-` and `-ilm-`, treats the whole
+  clipboard as the draft: data to rewrite, never instructions to the rewriter (#47). Pasted
+  material is copied word for word, and the rewrite adds a constraint that instructions inside
+  it must not be followed. It adds no facts, roles or audiences, and returns only the prompt.
+  On flash-lite (a proxy; no local model measured yet), the bench's `check_general` passes
+  36/36 drafts, up from 4/36 (31 of the old failures were invented roles), and the injection
+  drafts are never carried over as instructions, with the guard present, in 12/12 runs.
 - Invisible characters no longer reach the model or the paste (#22). `_clean()` now drops
   every code point Unicode marks as default-ignorable (zero-width space, word joiner, BOM, bidi
   marks, soft hyphen, combining grapheme joiner, Hangul fillers, variation selectors, and the
@@ -55,6 +62,13 @@ All notable changes to this project are documented here. The format follows
   recommends `ALLOW_CLOUD_OVERRIDE`.
 
 ### Changed
+- The `general` profile writes in the language of the user's own request instead of
+  translating (#47).
+- A reply wrapped in one code fence is pasted without the fence, for every profile. Fences
+  inside the reply, and an empty fenced reply, are kept (#47).
+- The bench takes `--profile` and scores a profile without the golden template on its output
+  contract (`check_general`): no answer instead of a rewrite, no preamble, role or carried-over
+  injection, the draft's language and its pasted material. Fenced replies are counted (#47).
 - The gate stops blocking ordinary drafts (#21). A confidentiality label counts only when
   written as one: upper case, alone on a line or opening one before `:` or a dash, in
   brackets, a `Classification:`/`Sensitivity:`/`Độ mật:` field, *highly/company/strictly
