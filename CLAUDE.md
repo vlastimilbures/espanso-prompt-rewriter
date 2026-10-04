@@ -35,7 +35,9 @@ Espanso does not inherit shell PATH):
   `reasoning: {effort, exclude: true}` (`OPENROUTER_REASONING_EFFORT`; empty omits it).
 - `config.py` — `Settings` is a frozen dataclass read from env vars, with defaults for each
   provider. Values are parsed strictly (`_bool`, `_positive_int`, ...) and a bad one raises a
-  `ValueError` naming the variable; API key fields are `secret` (kept out of `repr()`). `_load_dotenv()` loads the first of `$PROMPT_WORKFLOW_ENV`, the editable-install
+  `ValueError` naming the variable; API key fields are `secret` (kept out of `repr()`). Any error
+  that quotes a rejected value goes through `redaction.safe_repr()`, since markers are pasted
+  into the focused app, and `_load_dotenv()` refuses a value holding another setting's `NAME=`. `_load_dotenv()` loads the first of `$PROMPT_WORKFLOW_ENV`, the editable-install
   repo root's `.env` (derived from `__file__`), or the user config dir `.env`, with a
   dependency-free `setdefault` (never overrides real env vars). It exports only `env_names()`
   keys, so a `.env` cannot set `HTTPS_PROXY`, `SSL_CERT_FILE` or any other variable. It deliberately never reads the

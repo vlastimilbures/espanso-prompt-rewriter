@@ -101,6 +101,20 @@ def _normalize(text: str) -> str:
     return "".join(ch for ch in folded if unicodedata.category(ch) != "Cf")
 
 
+# Longest raw value an error message repeats back as-is.
+SHOWN_MAX_CHARS = 40
+
+
+def safe_repr(raw: str) -> str:
+    """How an error message quotes a value it rejects. Errors are pasted into whatever app
+    has focus, so a value that may hold a secret is described instead of repeated: a long
+    one, one that scan() flags, or one containing '=' (two .env lines run together)."""
+    if len(raw) <= SHOWN_MAX_CHARS and "=" not in raw and not scan(raw):
+        return repr(raw)
+    merged = "; two .env lines may have run together" if "=" in raw else ""
+    return f"<redacted, {len(raw)} chars{merged}>"
+
+
 def scan(text: str, extra: tuple[re.Pattern[str], ...] = ()) -> list[str]:
     """Return the names of any sensitive patterns found in text.
 

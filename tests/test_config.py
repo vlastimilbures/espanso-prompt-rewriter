@@ -280,6 +280,49 @@ def test_bool_parsing_rejects_other_values(monkeypatch, raw):
         Settings()
 
 
+FAKE_KEY = "sk-or-v1-" + "cd" * 32
+
+
+# A rejected value that may hold a secret is never repeated in the error, which the CLI
+# pastes into the focused app. Short harmless values still are (see the tests above).
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "2400OPENROUTER_API_KEY=" + FAKE_KEY,
+        FAKE_KEY,
+        "x" * 41,
+    ],
+    ids=["merged-line", "key", "long"],
+)
+def test_parse_error_never_echoes_secret_like_values(monkeypatch, raw):
+    monkeypatch.setenv("OPENROUTER_MAX_TOKENS", raw)
+    with pytest.raises(ValueError, match=r"^OPENROUTER_MAX_TOKENS must be") as caught:
+        Settings()
+    message = str(caught.value)
+    assert "sk-or-v1" not in message
+    assert "cdcd" not in message
+    assert "xxxx" not in message
+    assert f"<redacted, {len(raw)} chars" in message
+
+
+# Per-call overrides follow the same rule.
+def test_override_error_never_echoes_secret_like_values():
+    with pytest.raises(ValueError, match="redacted") as caught:
+        Settings().with_overrides(max_tokens=FAKE_KEY)
+    assert "cdcd" not in str(caught.value)
+
+
+# A .env saved without the newline between two lines is refused by name, before any value
+# (here a persona carrying the next line's key) can reach a prompt or the pasted output.
+@pytest.mark.parametrize("first", ["OPENROUTER_MAX_TOKENS=2400", "PROMPT_PERSONA=I am a tester."])
+def test_load_rejects_merged_env_lines(tmp_path, first):
+    (tmp_path / ".env").write_text(f"{first}OPENROUTER_API_KEY={FAKE_KEY}\n")
+    key = first.partition("=")[0]
+    with pytest.raises(ValueError, match=f"^{key} in .env runs into the next line") as caught:
+        Settings.load()
+    assert "cdcd" not in str(caught.value)
+
+
 # An empty key in .env (as in .env.example) counts as unset for the provider check.
 def test_empty_api_key_is_kept_as_empty(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "")

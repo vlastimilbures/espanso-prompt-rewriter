@@ -97,7 +97,35 @@ def test_unknown_provider_reports_inline():
 def test_unknown_profile_reports_inline(stub_provider):
     result = improve("--profile", "nope", "--source", "argument", "--text", "draft")
     assert result.exit_code == 0
-    assert result.stdout.startswith("[prompt-workflow: Unknown profile: nope")
+    assert result.stdout.startswith("[prompt-workflow: Unknown profile: 'nope'")
+
+
+FAKE_KEY = "sk-or-v1-" + "cd" * 32
+
+
+# A provider or profile name that is really two .env lines run together (so it carries the
+# next line's API key) is reported without repeating the value.
+@pytest.mark.parametrize("setting", ["PROMPT_PROVIDER", "PROMPT_PROFILE"])
+def test_bad_name_error_never_echoes_key(monkeypatch, setting):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setenv(setting, f"openrouterOPENROUTER_API_KEY={FAKE_KEY}")
+    result = improve("--source", "argument", "--text", "draft")
+    assert result.exit_code == 0
+    assert result.stdout.startswith("[prompt-workflow: Unknown pro")
+    assert "<redacted," in result.stdout
+    assert "cdcd" not in result.stdout
+
+
+# The same .env merged into the persona line is an inline error for improve, and the -p-
+# snippet falls back to its placeholder instead of pasting the key.
+def test_merged_env_line_is_reported_not_pasted(tmp_path):
+    (tmp_path / ".env").write_text(f"PROMPT_PERSONA=I am a tester.OPENROUTER_API_KEY={FAKE_KEY}\n")
+    result = improve("--source", "argument", "--text", "draft")
+    assert result.stdout == (
+        "[prompt-workflow: PROMPT_PERSONA in .env runs into the next line; add the missing newline]"
+    )
+    persona = runner.invoke(app, ["persona"])
+    assert persona.stdout == "I am working as [role] in [company]."
 
 
 # Any other exception is still caught and marked as unexpected, never a traceback.

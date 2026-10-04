@@ -8,6 +8,8 @@ from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 from typing import Any
 
+from .redaction import safe_repr
+
 
 def _parse_value(raw: str) -> str:
     """A .env value: the text inside a leading quote pair, else the text before an inline
@@ -74,10 +76,21 @@ def _load_dotenv() -> None:
     for candidate in _env_file_candidates():
         pairs = read_env_file(candidate)
         if pairs is not None:
+            _reject_merged_lines(pairs)
             for key, value in pairs.items():
                 if key in known:
                     os.environ.setdefault(key, value)
             return
+
+
+def _reject_merged_lines(pairs: dict[str, str]) -> None:
+    """Refuse a value that holds another setting's `NAME=`: a .env saved without a newline
+    between two lines. Every setting would otherwise take the rest of the line, and a
+    persona, profile or provider name could carry an API key into pasted output."""
+    names = re.compile("|".join(re.escape(name) + "=" for name in env_names()))
+    for key, value in pairs.items():
+        if names.search(value):
+            raise ValueError(f"{key} in .env runs into the next line; add the missing newline")
 
 
 def _env(
@@ -91,7 +104,7 @@ def _env(
         try:
             return parse(raw)
         except ValueError as exc:
-            raise ValueError(f"{name} must be {exc}, got {raw!r}") from None
+            raise ValueError(f"{name} must be {exc}, got {safe_repr(raw)}") from None
 
     return field(default_factory=read, repr=not secret, metadata={"env": name})
 
@@ -151,7 +164,7 @@ def split_model_spec(spec: str | None) -> tuple[str | None, str | None]:
         return spec, None
     model, _, endpoint = spec.partition("@")
     if not model or not endpoint:
-        raise ValueError(f"--model must be slug or slug@endpoint, got {spec!r}")
+        raise ValueError(f"--model must be slug or slug@endpoint, got {safe_repr(spec)}")
     return model, "" if endpoint == AUTO_ENDPOINT else endpoint
 
 
@@ -162,7 +175,7 @@ def _override[T](raw: str | None, option: str, parse: Callable[[str], T]) -> T |
     try:
         return parse(raw)
     except ValueError as exc:
-        raise ValueError(f"{option} must be {exc} or {KEEP}, got {raw!r}") from None
+        raise ValueError(f"{option} must be {exc} or {KEEP}, got {safe_repr(raw)}") from None
 
 
 @dataclass(frozen=True)
