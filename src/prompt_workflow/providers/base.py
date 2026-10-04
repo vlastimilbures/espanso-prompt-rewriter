@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from ..redaction import safe_repr, scan
+from .usage import Meter
 
 
 class ProviderError(RuntimeError):
@@ -171,6 +172,7 @@ def post_json(
     *,
     json: object = None,
     headers: Mapping[str, str] | None = None,
+    meter: Meter | None = None,
 ) -> dict[str, object]:
     """POST and return the parsed JSON body; every failure is a ProviderError.
 
@@ -184,20 +186,38 @@ def post_json(
     httpx applies those only to a client without its own transport, so giving it one keeps
     the rest of the environment (SSL_CERT_FILE for a local https server) in effect. Other
     URLs keep using the proxy, which corporate networks need.
+
+    With a ``meter``, every attempt, failed ones included, reports one AttemptUsage to its
+    observer before this returns or raises, so usage the API charged for is kept even when
+    the caller then fails to finalise the content. The observer's own time is not charged
+    to ``timeout``, so a slow observer cannot cost the call its retry.
     """
     encoded = _encode_headers(label, headers)
     deadline = time.monotonic() + timeout
+    first = _Outcome()
     try:
-        return _attempt(label, url, timeout, timeout, json, encoded)
+        return _attempt(label, url, timeout, timeout, json, encoded, meter, first)
     except _Retry as retry:
-        budget = deadline - time.monotonic() - retry.delay
+        budget = deadline + first.observer_seconds - time.monotonic() - retry.delay
         if budget < MIN_RETRY_BUDGET:
             raise retry.error from retry.error.__cause__
         _sleep(retry.delay)
     try:
-        return _attempt(label, url, timeout, budget, json, encoded)
+        return _attempt(label, url, timeout, budget, json, encoded, meter, _Outcome(2))
     except _Retry as retry:
         raise retry.error from retry.error.__cause__
+
+
+class _Outcome:
+    """What one attempt saw, filled in by _exchange() as it goes, for the usage record, and
+    how long the observer then took with it."""
+
+    def __init__(self, number: int = 1) -> None:
+        self.number = number
+        self.status: int | None = None
+        self.error_kind: str | None = None
+        self.body: object = None
+        self.observer_seconds = 0.0
 
 
 def _attempt(
@@ -207,6 +227,39 @@ def _attempt(
     budget: float,
     json: object,
     headers: httpx.Headers,
+    meter: Meter | None = None,
+    outcome: _Outcome | None = None,
+) -> dict[str, object]:
+    """One request, reported to ``meter`` (if any) however it ends."""
+    outcome = outcome or _Outcome()
+    started = time.monotonic()
+    try:
+        return _exchange(label, url, timeout, budget, json, headers, outcome)
+    except BaseException:
+        outcome.error_kind = outcome.error_kind or "unexpected"
+        raise
+    finally:
+        if meter is not None:
+            ended = time.monotonic()
+            meter.record(
+                loopback=is_loopback(url),
+                attempt=outcome.number,
+                status=outcome.status,
+                error_kind=outcome.error_kind,
+                body=outcome.body,
+                latency=ended - started,
+            )
+            outcome.observer_seconds = time.monotonic() - ended
+
+
+def _exchange(
+    label: str,
+    url: str,
+    timeout: float,
+    budget: float,
+    json: object,
+    headers: httpx.Headers,
+    outcome: _Outcome,
 ) -> dict[str, object]:
     """One request, given ``budget`` seconds in total. httpx's own timeouts apply to each
     network operation, and its read timer restarts with every chunk, so a server that
@@ -221,21 +274,27 @@ def _attempt(
             httpx.Client(timeout=limits, transport=transport) as client,
             client.stream("POST", url, json=json, headers=headers) as response,
         ):
+            outcome.status = response.status_code
             for chunk in response.iter_bytes():
                 content += chunk
                 if time.monotonic() > stop_at:
+                    outcome.error_kind = "timeout"
                     raise timed_out
     except httpx.TimeoutException as exc:
+        outcome.error_kind = "timeout"
         raise timed_out from exc
     except httpx.InvalidURL as exc:
+        outcome.error_kind = "invalid_url"
         raise ProviderError(f"{label} base URL invalid: {safe_repr(str(exc))}") from exc
     except httpx.LocalProtocolError as exc:
         # Raised for a header value with characters HTTP forbids; its message quotes the
         # value, which is the API key, so it is not repeated.
+        outcome.error_kind = "invalid_header"
         raise ProviderError(
             f"{label} request failed: invalid header value (check the API key)"
         ) from exc
     except httpx.ConnectError as exc:
+        outcome.error_kind = "refused"
         refused = ProviderError(f"{label} request failed: {exc}", transient=True)
         refused.__cause__ = exc  # kept when post_json re-raises it after the retry
         # A local server that refuses the connection is not running; a second try a second
@@ -244,21 +303,26 @@ def _attempt(
             raise refused from exc
         raise _Retry(refused) from exc
     except httpx.HTTPError as exc:
+        outcome.error_kind = "transport"
         raise ProviderError(f"{label} request failed: {exc}") from exc
 
     try:
         body: object = jsonlib.loads(content)
     except ValueError:
         body = None
+    outcome.body = body
     if not response.is_success:
+        outcome.error_kind = "non_2xx"
         error = http_error(label, response.status_code, body)
         delay = _retry_delay(response.headers.get("retry-after"))
         if response.status_code in RETRY_STATUSES and delay is not None:
             raise _Retry(error, delay)
         raise error
     if body is None:
+        outcome.error_kind = "invalid_json"
         raise ProviderError(f"{label} returned invalid JSON")
     if failure := body_error(label, body):
+        outcome.error_kind = "body_error"
         if failure.status in RETRY_STATUSES:
             raise _Retry(failure)
         raise failure

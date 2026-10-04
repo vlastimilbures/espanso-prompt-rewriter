@@ -9,6 +9,7 @@ from .providers.anthropic import AnthropicProvider
 from .providers.base import Provider, ProviderError, is_loopback
 from .providers.ollama import OllamaProvider
 from .providers.openai_compatible import OpenAICompatibleProvider
+from .providers.usage import UsageObserver
 from .redaction import compile_extra, safe_repr
 
 PROVIDER_NAMES = ("ollama", "lmstudio", "openrouter", "anthropic")
@@ -105,6 +106,7 @@ def make_provider(
     extra_body: dict[str, object] | None = None,
     on_response: Callable[[dict[str, object]], None] | None = None,
     title: str = APP_TITLE,
+    observer: UsageObserver | None = None,
 ) -> Provider:
     """Build the named provider from settings. Anything that can send the draft off this
     machine (see _leaves_machine) comes wrapped in the data-protection gate, and with
@@ -116,6 +118,10 @@ def make_provider(
 
     ``extra_body``, ``on_response`` and ``title`` only apply to OpenRouter; they let
     scripts/bench_models.py request usage/cost data through the same construction path.
+
+    ``observer`` goes to every provider, inside the gate, and receives one AttemptUsage per
+    HTTP attempt (providers/usage.py); a draft the gate blocks makes no attempt, so no record.
+    A loopback Ollama or LM Studio that is not a cloud model reports cost ``not_applicable``.
 
     The ``-> Provider`` return type is also what makes mypy check that every provider class
     conforms to the Provider protocol.
@@ -130,6 +136,8 @@ def make_provider(
             timeout=cfg.timeout,
             think=cfg.ollama_think,
             temperature=cfg.temperature,
+            observer=observer,
+            local=not remote,
         )
         return _gate(ollama, cfg, allow_flagged, name) if remote else ollama
     if name == "lmstudio":
@@ -139,6 +147,9 @@ def make_provider(
             timeout=cfg.timeout,
             temperature=cfg.temperature,
             label="LM Studio",
+            observer=observer,
+            name=name,
+            local=not remote,
         )
         return _gate(lmstudio, cfg, allow_flagged, name) if remote else lmstudio
     if name == "openrouter":
@@ -154,6 +165,8 @@ def make_provider(
                 label="OpenRouter",
                 extra_body={**openrouter_body(cfg), **(extra_body or {})},
                 on_response=on_response,
+                observer=observer,
+                name=name,
             ),
             cfg,
             allow_flagged,
@@ -168,6 +181,7 @@ def make_provider(
                 timeout=cfg.timeout,
                 max_tokens=cfg.anthropic_max_tokens,
                 temperature=cfg.temperature,
+                observer=observer,
             ),
             cfg,
             allow_flagged,

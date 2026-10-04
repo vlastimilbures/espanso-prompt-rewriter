@@ -45,6 +45,16 @@ Espanso does not inherit shell PATH):
   lists the valid names. `cli.py` and `scripts/bench_models.py` both build through it. For
   OpenRouter it adds the endpoint pin (`OPENROUTER_PROVIDER`) and
   `reasoning: {effort, exclude: true}` (`OPENROUTER_REASONING_EFFORT`; empty omits it).
+  An optional `observer=` is passed to every provider, inside the gate (no request, no record).
+- `providers/usage.py` — `AttemptUsage` (frozen) and the `UsageObserver` protocol. With an
+  observer, `post_json(..., meter=Meter(...))` reports one record per HTTP attempt (both
+  attempts of a retry, timeouts and non-2xx included) before it returns or raises, so usage
+  survives a `finalize_content()` failure. Each provider adds what its body reports
+  (`openrouter_usage`, `openai_usage`, `anthropic_usage`, `ollama_usage`). Records hold
+  metadata only, never prompt, response, body or key text. A missing cost is `None`/`unknown`,
+  never 0; the factory's `local=True` (loopback, non-cloud Ollama/LM Studio) makes it
+  `not_applicable`. Observer and parser exceptions are swallowed (no retry, output unchanged);
+  `decimal` is imported only when a cost is parsed. Nothing stores the records yet (#88, #89).
 - `config.py` — `Settings` is a frozen dataclass read from env vars, with defaults for each
   provider. Values are parsed strictly (`_bool`, `_positive_int`, ...) and a bad one raises a
   `ValueError` naming the variable; API key fields are `secret` (kept out of `repr()`). Any error
