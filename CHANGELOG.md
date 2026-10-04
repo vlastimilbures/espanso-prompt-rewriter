@@ -16,6 +16,25 @@ All notable changes to this project are documented here. The format follows
   joiners survive. Ideographic variation selectors, Mongolian variation selectors and bidi marks
   are dropped too. The gate's normalised scan drops the same characters, so they can no longer
   split a card number.
+- The gate catches the secret shapes developers paste most (#20):
+  - camelCase and JSON names (`clientSecret`, `accessToken`, `dbPassword`), compound env names
+    (`PGPASSWORD`), `*_KEY` names (`SECRET_KEY`, `PRIVATE_KEY`, `secret_key_base`) and
+    `_authToken`;
+  - PHP `'password' => …`, Go `:=`, `define('DB_PASSWORD', …)`, `environ["API_KEY"] = …` and
+    values aligned with many spaces;
+  - passwords of 6+ characters (`password: hunter2`) and in prose (`the password for the
+    admin account is …`, Vietnamese `mật khẩu wifi là …`, `mật khẩu đăng nhập: …`);
+  - AWS temporary keys (`ASIA…`), `Basic` credentials (UTF-8 too), `curl -u user:password`
+    (also after a `\` line continuation), npm tokens, Azure `AccountKey=`/`SharedAccessKey=`
+    and SAS `sig=`;
+  - IBANs (any case, spaces or dashes; country length and mod-97 checked);
+  - card numbers split by up to three spaces, tabs, slashes, dashes or minus signs, or one line
+    break, or next to another number.
+- A draft that is one password- or token-like word (no spaces, 8-200 characters, a digit and
+  three of lower case, upper case, digit and symbol) is blocked as `bare_token`: the classic
+  stale-clipboard slip. URLs, paths, emails, UUIDs, hashes, versions, dates and lower-case
+  slugs and file names are not. A single word is never a prompt, so a mixed-case identifier
+  with a digit is blocked too.
 
 ### Changed
 - Carriage returns, vertical tabs, form feeds, NEL and the Unicode line and paragraph

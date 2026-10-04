@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 
 from .providers.base import Provider, ProviderError
-from .redaction import scan
+from .redaction import scan_draft
 
 
 class GatedProvider:
@@ -21,7 +21,7 @@ class GatedProvider:
         self._extra_patterns = extra_patterns
 
     def generate(self, prompt: str, system_prompt: str) -> str:
-        findings = scan(prompt, self._extra_patterns)
+        findings = scan_draft(prompt, self._extra_patterns)
         if findings and not self._allow_override:
             raise ProviderError(
                 "Blocked cloud call. Sensitive content detected: "

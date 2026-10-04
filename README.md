@@ -365,10 +365,18 @@ Ollama or LM Studio when their base URL is not `localhost` (or `127.0.0.1`, `::1
 model is a cloud model (a `:cloud` or `-cloud` tag, which the local daemon forwards to
 ollama.com). The gate blocks drafts containing:
 
-- payment card numbers (Luhn-checked) and email addresses
+- payment card numbers (Luhn-checked, also when split by double spaces, tabs, dashes or one line
+  break), IBANs (checksum-validated) and email addresses
 - API keys (OpenRouter, Anthropic, OpenAI, Stripe, GitHub, GitLab, Hugging Face, Slack, Google,
-  xAI, AWS), JWTs, bearer tokens, PEM/OpenSSH/PGP private keys, `user:password@` URLs and
-  `password=…`-style assignments, including `DB_PASSWORD=…` and JSON `"client_secret": "…"`
+  xAI, npm, AWS including temporary `ASIA…` keys), Azure storage keys and SAS signatures, JWTs,
+  bearer and `Basic` credentials, `curl -u user:password`, PEM/OpenSSH/PGP private keys and
+  `user:password@` URLs
+- secrets assigned to a name: `DB_PASSWORD=…`, JSON `"client_secret": "…"`, camelCase
+  `clientSecret`/`dbPassword`, `PGPASSWORD`, `SECRET_KEY`, `PRIVATE_KEY`, `_authToken`, PHP
+  `=>` and Go `:=` (the value must contain a digit), and passwords in prose (`the password is
+  …`, `mật khẩu là …`)
+- a draft that is a single password- or token-like word, such as a vault password left on the
+  clipboard
 - confidentiality labels such as *confidential*, *restricted*, *internal only*, *customer data*
 - Vietnamese national ID formats (12-digit, and 9-digit next to an ID keyword)
 - your own patterns from `PROMPT_EXTRA_PATTERNS`, for example
@@ -377,7 +385,8 @@ ollama.com). The gate blocks drafts containing:
 
 > [!WARNING]
 > The gate is a heuristic safety net, not a compliance control. It misses things (names,
-> addresses, most countries' ID formats, look-alike letters from other alphabets) and sometimes
+> addresses, phone numbers, IP addresses, most countries' ID formats, a password in a
+> sentence that does not call it one, look-alike letters from other alphabets) and sometimes
 > flags harmless text.
 
 The draft is also scanned in a normalised form, so no-break or zero-width spaces, soft hyphens,

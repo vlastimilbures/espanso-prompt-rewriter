@@ -75,8 +75,9 @@ Espanso does not inherit shell PATH):
 `factory.py`'s `make_provider()` (the only place providers are built) wraps, via `_gate()`,
 everything that can send the draft off the machine (`_leaves_machine()`) in `gate.GatedProvider`: `openrouter` and
 `anthropic` always, `ollama`/`lmstudio` when the base URL is not loopback (`providers.base.is_loopback()`) or
-the Ollama model is a `cloud`-tagged one. The gate runs `redaction.scan()` (built-in patterns
-plus the user's `PROMPT_EXTRA_PATTERNS`) and blocks the call unless `ALLOW_CLOUD_OVERRIDE=true`.
+the Ollama model is a `cloud`-tagged one. The gate runs `redaction.scan_draft()` (built-in patterns,
+the user's `PROMPT_EXTRA_PATTERNS`, and the whole-draft `bare_token` rule, which `safe_repr()`'s
+`scan()` leaves out) and blocks the call unless `ALLOW_CLOUD_OVERRIDE=true`.
 It also requires `https` cloud base URLs (plain `http` only to loopback).
 `providers.base.post_json()` (the only HTTP call) gives a loopback URL its own `HTTPTransport`,
 which makes httpx skip env and system proxies for it; every other URL keeps the proxy.

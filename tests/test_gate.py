@@ -47,3 +47,12 @@ def test_blocks_on_extra_pattern():
     with pytest.raises(ProviderError, match="custom_1"):
         provider.generate("Project Falcon roadmap", "system")
     assert inner.calls == []
+
+
+# A password left alone on the clipboard is blocked, though no pattern names it.
+def test_blocks_bare_token_draft():
+    inner = _Stub()
+    provider = GatedProvider(inner, allow_override=False)
+    with pytest.raises(ProviderError, match="bare_token"):
+        provider.generate("Winter" + "2026!x", "system")
+    assert inner.calls == []
