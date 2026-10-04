@@ -61,7 +61,24 @@ def _is_ollama_cloud(model: str) -> bool:
     return tag == "cloud" or tag.endswith("-cloud")
 
 
+def _leaves_machine(name: str, cfg: Settings) -> bool:
+    """Whether the named provider can send the draft off this machine: the cloud providers
+    always, Ollama or LM Studio when the base URL is not loopback or (Ollama) the model is a
+    cloud model. The gate and PROMPT_LOCAL_ONLY both follow this one decision."""
+    if name == "ollama":
+        return not is_loopback(cfg.ollama_base_url) or _is_ollama_cloud(cfg.ollama_model)
+    if name == "lmstudio":
+        return not is_loopback(cfg.lmstudio_base_url)
+    return name in ("openrouter", "anthropic")
+
+
 def _gate(inner: Provider, cfg: Settings) -> GatedProvider:
+    # make_provider refuses earlier with a clearer message; this keeps the guarantee for any
+    # provider added later that returns through _gate().
+    if cfg.local_only:
+        raise ProviderError(
+            "PROMPT_LOCAL_ONLY=true: this provider would send the draft off this machine"
+        )
     return GatedProvider(
         inner,
         allow_override=cfg.allow_cloud_override,
@@ -78,13 +95,16 @@ def make_provider(
     title: str = APP_TITLE,
 ) -> Provider:
     """Build the named provider from settings. Anything that can send the draft off this
-    machine comes wrapped in the data-protection gate: the cloud providers always, and
-    Ollama or LM Studio when the base URL is not loopback or (Ollama) the model is a cloud
-    model. Nothing built here can skip it.
+    machine (see _leaves_machine) comes wrapped in the data-protection gate, and with
+    PROMPT_LOCAL_ONLY=true it is refused before anything is built. Nothing built here can
+    skip either.
 
     ``extra_body``, ``on_response`` and ``title`` only apply to OpenRouter; they let
     scripts/bench_models.py request usage/cost data through the same construction path.
     """
+    remote = _leaves_machine(name, cfg)
+    if remote and cfg.local_only:
+        raise ProviderError(f"PROMPT_LOCAL_ONLY=true: {name} would send the draft off this machine")
     if name == "ollama":
         ollama = OllamaProvider(
             base_url=cfg.ollama_base_url,
@@ -93,8 +113,7 @@ def make_provider(
             think=cfg.ollama_think,
             temperature=cfg.temperature,
         )
-        local = is_loopback(cfg.ollama_base_url) and not _is_ollama_cloud(cfg.ollama_model)
-        return ollama if local else _gate(ollama, cfg)
+        return _gate(ollama, cfg) if remote else ollama
     if name == "lmstudio":
         lmstudio = OpenAICompatibleProvider(
             base_url=cfg.lmstudio_base_url,
@@ -103,7 +122,7 @@ def make_provider(
             temperature=cfg.temperature,
             label="LM Studio",
         )
-        return lmstudio if is_loopback(cfg.lmstudio_base_url) else _gate(lmstudio, cfg)
+        return _gate(lmstudio, cfg) if remote else lmstudio
     if name == "openrouter":
         return _gate(
             OpenAICompatibleProvider(

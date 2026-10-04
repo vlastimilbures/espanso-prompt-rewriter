@@ -97,7 +97,7 @@ step. A quick note to yourself would get "execute now" and a self-review checkli
 - 🧠 **Two tiers.** `-i-` answers in about 2 seconds; `-ip-` hands hard, multi-part
   drafts to a reasoning model for a more rigorous rewrite in about 5-8 seconds.
 - 🔌 **Four providers, one interface.** OpenRouter (default), Anthropic, Ollama and LM Studio.
-  Switching is one setting.
+  Each trigger names its provider; `PROMPT_LOCAL_ONLY=true` refuses every cloud call.
 - 🛡️ **Data-protection gate.** Before the draft can leave your machine it is scanned for
   payment cards, national IDs, emails, API keys, tokens, passwords, private keys,
   confidentiality labels and your own patterns; matches are blocked unless you explicitly
@@ -281,7 +281,7 @@ short and does not look like a key.
 
 | Variable                     | Default                        | Purpose                                                   |
 |------------------------------|--------------------------------|-----------------------------------------------------------|
-| `PROMPT_PROVIDER`            | `openrouter`                   | Provider when `--provider` is not given                   |
+| `PROMPT_PROVIDER`            | `openrouter`                   | Provider when `--provider` is not given (the bare CLI; every trigger passes its own) |
 | `PROMPT_PROFILE`             | `default`                      | Profile when `--profile` is not given (`-i-`, and `-if-` on a non-pro model) |
 | `PROMPT_PERSONA`             | *(empty)*                      | Your first-person role, see [persona](#profiles-and-persona) |
 | `PROMPT_TIMEOUT_SECONDS`     | `30`                           | Request timeout                                           |
@@ -308,6 +308,7 @@ short and does not look like a key.
 | `LMSTUDIO_BASE_URL`          | `http://localhost:1234/v1`     |                                                           |
 | `LMSTUDIO_MODEL`             | `local-model`                  |                                                           |
 | `ALLOW_CLOUD_OVERRIDE`       | `false`                        | `true` lets flagged drafts reach cloud providers          |
+| `PROMPT_LOCAL_ONLY`          | `false`                        | `true` refuses every provider that can send the draft off this machine |
 | `PROMPT_EXTRA_PATTERNS`      | *(empty)*                      | Your own `;`-separated regexes for the gate               |
 | `PROMPT_WORKFLOW_ENV`        | *(unset)*                      | Path of the `.env` to load (real environment only)        |
 
@@ -348,8 +349,13 @@ Left empty, the rewrite uses only a role the draft itself states and never guess
 
 > [!IMPORTANT]
 > Cloud triggers send your clipboard to a third-party API. Use them only where your organisation's
-> policy allows. For sensitive work, use `-il-` (or `PROMPT_PROVIDER=ollama`) with a model that
-> runs on your machine, and nothing leaves it.
+> policy allows. For sensitive work, use `-il-` or `-ilm-` with a model that runs on your machine,
+> and nothing leaves it. Each trigger names its own provider, so `PROMPT_PROVIDER` does not make
+> `-i-` local. To rule out cloud calls, set `PROMPT_LOCAL_ONLY=true`: every trigger or command
+> that would send the draft off your machine then pastes
+> `[prompt-workflow: PROMPT_LOCAL_ONLY=true: … would send the draft off this machine]` instead.
+> It judges by the base URL and the Ollama model tag, so a relay on `localhost` that forwards to
+> a cloud API (LiteLLM, an SSH tunnel) still counts as local.
 
 Every call that can send the draft off your machine first runs through a regex gate
 ([`redaction.py`](src/prompt_workflow/redaction.py)): OpenRouter and Anthropic always, and

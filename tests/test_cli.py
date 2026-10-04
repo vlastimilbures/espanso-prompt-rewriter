@@ -130,6 +130,60 @@ def test_merged_env_line_is_reported_not_pasted(tmp_path):
     assert persona.stdout == "I am working as [role] in [company]."
 
 
+# With PROMPT_LOCAL_ONLY=true each cloud trigger's command pastes a marker and makes no
+# request at all, whatever --provider it names; a local trigger still runs.
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["--provider", "openrouter"],
+        ["--provider", "openrouter", "--tier", "pro"],
+        [
+            "--provider",
+            "openrouter",
+            "--tier",
+            "pro",
+            "--model",
+            "google/gemini-3.5-flash-lite@google-ai-studio/flex",
+            "--effort",
+            "default",
+            "--max-tokens",
+            "default",
+            "--timeout",
+            "default",
+        ],
+        ["--provider", "anthropic", "--profile", "general"],
+    ],
+    ids=["-i-", "-ip-", "-if-", "-ic-"],
+)
+def test_local_only_blocks_cloud_triggers(monkeypatch, mock_transport, args):
+    monkeypatch.setenv("PROMPT_LOCAL_ONLY", "true")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    result = improve(*args, "--source", "argument", "--text", "draft")
+    assert result.exit_code == 0
+    assert result.stdout.startswith("[prompt-workflow: PROMPT_LOCAL_ONLY=true: ")
+    assert mock_transport.requests == []
+
+
+# A mistyped PROMPT_LOCAL_ONLY fails closed: an inline error, no request.
+def test_local_only_bad_value_fails_closed(monkeypatch, mock_transport):
+    monkeypatch.setenv("PROMPT_LOCAL_ONLY", "yes")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    result = improve("--provider", "openrouter", "--source", "argument", "--text", "d")
+    assert result.stdout.startswith("[prompt-workflow: PROMPT_LOCAL_ONLY must be true or false")
+    assert mock_transport.requests == []
+
+
+def test_local_only_allows_local_trigger(monkeypatch, mock_transport):
+    monkeypatch.setenv("PROMPT_LOCAL_ONLY", "true")
+    mock_transport.reply = {"message": {"content": "improved"}}
+    result = improve(
+        "--provider", "ollama", "--profile", "general", "--source", "argument", "--text", "d"
+    )
+    assert result.stdout == "improved"
+    assert [str(r.url) for r in mock_transport.requests] == ["http://localhost:11434/api/chat"]
+
+
 # Any other exception is still caught and marked as unexpected, never a traceback.
 def test_unexpected_error_reports_inline(stub_provider):
     stub_provider.exc = KeyError("kaboom")

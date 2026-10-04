@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Added
+- `PROMPT_LOCAL_ONLY` (default `false`): `true` refuses every provider that can send the draft
+  off this machine, including the ones the cloud triggers name, with an inline marker and no
+  request. `-il-` and `-ilm-` on localhost keep working.
+
 ### Changed
 - Calls to a base URL on this machine (`localhost`, `127.0.0.0/8`, `::1`; any provider) now
   connect directly and ignore `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and the system proxy.
@@ -36,6 +41,8 @@ All notable changes to this project are documented here. The format follows
   longer sends the clipboard). A trigger right after a space or bracket still expands, as in
   `s[-i-1]`. Type a space before a trigger that follows a letter, digit or `-`. Re-run the
   installer to redeploy the match files.
+- The README and `.env.example` no longer suggest that `PROMPT_PROVIDER=ollama` makes `-i-`
+  local: every trigger passes its own `--provider`. Use `PROMPT_LOCAL_ONLY=true` instead.
 
 ## 0.12.0
 

@@ -19,9 +19,13 @@ REPO = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.live
 
 
+def _setting(name: str) -> str:
+    return os.environ.get(name) or (read_env_file(REPO / ".env") or {}).get(name) or ""
+
+
 def _has_key() -> bool:
-    in_file = (read_env_file(REPO / ".env") or {}).get("OPENROUTER_API_KEY")
-    return bool(in_file or os.environ.get("OPENROUTER_API_KEY"))
+    # PROMPT_LOCAL_ONLY=true refuses OpenRouter, so there is nothing to test live.
+    return bool(_setting("OPENROUTER_API_KEY")) and _setting("PROMPT_LOCAL_ONLY").lower() != "true"
 
 
 def _improve(draft: str) -> subprocess.CompletedProcess[str]:
@@ -51,7 +55,9 @@ def _improve(draft: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-needs_key = pytest.mark.skipif(not _has_key(), reason="OPENROUTER_API_KEY not configured")
+needs_key = pytest.mark.skipif(
+    not _has_key(), reason="OPENROUTER_API_KEY not configured, or PROMPT_LOCAL_ONLY=true"
+)
 
 
 @needs_key

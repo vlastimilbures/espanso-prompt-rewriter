@@ -230,6 +230,9 @@ class Settings:
     anthropic_api_key: str = _env("ANTHROPIC_API_KEY", "", str.strip, secret=True)
     anthropic_max_tokens: int = _env("ANTHROPIC_MAX_TOKENS", "2400", _positive_int)
     allow_cloud_override: bool = _env("ALLOW_CLOUD_OVERRIDE", "false", _bool)
+    # Refuse every provider that can send the draft off this machine (factory.make_provider),
+    # whatever --provider a trigger passes.
+    local_only: bool = _env("PROMPT_LOCAL_ONLY", "false", _bool)
     # Extra `;`-separated regexes the data-protection gate blocks on, e.g. internal project
     # code names or customer-ID formats. Compiled by redaction.compile_extra().
     extra_patterns: str = _env("PROMPT_EXTRA_PATTERNS", "")

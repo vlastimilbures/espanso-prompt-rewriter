@@ -68,7 +68,7 @@ Espanso does not inherit shell PATH):
 ### Data-protection gate
 
 `factory.py`'s `make_provider()` (the only place providers are built) wraps, via `_gate()`,
-everything that can send the draft off the machine in `gate.GatedProvider`: `openrouter` and
+everything that can send the draft off the machine (`_leaves_machine()`) in `gate.GatedProvider`: `openrouter` and
 `anthropic` always, `ollama`/`lmstudio` when the base URL is not loopback (`providers.base.is_loopback()`) or
 the Ollama model is a `cloud`-tagged one. The gate runs `redaction.scan()` (built-in patterns
 plus the user's `PROMPT_EXTRA_PATTERNS`) and blocks the call unless `ALLOW_CLOUD_OVERRIDE=true`.
@@ -76,7 +76,9 @@ It also requires `https` cloud base URLs (plain `http` only to loopback).
 `providers.base.post_json()` (the only HTTP call) gives a loopback URL its own `HTTPTransport`,
 which makes httpx skip env and system proxies for it; every other URL keeps the proxy.
 `scripts/bench_models.py` builds through it too. A new provider that can leave the machine must
-return through `_gate()`.
+return through `_gate()` and be listed in `_leaves_machine()`. `PROMPT_LOCAL_ONLY=true` makes
+`make_provider()` refuse such a provider before building it (and `_gate()` refuses too), so it
+overrides any `--provider` a trigger passes; `PROMPT_PROVIDER` only sets the bare CLI's default.
 
 ### Espanso integration contract
 

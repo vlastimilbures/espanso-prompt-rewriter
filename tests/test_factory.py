@@ -1,5 +1,6 @@
 import pytest
 
+from prompt_workflow import factory
 from prompt_workflow.config import Settings
 from prompt_workflow.factory import PROVIDER_NAMES, make_provider, openrouter_routing
 from prompt_workflow.gate import GatedProvider
@@ -175,6 +176,64 @@ def test_remote_local_provider_is_gated(monkeypatch, name, var, url, gated):
 def test_ollama_cloud_model_is_gated(monkeypatch, model, gated):
     monkeypatch.setenv("OLLAMA_MODEL", model)
     assert isinstance(make_provider("ollama", Settings()), GatedProvider) is gated
+
+
+# PROMPT_LOCAL_ONLY=true refuses every provider that can leave this machine before building
+# it (so even without an API key the refusal is what the user sees).
+@pytest.mark.parametrize(
+    ("name", "env"),
+    [
+        ("openrouter", {}),
+        ("anthropic", {}),
+        ("ollama", {"OLLAMA_BASE_URL": "http://192.168.1.5:11434"}),
+        ("ollama", {"OLLAMA_MODEL": "gpt-oss:120b-cloud"}),
+        ("lmstudio", {"LMSTUDIO_BASE_URL": "https://lms.example.com/v1"}),
+    ],
+    ids=["openrouter", "anthropic", "remote-ollama", "ollama-cloud-model", "remote-lmstudio"],
+)
+def test_local_only_refuses_providers_that_leave_the_machine(monkeypatch, name, env):
+    monkeypatch.setenv("PROMPT_LOCAL_ONLY", "true")
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    with pytest.raises(ProviderError, match=f"^PROMPT_LOCAL_ONLY=true: {name} would send"):
+        make_provider(name, Settings())
+
+
+# Local providers on this machine still build, ungated, under PROMPT_LOCAL_ONLY=true.
+@pytest.mark.parametrize("name", ["ollama", "lmstudio"])
+def test_local_only_allows_loopback_providers(monkeypatch, name):
+    monkeypatch.setenv("PROMPT_LOCAL_ONLY", "true")
+    assert not isinstance(make_provider(name, Settings()), GatedProvider)
+
+
+# make_provider gates exactly the providers _leaves_machine reports, so PROMPT_LOCAL_ONLY
+# (which follows _leaves_machine) refuses everything the gate would scan.
+@pytest.mark.parametrize("name", PROVIDER_NAMES)
+@pytest.mark.parametrize(
+    "env",
+    [
+        {},
+        {"OLLAMA_BASE_URL": "http://192.168.1.5:11434", "LMSTUDIO_BASE_URL": "http://10.0.0.2/v1"},
+        {"OLLAMA_MODEL": "gpt-oss:120b-cloud"},
+    ],
+    ids=["defaults", "remote-local", "ollama-cloud-model"],
+)
+def test_gated_exactly_when_leaving_the_machine(monkeypatch, name, env):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    cfg = Settings()
+    assert isinstance(make_provider(name, cfg), GatedProvider) is factory._leaves_machine(name, cfg)
+
+
+# _gate() itself refuses under PROMPT_LOCAL_ONLY, so a provider added later that returns
+# through it is covered even if it misses the early check.
+def test_gate_refuses_under_local_only(monkeypatch):
+    monkeypatch.setenv("PROMPT_LOCAL_ONLY", "true")
+    inner = OllamaProvider("http://localhost:11434", "m")
+    with pytest.raises(ProviderError, match=r"^PROMPT_LOCAL_ONLY=true: this provider would send"):
+        factory._gate(inner, Settings())
 
 
 # The gate on a remote local provider blocks a sensitive draft before any request.

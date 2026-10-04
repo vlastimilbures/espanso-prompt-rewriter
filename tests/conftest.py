@@ -78,6 +78,36 @@ def fake_http(monkeypatch):
     return fake
 
 
+class MockHttp:
+    """Answers every request through httpx.MockTransport, so httpx still builds and sends
+    real requests. Records each one; replies with ``reply`` as JSON and ``status``."""
+
+    def __init__(self):
+        self.requests: list[httpx.Request] = []
+        self.reply: object = {}
+        self.status = 200
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        return httpx.Response(self.status, json=self.reply)
+
+
+@pytest.fixture
+def mock_transport(monkeypatch):
+    """Patch httpx.Client so every client uses a MockTransport, so a test using this fixture
+    cannot reach the network. A proxy or mount would take precedence over the transport, so
+    the patched client refuses them."""
+    mock = MockHttp()
+    real_client = httpx.Client
+
+    def client(*args, **kwargs):
+        assert not {"proxy", "mounts"} & kwargs.keys(), "mock_transport cannot honour a proxy"
+        return real_client(*args, **{**kwargs, "transport": httpx.MockTransport(mock.handler)})
+
+    monkeypatch.setattr(httpx, "Client", client)
+    return mock
+
+
 class StubProvider:
     """Stands in for cli.make_provider and the provider it builds: records each build
     and generate() call, and returns ``result`` or raises ``exc``."""
