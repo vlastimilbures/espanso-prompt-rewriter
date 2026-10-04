@@ -69,8 +69,8 @@ everything that can send the draft off the machine in `gate.GatedProvider`: `ope
 the Ollama model is a `cloud`-tagged one. The gate runs `redaction.scan()` (built-in patterns
 plus the user's `PROMPT_EXTRA_PATTERNS`) and blocks the call unless `ALLOW_CLOUD_OVERRIDE=true`.
 It also requires `https` cloud base URLs (plain `http` only to loopback).
-`providers.base.post_json()` (the only HTTP call) opens loopback URLs with `trust_env=False`, so
-no env or system proxy applies to them; every other URL keeps the proxy.
+`providers.base.post_json()` (the only HTTP call) gives a loopback URL its own `HTTPTransport`,
+which makes httpx skip env and system proxies for it; every other URL keeps the proxy.
 `scripts/bench_models.py` builds through it too. A new provider that can leave the machine must
 return through `_gate()`.
 

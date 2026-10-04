@@ -179,7 +179,8 @@ def test_load_dotenv_explicit_path_does_not_override(tmp_path, monkeypatch):
 def test_load_dotenv_exports_only_known_settings(tmp_path, monkeypatch):
     others = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "SSL_CERT_FILE", "FOO")
     for name in others:
-        monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv(name, "x")  # so monkeypatch restores the original state afterwards
+        monkeypatch.delenv(name)
     lines = [f"{name}=http://127.0.0.1:9" for name in others]
     (tmp_path / ".env").write_text("\n".join([*lines, "OLLAMA_MODEL=from-file", ""]))
 

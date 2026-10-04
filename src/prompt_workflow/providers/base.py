@@ -48,10 +48,13 @@ def post_json(
 
     A loopback URL is reached directly, ignoring HTTP(S)_PROXY/ALL_PROXY and the
     macOS/Windows system proxy: a call to this machine has no reason to go anywhere else.
-    Other URLs keep using the proxy, which corporate networks need.
+    httpx applies those only to a client without its own transport, so giving it one keeps
+    the rest of the environment (SSL_CERT_FILE for a local https server) in effect. Other
+    URLs keep using the proxy, which corporate networks need.
     """
+    transport = httpx.HTTPTransport() if is_loopback(url) else None
     try:
-        with httpx.Client(timeout=timeout, trust_env=not is_loopback(url)) as client:
+        with httpx.Client(timeout=timeout, transport=transport) as client:
             response = client.post(url, json=json, headers=headers)
             response.raise_for_status()
             return response.json()  # type: ignore[no-any-return]

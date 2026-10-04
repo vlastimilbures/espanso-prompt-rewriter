@@ -67,7 +67,7 @@ def test_ollama_request_shape(fake_http):
     OllamaProvider("http://x/", "m", timeout=7, think=True, temperature=0.2).generate(
         "draft", "sys"
     )
-    assert fake_http.client_kwargs == [{"timeout": 7, "trust_env": True}]
+    assert fake_http.client_kwargs == [{"timeout": 7, "transport": None}]
     assert fake_http.calls == [
         {
             "url": "http://x/api/chat",
@@ -349,7 +349,8 @@ def _http_server(reply: dict) -> Iterator[tuple[str, list[str]]]:
             self.wfile.write(body)
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+    poll = {"poll_interval": 0.01}  # shutdown() waits up to one poll interval
+    threading.Thread(target=server.serve_forever, kwargs=poll, daemon=True).start()
     try:
         yield f"http://127.0.0.1:{server.server_address[1]}", seen
     finally:
@@ -377,6 +378,7 @@ _LOOPBACK = {
     "ollama": ("OLLAMA_BASE_URL", "", _ollama_body("ok")),
     "lmstudio": ("LMSTUDIO_BASE_URL", "/v1", _openai_body("ok")),
     "openrouter": ("OPENROUTER_BASE_URL", "/api/v1", _openai_body("ok")),
+    "anthropic": ("ANTHROPIC_BASE_URL", "", _anthropic_body("ok")),
 }
 
 
@@ -386,6 +388,7 @@ _LOOPBACK = {
 def test_loopback_provider_bypasses_proxy(monkeypatch, name, route):
     setting, path, body = _LOOPBACK[name]
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     with _http_server(body) as (target, target_seen), _http_server(body) as (proxy, proxy_seen):
         _route_through_proxy(monkeypatch, route, proxy)
         monkeypatch.setenv(setting, target + path)
@@ -406,9 +409,10 @@ def test_remote_provider_keeps_proxy(monkeypatch, route):
     assert proxy_seen == ["POST http://ollama.example.test:11434/api/chat HTTP/1.1"]
 
 
-# post_json decides per URL: no env or system proxy settings for this machine only.
+# post_json decides per URL: only a loopback call gets its own transport, which is what
+# makes httpx skip the env and system proxies (covered end to end above).
 @pytest.mark.parametrize(
-    ("url", "trust_env"),
+    ("url", "remote"),
     [
         ("http://localhost:11434/api/chat", False),
         ("http://127.0.0.2:1234/v1/chat/completions", False),
@@ -418,7 +422,9 @@ def test_remote_provider_keeps_proxy(monkeypatch, route):
         ("http://localhost.example.com/api/chat", True),
     ],
 )
-def test_post_json_trusts_env_only_off_loopback(fake_http, url, trust_env):
+def test_post_json_direct_only_on_loopback(fake_http, url, remote):
     post_json("X", url, 5, json={})
-    assert fake_http.client_kwargs == [{"timeout": 5, "trust_env": trust_env}]
-    assert is_loopback(url) is not trust_env
+    (kwargs,) = fake_http.client_kwargs
+    assert kwargs["timeout"] == 5
+    assert (kwargs["transport"] is None) is remote
+    assert is_loopback(url) is not remote
