@@ -1,6 +1,6 @@
 [project]
 name = "espanso-prompt-rewriter"
-version = "0.14.0"
+version = "0.15.0"
 description = "Cross-platform Espanso prompt workflow with OpenRouter, Anthropic, Ollama, and LM Studio"
 readme = "README.md"
 license = "MIT"
