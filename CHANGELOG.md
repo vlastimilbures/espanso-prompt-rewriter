@@ -62,6 +62,17 @@ All notable changes to this project are documented here. The format follows
   recommends `ALLOW_CLOUD_OVERRIDE`.
 
 ### Changed
+- Loading settings no longer copies `.env` values into the process environment (#83). A pure,
+  layered merge (`ConfigLayers`: built-in default < `.env` < real environment, then per-call
+  overrides) builds `Settings`, so loading again in the same process sees an edited `.env`, child
+  processes inherit nothing from it, and each setting records where its value came from,
+  including a real environment variable that shadows a `.env` value. A repair mode, for
+  management commands, returns problems as findings instead of raising: a line that runs into
+  the next, an invalid value (the setting falls back to the next layer, which records the
+  refused one), a line without `=` (by line number) and a `.env` that exists but cannot be read.
+  The trigger path raises the same errors as before, word for word, and still skips the last
+  two silently. Precedence, the setting allowlist, merged-line
+  rejection and the no-current-directory rule are unchanged.
 - The `general` profile writes in the language of the user's own request instead of
   translating (#47).
 - A reply wrapped in one code fence is pasted without the fence, for every profile. Fences

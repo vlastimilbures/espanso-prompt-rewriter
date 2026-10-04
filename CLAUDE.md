@@ -49,10 +49,17 @@ Espanso does not inherit shell PATH):
   provider. Values are parsed strictly (`_bool`, `_positive_int`, ...) and a bad one raises a
   `ValueError` naming the variable; API key fields are `secret` (kept out of `repr()`). Any error
   that quotes a rejected value goes through `redaction.safe_repr()`, since markers are pasted
-  into the focused app, and `_load_dotenv()` refuses a value holding another setting's `NAME=`. `_load_dotenv()` loads the first of `$PROMPT_WORKFLOW_ENV`, the editable-install
-  repo root's `.env` (derived from `__file__`), or the user config dir `.env`, with a
-  dependency-free `setdefault` (never overrides real env vars). It exports only `env_names()`
-  keys, so a `.env` cannot set `HTTPS_PROXY`, `SSL_CERT_FILE` or any other variable. It deliberately never reads the
+  into the focused app. `Settings.load()` builds from `ConfigLayers.resolve()`, a pure merge
+  of layers (lowest first): built-in default < the first readable of `$PROMPT_WORKFLOW_ENV`, the
+  editable-install repo root's `.env` (derived from `__file__`), or the user config dir `.env` <
+  the real environment; per-call overrides come after, in `Settings.with_overrides()`. It never
+  writes `os.environ` (a second load sees an edited file; child processes inherit nothing) and
+  records each key's source (`default`, `file:<path>`, `env`) and the layers it shadows. Only
+  `env_names()` keys are taken, so a `.env` cannot set `HTTPS_PROXY`, `SSL_CERT_FILE` or any
+  other variable, and a value holding another setting's `NAME=` (a merged line) is refused.
+  `resolve(strict=False)` (repair mode) returns those errors as `Finding`s and falls back to the
+  next lower layer (recorded in `Entry.rejected`) instead of raising; it also notes an unreadable
+  `.env` and lines without `=`, which strict mode skips silently. It deliberately never reads the
   cwd, so a planted `.env` cannot redirect the base URL or enable the override. This matters
   because Espanso runs the CLI as a GUI-spawned subprocess without an inherited login-shell
   environment. `tests/conftest.py` points `PROMPT_WORKFLOW_ENV` at a temp file per test.

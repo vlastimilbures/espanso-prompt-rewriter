@@ -13,10 +13,9 @@ from prompt_workflow.providers import base
 def isolated_env(tmp_path, monkeypatch):
     """Prevent the real .env / shell environment from leaking into tests.
 
-    Without this, Settings.load()'s os.environ.setdefault(...) permanently
-    pollutes the test process on whichever test happens to run first
-    alphabetically, making later assertions depend on the developer's
-    real .env contents.
+    Settings.load() reads the real environment and the first .env it finds (it never
+    writes os.environ), so without this a test's result would depend on the developer's
+    shell and real .env contents.
     """
     for key in env_names():
         monkeypatch.delenv(key, raising=False)
