@@ -236,6 +236,9 @@ independent review, and the self-review lines match the format in `OUTPUTS`. Sti
 9. **The bench runs `default` on every model.** Without `--system-prompt-file`,
    `scripts/bench_models.py` scores gpt-6-luna on `default`, not `default-pro`; pass
    `--system-prompt-file src/prompt_workflow/prompts/default-pro.md` for the pro model.
+10. **Pasted material dropped (#42).** A pasted thread over about 20 lines is described in
+    `INPUTS` instead of copied, and flash-lite often summarises even a short pasted email. The
+    bench's material check fails `long-thread` on every model and `pasted` on flash-lite.
 
 ### Next steps for the default prompt
 
