@@ -6,6 +6,29 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## 0.13.0
+
+Upgrading: re-run the installer (`./scripts/install_macos.sh` or
+`.\scripts\install_windows.ps1`). Every trigger that runs the CLI changed (`force_mode`,
+`left_word`, no `--profile` on `-i-`, `-ip-` and `-if-`), and the fix for
+GHSA-9v85-6m6j-8529 takes effect only once the match files are redeployed. A proxy or CA
+variable set only in `.env` no longer applies; set it for GUI apps instead (see the README).
+
+### Security
+- [GHSA-pchf-7qh9-8xpc](https://github.com/vlastimilbures/espanso-prompt-rewriter/security/advisories/GHSA-pchf-7qh9-8xpc)
+  (medium): with an HTTP proxy set in the environment, in `.env` or in the system settings,
+  `-il-` and `-ilm-` sent the draft to the proxy without the data-protection gate. Local calls
+  now connect directly, and `.env` can no longer set proxy or CA variables (see Changed).
+- [GHSA-6mvg-6wv7-5f2m](https://github.com/vlastimilbures/espanso-prompt-rewriter/security/advisories/GHSA-6mvg-6wv7-5f2m)
+  (low): a settings error could paste a value holding an API key (for example, two `.env` lines
+  saved without the newline between them) into the focused app. Settings errors now redact
+  such values (see Fixed).
+- [GHSA-9v85-6m6j-8529](https://github.com/vlastimilbures/espanso-prompt-rewriter/security/advisories/GHSA-9v85-6m6j-8529)
+  (medium): by default, Espanso typed replies shorter than 100 characters as keystrokes, so each
+  newline pressed Enter in the focused app, a terminal included. Every trigger that runs the CLI
+  now pastes through the clipboard, so replies are no longer typed as keystrokes (see Fixed). A
+  pasted newline can still run a line in a shell without bracketed paste.
+
 ### Added
 - `PROMPT_LOCAL_ONLY` (default `false`): `true` refuses every provider that can send the draft
   off this machine, including the ones the cloud triggers name, with an inline marker and no
@@ -24,8 +47,8 @@ All notable changes to this project are documented here. The format follows
   otherwise they show `<redacted, N chars>`. The same applies to an unknown provider or profile.
 - A `.env` value that contains another `NAME=` assignment (two lines saved without the newline
   between them) is reported by setting name instead of being read as one long value.
-- Spaces around an API key are dropped, and a key with a character HTTP forbids in a header is
-  reported as `invalid header value (check the API key)`.
+- Spaces around an API key are dropped, and a key with a control character (such as a newline)
+  is reported as `invalid header value (check the API key)`.
 - Every trigger that runs the CLI (`-i-`, `-ip-`, `-if-`, `-il-`, `-ilm-`, `-ic-`, `-p-`) now
   sets `force_mode: clipboard`, so Espanso always pastes the result instead of typing short
   replies key by key. This overrides any Espanso `backend` setting for these triggers. Re-run
