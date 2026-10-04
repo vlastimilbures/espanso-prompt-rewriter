@@ -64,6 +64,8 @@ uv run pytest -m live
   `fix:`, `docs:`, `refactor:`, `test:`, `chore:`, `ci:`.
 - **Changelog.** Add a line under *Unreleased* in [CHANGELOG.md](CHANGELOG.md) for anything a user
   would notice.
+- **Releases.** After tagging `vX.Y.Z`, run `uv run python scripts/update_match_history.py` and
+  commit any change, so deploy keeps recognising every released match file.
 
 ## Releasing
 
@@ -150,13 +152,11 @@ path. Raise the ceiling only with new measurements here.
 
 ```text
 espanso-prompt-rewriter/
-├── espanso/                      deployed into Espanso by the installers
-│   ├── match/                    also shipped in the wheel (config/ is not), see assets.py
+├── espanso/                      deployed into Espanso by `prompt-workflow espanso deploy`
+│   ├── match/                    also shipped in the wheel, see assets.py
 │   │   ├── prompts-llm.yml       -i- -ip- -if- -iok- -il- -ilm- (-ic-): call the CLI
 │   │   ├── prompts-core.yml      -prompt- -risk-: static snippets and forms
 │   │   └── prompts-template.yml  -p-: the empty golden template, opens with your persona
-│   └── config/
-│       └── default.yml           optional Espanso settings (--with-config / -WithConfig)
 ├── src/prompt_workflow/          the prompt-workflow CLI
 │   ├── cli.py                    improve and persona commands, the single output sink
 │   ├── config.py                 Settings from the environment, config.toml or .env
@@ -170,6 +170,8 @@ espanso-prompt-rewriter/
 │   ├── prompt_builder.py         loads built-in and user profiles, fills in the persona rule
 │   ├── profiles.py               migrate a checkout's own profiles to the user directory
 │   ├── assets.py                 the packaged Espanso match files (importlib.resources)
+│   ├── deploy.py                 espanso deploy/status/detach: manifest, states, stable launcher
+│   ├── match_history.py          generated: digests of every released match file source
 │   ├── prompts/
 │   │   ├── default.md            golden-template rewrite (-i-, -ip-, -if-)
 │   │   └── general.md            lighter "make this precise" rewrite (local triggers)
@@ -180,8 +182,10 @@ espanso-prompt-rewriter/
 │       ├── anthropic.py          Anthropic Messages API
 │       └── ollama.py             Ollama /api/chat
 ├── scripts/
-│   ├── install_macos.sh          install the CLI and deploy the match files
+│   ├── install_macos.sh          contributor install pinned to uv.lock, then espanso deploy
 │   ├── install_windows.ps1       the same for Windows
+│   ├── check_tool_lock.py        the tool venv's packages match uv.lock (#34)
+│   ├── update_match_history.py   regenerate match_history.py from the release tags
 │   ├── bench_models.py           score models on template fidelity, latency, cost
 │   ├── check_wheel.py            CI: what an installed wheel really contains
 │   └── release_notes.py          release: the version and its CHANGELOG notes
@@ -220,7 +224,7 @@ To ship a new built-in profile:
 ### Add a trigger
 
 Add a match to `espanso/match/prompts-llm.yml`. Shell commands start with the quoted
-`__PROMPT_WORKFLOW__` placeholder, which the install scripts replace with the absolute CLI path.
+`__PROMPT_WORKFLOW__` placeholder, which `prompt-workflow espanso deploy` replaces with the absolute CLI path.
 Quote nothing else: `cmd.exe` mangles a command line holding more than one quoted part.
 Set `force_mode: clipboard` on every match that runs the CLI, so Espanso pastes the output
 instead of typing short replies key by key.
@@ -236,6 +240,12 @@ instead of typing short replies key by key.
       params:
         cmd: "\"__PROMPT_WORKFLOW__\" improve --provider ollama --profile regulation --source clipboard"
 ```
+
+Any change to a file in `espanso/match/` needs
+`uv run python scripts/update_match_history.py` (also run it at every release, after tagging):
+it records the source's digest in `src/prompt_workflow/match_history.py`, so `espanso deploy`
+later recognises a file this version wrote as its own (stale) rather than foreign, and
+`tests/test_deploy.py` fails until it is run.
 
 `tests/test_yaml.py` checks the placeholder, quoting and `force_mode`, and that the profile and
 provider exist. Add the trigger's expected provider, profile and tier to `EXPECTED` in

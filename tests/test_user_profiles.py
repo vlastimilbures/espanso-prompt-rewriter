@@ -386,7 +386,7 @@ def test_match_files_missing(monkeypatch, tmp_path):
         assets.match_dir()
 
 
-# The wheel ships the match files but not espanso/config/ (#37 removes it).
+# The wheel ships the match files and nothing else from espanso/ (#37 removed espanso/config/).
 def test_wheel_declares_match_files_only():
     import tomllib
 

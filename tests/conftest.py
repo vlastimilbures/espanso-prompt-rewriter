@@ -40,6 +40,13 @@ def isolated_env(tmp_path, monkeypatch):
     import prompt_workflow.cli as cli
 
     monkeypatch.setattr(cli, "is_concealed", lambda: None)
+    # ...nor run the real espanso, uv or brew: a deploy test passes or patches in its own.
+    import prompt_workflow.deploy as deploy
+
+    def refuse(argv):
+        raise AssertionError(f"a test ran a real command: {argv}")
+
+    monkeypatch.setattr(deploy, "run_command", refuse)
 
 
 # Headers httpx adds to every request on its own; calls[i]["headers"] leaves them out so a

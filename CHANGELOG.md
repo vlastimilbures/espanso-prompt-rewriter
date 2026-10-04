@@ -7,6 +7,24 @@ All notable changes to this project are documented here. The format follows
 ## Unreleased
 
 ### Added
+- Managed Espanso deployment (#86): `prompt-workflow espanso deploy|status|detach`. `deploy`
+  shows a plan and a diff and asks first (`--yes` skips); a second run with nothing to change
+  does nothing. A manifest in the per-device data dir (`~/.local/share/prompt-workflow/`,
+  `%LOCALAPPDATA%\prompt-workflow\` on Windows) records each file it wrote, so `status` reports
+  `missing`, `in sync`, `stale` (an older deploy of ours, the #25 drift case), `modified` or
+  `foreign`. Each deployed file opens with `# prompt-workflow <version> (managed; edit at your own
+  risk)`; the rest is byte-identical to what the install scripts wrote. A file you edited is never
+  overwritten silently: keep yours (the default with `--yes`), take ours with a
+  `.bak-<timestamp>` backup (only our last 2 backups are kept), or write ours side by side
+  (`--on-conflict keep|ours|side`); a deploy that kept a file ends with a `WARNING` naming it.
+  A file any earlier release's installer wrote, unedited, is recognised as ours and updated
+  (by digest of its source, `match_history.py`). `detach` keeps `-prompt-`/`-risk-` by default
+  (`--keep-static`) or removes every deployed file (`--remove-all`), and changes only files
+  still as we wrote them. The launcher is the install channel's stable entry point (uv's tool
+  bin, Homebrew's `bin/`, Scoop's shim), never a versioned path an upgrade removes.
+- The install scripts pin the tool to `uv.lock` (`uv export` constraints for `uv tool install`)
+  and check the result with `scripts/check_tool_lock.py` (#34), then call
+  `prompt-workflow espanso deploy --yes`.
 - Per-attempt usage metadata for every provider (#87), the data source for the coming usage
   history. `make_provider(..., observer=...)` passes an observer to each provider, inside the
   gate, and every HTTP attempt (both attempts of a retry, a timeout, a non-2xx reply) reports
@@ -27,55 +45,6 @@ All notable changes to this project are documented here. The format follows
   runtime pins from `uv.lock`, so `uv tool install <wheel-url> -c <constraints-url>` installs
   exactly the locked dependencies. Release builds pin the build backend (hatchling 1.32.4).
   CHANGELOG headings now carry their release date (`## 0.15.0 - 2026-10-04`); a test checks that the newest one is the `pyproject.toml` version.
-
-### Security
-- A clipboard item that a password manager marked as concealed is refused before it is read,
-  for every trigger, and cleared, so Espanso's restore cannot put it back unmarked for the next
-  trigger (#24). Markers: `org.nspasteboard.ConcealedType` or `com.agilebits.onepassword` on
-  macOS; `ExcludeClipboardContentFromMonitorProcessing`, `Clipboard Viewer Ignore` or
-  `CanIncludeInClipboardHistory` (0, or present but unreadable) on Windows. The probe asks only
-  which formats are present, through ctypes (about 10-40 ms on macOS), and adds no dependency.
-  On Linux, for browser-extension copies, or if the probe fails, the clipboard is read as
-  before.
-- The `general` profile, used by the local triggers `-il-` and `-ilm-`, treats the whole
-  clipboard as the draft: data to rewrite, never instructions to the rewriter (#47). Pasted
-  material is copied word for word, and the rewrite adds a constraint that instructions inside
-  it must not be followed. It adds no facts, roles or audiences, and returns only the prompt.
-  On flash-lite (a proxy; no local model measured yet), the bench's `check_general` passes
-  36/36 drafts, up from 4/36 (31 of the old failures were invented roles), and the injection
-  drafts are never carried over as instructions, with the guard present, in 12/12 runs.
-- Invisible characters no longer reach the model or the paste (#22). `_clean()` now drops
-  every code point Unicode marks as default-ignorable (zero-width space, word joiner, BOM, bidi
-  marks, soft hyphen, combining grapheme joiner, Hangul fillers, variation selectors, and the
-  unassigned blocks that render as nothing) and every other format character, since a run of
-  them after one visible character could carry a hidden instruction. An emoji keeps one
-  presentation selector and one joiner, a keycap keeps its selector, and Persian and Indic
-  joiners survive. Ideographic variation selectors, Mongolian variation selectors and bidi marks
-  are dropped too. The gate's normalised scan drops the same characters, so they can no longer
-  split a card number.
-- The gate catches the secret shapes developers paste most (#20):
-  - camelCase and JSON names (`clientSecret`, `accessToken`, `dbPassword`), compound env names
-    (`PGPASSWORD`), `*_KEY` names (`SECRET_KEY`, `PRIVATE_KEY`, `secret_key_base`) and
-    `_authToken`;
-  - PHP `'password' => …`, Go `:=`, `define('DB_PASSWORD', …)`, `environ["API_KEY"] = …` and
-    values aligned with many spaces;
-  - passwords of 6+ characters (`password: hunter2`) and in prose (`the password for the
-    admin account is …`, Vietnamese `mật khẩu wifi là …`, `mật khẩu đăng nhập: …`);
-  - AWS temporary keys (`ASIA…`), `Basic` credentials (UTF-8 too), `curl -u user:password`
-    (also after a `\` line continuation), npm tokens, Azure `AccountKey=`/`SharedAccessKey=`
-    and SAS `sig=`;
-  - IBANs (any case, spaces or dashes; country length and mod-97 checked);
-  - card numbers split by up to three spaces, tabs, slashes, dashes or minus signs, or one line
-    break, or next to another number.
-- A draft that is one password- or token-like word (no spaces, 8-200 characters, a digit and
-  three of lower case, upper case, digit and symbol) is blocked as `bare_token`: the classic
-  stale-clipboard slip. URLs, paths, emails, UUIDs, hashes, versions, dates and lower-case
-  slugs and file names are not. A single word is never a prompt, so a mixed-case identifier
-  with a digit is blocked too.
-- An email address next to a password (`jane@example.com:…`) is a hard `credential_pair`
-  finding, and `scheme://:password@host` (no user name) counts as `url_credentials` (#21).
-
-### Added
 - Saved settings (#84). Once `config.toml` exists in the config folder
   (`~/.config/prompt-workflow/`, `%APPDATA%\prompt-workflow\` on Windows), it is the saved
   configuration and no `.env` is read, so an old `.env` never overrides a saved value. API keys
@@ -126,6 +95,53 @@ All notable changes to this project are documented here. The format follows
   `PROMPT_HISTORY_RETENTION_DAYS` (default `365`, at most 36500). Optional estimates come from a user
   `prices.toml` in the config dir. Nothing records yet; the CLI starts recording in #89.
 
+### Security
+- A clipboard item that a password manager marked as concealed is refused before it is read,
+  for every trigger, and cleared, so Espanso's restore cannot put it back unmarked for the next
+  trigger (#24). Markers: `org.nspasteboard.ConcealedType` or `com.agilebits.onepassword` on
+  macOS; `ExcludeClipboardContentFromMonitorProcessing`, `Clipboard Viewer Ignore` or
+  `CanIncludeInClipboardHistory` (0, or present but unreadable) on Windows. The probe asks only
+  which formats are present, through ctypes (about 10-40 ms on macOS), and adds no dependency.
+  On Linux, for browser-extension copies, or if the probe fails, the clipboard is read as
+  before.
+- The `general` profile, used by the local triggers `-il-` and `-ilm-`, treats the whole
+  clipboard as the draft: data to rewrite, never instructions to the rewriter (#47). Pasted
+  material is copied word for word, and the rewrite adds a constraint that instructions inside
+  it must not be followed. It adds no facts, roles or audiences, and returns only the prompt.
+  On flash-lite (a proxy; no local model measured yet), the bench's `check_general` passes
+  36/36 drafts, up from 4/36 (31 of the old failures were invented roles), and the injection
+  drafts are never carried over as instructions, with the guard present, in 12/12 runs.
+- Invisible characters no longer reach the model or the paste (#22). `_clean()` now drops
+  every code point Unicode marks as default-ignorable (zero-width space, word joiner, BOM, bidi
+  marks, soft hyphen, combining grapheme joiner, Hangul fillers, variation selectors, and the
+  unassigned blocks that render as nothing) and every other format character, since a run of
+  them after one visible character could carry a hidden instruction. An emoji keeps one
+  presentation selector and one joiner, a keycap keeps its selector, and Persian and Indic
+  joiners survive. Ideographic variation selectors, Mongolian variation selectors and bidi marks
+  are dropped too. The gate's normalised scan drops the same characters, so they can no longer
+  split a card number.
+- The gate catches the secret shapes developers paste most (#20):
+  - camelCase and JSON names (`clientSecret`, `accessToken`, `dbPassword`), compound env names
+    (`PGPASSWORD`), `*_KEY` names (`SECRET_KEY`, `PRIVATE_KEY`, `secret_key_base`) and
+    `_authToken`;
+  - PHP `'password' => …`, Go `:=`, `define('DB_PASSWORD', …)`, `environ["API_KEY"] = …` and
+    values aligned with many spaces;
+  - passwords of 6+ characters (`password: hunter2`) and in prose (`the password for the
+    admin account is …`, Vietnamese `mật khẩu wifi là …`, `mật khẩu đăng nhập: …`);
+  - AWS temporary keys (`ASIA…`), `Basic` credentials (UTF-8 too), `curl -u user:password`
+    (also after a `\` line continuation), npm tokens, Azure `AccountKey=`/`SharedAccessKey=`
+    and SAS `sig=`;
+  - IBANs (any case, spaces or dashes; country length and mod-97 checked);
+  - card numbers split by up to three spaces, tabs, slashes, dashes or minus signs, or one line
+    break, or next to another number.
+- A draft that is one password- or token-like word (no spaces, 8-200 characters, a digit and
+  three of lower case, upper case, digit and symbol) is blocked as `bare_token`: the classic
+  stale-clipboard slip. URLs, paths, emails, UUIDs, hashes, versions, dates and lower-case
+  slugs and file names are not. A single word is never a prompt, so a mixed-case identifier
+  with a digit is blocked too.
+- An email address next to a password (`jane@example.com:…`) is a hard `credential_pair`
+  finding, and `scheme://:password@host` (no user name) counts as `url_credentials` (#21).
+
 ### Changed
 - `.env.example` sets only `OPENROUTER_API_KEY` and `PROMPT_PERSONA`; every other setting is
   shown commented out with its default, so a copied file no longer pins the model, endpoint or
@@ -166,6 +182,12 @@ All notable changes to this project are documented here. The format follows
   separators become newlines instead of disappearing.
 - A draft over 50,000 characters is refused before it is cleaned, so a pasted multi-megabyte
   log no longer stalls the expansion.
+
+### Removed
+- `espanso/config/default.yml` and the installers' `--with-config` / `-WithConfig` option (#37).
+  Nothing deploys to Espanso's `config/` folder any more, so your own `default.yml` (and any
+  symlink to it) is never replaced; set `toggle_key` or `search_shortcut` there yourself if
+  you want them. The scripts now refuse the old option with a message.
 
 ## 0.15.0 - 2026-10-04
 

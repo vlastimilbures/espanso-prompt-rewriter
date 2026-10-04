@@ -8,12 +8,14 @@ in `espanso/match/` call the CLI as a shell command and paste back stdout.
 
 ## Commands
 
-Deploy Espanso configs (substitutes the absolute CLI path into match files, since GUI-launched
-Espanso does not inherit shell PATH):
+Contributor install (`uv tool install --editable` constrained to `uv.lock`, checked by
+`scripts/check_tool_lock.py`, then `prompt-workflow espanso deploy --yes`, which substitutes the
+absolute CLI path into the match files, since GUI-launched Espanso does not inherit shell PATH):
 
 ```bash
 ./scripts/install_macos.sh      # macOS
 .\scripts\install_windows.ps1   # Windows
+prompt-workflow espanso status  # missing / in sync / stale / modified / foreign per match file
 ```
 
 ## Architecture
@@ -151,10 +153,37 @@ Espanso does not inherit shell PATH):
   or modified `src/prompt_workflow/prompts/*.md` (against `git_pristine_profiles()` or the
   packaged `PROFILES`) into that dir: copy only, exclusive create, never deletes or overwrites.
 - `assets.py` — the Espanso match files as package data. Hatch `force-include` copies the repo's
-  `espanso/match/` (the source of truth) to `prompt_workflow/espanso/match/` in the wheel;
-  `espanso/config/` is not shipped. An editable install falls back to the checkout's folder.
+  `espanso/match/` (the source of truth) to `prompt_workflow/espanso/match/` in the wheel. An editable install falls back to the checkout's folder.
   CI's `wheel` job builds sdist + wheel, installs the wheel in a clean venv outside the checkout
   and runs `scripts/check_wheel.py` (match files, profiles, `persona`) on all three OSes.
+- `deploy.py` — managed Espanso deployment behind `prompt-workflow espanso deploy|status|detach`
+  (cli.py imports it lazily, and `tests/test_trigger_contract.py` keeps it off the trigger path).
+  `plan()` renders each packaged match file (`render()`: the stamp line
+  `# prompt-workflow <version> (managed; edit at your own risk)` + a literal replace of
+  `__PROMPT_WORKFLOW__`, byte-identical to the old scripts otherwise, see `tests/test_deploy.py`)
+  and compares it with disk and the manifest (`user_data_dir()/espanso-manifest.json`: target,
+  asset version, digest, launcher, backups) into `missing`/`in sync`/`stale`/`modified`/`foreign`.
+  A file that is exactly what any release wrote counts as ours (`stale`): stamp dropped, the
+  quoted launcher (`\"<path>\"`, so Windows forward slashes too) put back as the placeholder,
+  and its SHA-256 found in `match_history.KNOWN_SOURCES` (generated from the `v*` tags plus the
+  current sources by `scripts/update_match_history.py`; rerun after editing `espanso/match/`
+  and at each release, `tests/test_deploy.py` checks it). A symlinked target is `foreign`.
+  `Manifest.load()` type-checks every field (`DeployError` otherwise), writes go through
+  `mkstemp` in the same folder + `os.replace`, and backups use `"xb"` after an `is_symlink()`
+  check.
+  `apply()` writes only into `<espanso>/match/` (never `config/`, #37), keeps a modified/foreign
+  file unless the caller chose `ours` (timestamped backup; pruning to 2 deletes only paths in the
+  target's folder named exactly `<name>.bak-<14 digits>[-n]`) or `side`
+  (`<name>.prompt-workflow-new`), and retires the pre-0.9 `match/base.yml` with a backup. The
+  CLI ends a deploy that kept a file with a stderr `WARNING:` naming it (exit 0).
+  `detach()` (default `--keep-static`, D-UNI-1) removes only owned files whose digest still
+  matches, and only entries naming one of `assets.match_names()` in the current (resolved)
+  Espanso match folder; `--espanso-dir` is resolved to an absolute path first. `resolve_launcher()` picks the channel's stable entry point (uv tool bin, Homebrew
+  `<prefix>/bin` or `opt`, Scoop shim, else a running console script outside any versioned,
+  `Cellar` or `.venv` dir); `launcher_text()` keeps the old path guards (POSIX refuses
+  a quote, `$`, backtick or backslash; Windows converts to `/` and refuses `" % ^ & | < >`). Every external command
+  (`espanso path config`, `espanso restart`/`start`, `uv tool dir`, `brew --prefix`) goes
+  through `run_command`, which `tests/conftest.py` replaces with a refusal.
 
 ### Data-protection gate
 
@@ -178,10 +207,12 @@ overrides any `--provider` a trigger passes; `PROMPT_PROVIDER` only sets the bar
 
 ### Espanso integration contract
 
-- `espanso/match/prompts-llm.yml` triggers call `"__PROMPT_WORKFLOW__" improve ...`; the install
-  scripts substitute `__PROMPT_WORKFLOW__` with the resolved absolute path to the installed CLI.
+- `espanso/match/prompts-llm.yml` triggers call `"__PROMPT_WORKFLOW__" improve ...`;
+  `prompt-workflow espanso deploy` (which the install scripts call) substitutes
+  `__PROMPT_WORKFLOW__` with the stable absolute path to the installed CLI.
   Only that path is quoted (`cmd.exe` mangles more than one quoted part); there is no `cd`.
-  The installers deploy `espanso/config/` only with `--with-config` / `-WithConfig`.
+  Nothing is ever deployed to Espanso's `config/` (`espanso/config/` and `--with-config` were
+  removed, #37).
 - Every match that runs the CLI (including commented-out ones and `-p-`) sets
   `force_mode: clipboard`, so output is always pasted: Espanso's default backend would type output
   shorter than 100 characters key by key. `tests/test_yaml.py` enforces it.

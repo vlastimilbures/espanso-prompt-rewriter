@@ -185,9 +185,18 @@ Path(sys.argv[1]).write_text(json.dumps(result), encoding="utf-8")
 """
 
 # Never on the trigger path: the Textual interface (#93), config writers (#84), the keyring
-# (#88) and history (sqlite3, until #89 lets it in). rich is installed with Typer but not
-# loaded today: Typer imports it only for help and usage errors.
-FORBIDDEN = ("textual", "rich.console", "sqlite3", "_sqlite3", "tomli_w", "tomlkit", "keyring")
+# (#88), history (sqlite3, until #89 lets it in) and the Espanso deploy service (#86). rich is
+# installed with Typer but not loaded today: Typer imports it only for help and usage errors.
+FORBIDDEN = (
+    "textual",
+    "rich.console",
+    "sqlite3",
+    "_sqlite3",
+    "tomli_w",
+    "tomlkit",
+    "keyring",
+    "prompt_workflow.deploy",
+)
 
 # Modules the trigger scenarios add to a bare interpreter: 293 on Python 3.12 and 294 on 3.14,
 # macOS (see "Trigger start-up budget" in CONTRIBUTING.md). A coarse ceiling, not a timing: a new
