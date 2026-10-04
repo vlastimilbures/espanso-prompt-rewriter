@@ -11,7 +11,7 @@ from bench_module import GOOD, bench
 from prompt_workflow.config import Settings
 from prompt_workflow.prompt_builder import PROFILES, system_prompt
 from prompt_workflow.providers.base import ProviderError
-from prompt_workflow.redaction import scan
+from prompt_workflow.redaction import scan_draft
 
 
 def test_good_output_passes():
@@ -101,7 +101,7 @@ def test_suites():
 # unrelated to the model.
 @pytest.mark.parametrize("name", list(bench.DRAFTS))
 def test_draft_passes_gate(name):
-    assert scan(bench.DRAFTS[name].text) == []
+    assert scan_draft(bench.DRAFTS[name].text) == []
 
 
 def test_draft_languages_are_known():

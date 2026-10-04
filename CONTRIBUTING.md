@@ -164,8 +164,12 @@ Snippets that need no model go in `espanso/match/prompts-core.yml`, as plain Esp
 ### Improve the redaction gate
 
 Add a pattern to `_PATTERNS` in `src/prompt_workflow/redaction.py`, with a validator in
-`_VALIDATORS` if the raw regex is too broad. Add both a positive and a near-miss negative test to
-`tests/test_redaction.py`. Build fake keys at runtime (`"sk-ant-" + body`) so no key-shaped
+`_VALIDATORS` if the raw regex is too broad. Bound every repeat that can run over ordinary text
+and match a value only for its existence (`{8}`, not `{8,}`), then add an input to
+`test_scan_is_fast_on_adversarial_input`. Add a row to the `MUST_DETECT` corpus and a near-miss
+row to `MUST_PASS` in `tests/test_redaction.py`; every bench draft must still scan clean. Rules
+about the whole draft (like `bare_token`) belong in `scan_draft()`, which only the gate calls:
+`safe_repr()` uses `scan()` and must keep quoting short setting values. Build fake keys at runtime (`"sk-ant-" + body`) so no key-shaped
 literal lands in the repo. Patterns specific to one organisation belong in the user's
 `PROMPT_EXTRA_PATTERNS`, not in the code.
 
