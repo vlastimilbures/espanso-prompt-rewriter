@@ -6,7 +6,8 @@ record is a plain mapping; only allowlisted keys are ever read from it, and a te
 be a known enum or a short identifier with no spaces, so prose cannot get in.
 
 Writes (HistoryStore.record) are fail-open: a locked, read-only, full or corrupt database
-never raises to the caller, and a write gives up within a fixed time budget. A dropped write
+never raises to the caller, and a write gives up within a fixed time budget (a little more for
+the one write that creates the database). A dropped write
 bumps a small sidecar marker, which health() reports, so lost tracking stays visible.
 
 sqlite3, tomllib, csv and decimal are imported inside the functions that use them, so
@@ -59,6 +60,13 @@ _BUDGET = 0.25
 _WRITE_BUDGET = 0.15
 # Kept back from _BUDGET for writing the sidecar once its lock is taken.
 _MARGIN = 0.02
+# Added to both budgets for a write that has to create the database (once per device, and
+# after a reset): creating the file, switching it to WAL and running the migrations costs
+# several syncs, which took longer than the whole budget on a slow CI disk.
+_CREATE_EXTRA = 0.75
+# Most old operations an automatic prune (record(prune=True)) deletes in one write, so a
+# lowered retention is caught up over a few triggers instead of in one long transaction.
+_PRUNE_BATCH = 100
 # A sidecar lock older than this was left by a killed process (it is held for a few ms).
 _STALE_LOCK = 10.0
 # Busy timeout for management commands (stats, export, prune, reset), which nobody pastes.
@@ -534,15 +542,27 @@ class HistoryStore:
     # -- writing ---------------------------------------------------------------------------
 
     def record(
-        self, operation: Mapping[str, object], attempts: Sequence[Mapping[str, object]] = ()
+        self,
+        operation: Mapping[str, object],
+        attempts: Sequence[Mapping[str, object]] = (),
+        *,
+        prune: bool = False,
     ) -> bool:
         """Store one operation and its attempts in one short transaction. True when stored
         (or already stored: a retried write is keyed by (operation_id, seq) and never
         duplicates a row) or when history is off; False when dropped, which bumps the
-        lost-write marker. Never raises."""
+        lost-write marker. Never raises.
+
+        ``prune`` also deletes up to _PRUNE_BATCH operations older than the retention, in the
+        same transaction but under a savepoint, so a prune that fails or runs out of time
+        never costs the record. The trigger recorder passes it; the index on occurred_at_utc
+        makes the check a single seek when there is nothing to delete."""
         if not self.enabled:
             return True
         start = time.monotonic()
+        extra_time = 0.0
+        with contextlib.suppress(Exception):
+            extra_time = 0.0 if self.path.is_file() else _CREATE_EXTRA
         try:
             extra = compile_extra(self.extra_patterns)
             op_id, op = _operation_row(operation, extra)
@@ -550,11 +570,18 @@ class HistoryStore:
                 _attempt_row(op_id, seq, at, self._price_table(), extra)
                 for seq, at in enumerate(attempts, start=1)
             ]
-            self._write(op, rows, start + _WRITE_BUDGET)
+            cutoff = self._cutoff(timedelta(days=self.retention_days)) if prune else None
+            self._write(op, rows, start + _WRITE_BUDGET + extra_time, cutoff)
         except Exception:
-            self._mark_lost(start + _BUDGET - _MARGIN)
+            self._mark_lost(start + _BUDGET + extra_time - _MARGIN)
             return False
         return True
+
+    @staticmethod
+    def _cutoff(age: timedelta) -> str:
+        # A longer age would overflow the date arithmetic; nothing is that old anyway.
+        age = min(age, timedelta(days=MAX_RETENTION_DAYS))
+        return (datetime.now(UTC) - age).strftime(_TIME_FORMAT)
 
     def _price_table(self) -> PriceTable | None:
         # Read once, on the first attempt to price; a broken table means no estimates.
@@ -566,7 +593,11 @@ class HistoryStore:
         return self._prices
 
     def _write(
-        self, op: tuple[object, ...], rows: list[tuple[object, ...]], deadline: float
+        self,
+        op: tuple[object, ...],
+        rows: list[tuple[object, ...]],
+        deadline: float,
+        prune_before: str | None = None,
     ) -> None:
         def remaining_ms() -> int:
             left = deadline - time.monotonic()
@@ -593,6 +624,8 @@ class HistoryStore:
                     f"INSERT OR IGNORE INTO attempts VALUES ({placeholders})",  # noqa: S608
                     rows,
                 )
+                if prune_before is not None and deadline - time.monotonic() > _MARGIN:
+                    _prune_batch(conn, prune_before)
                 conn.execute("COMMIT")
             except BaseException:
                 with contextlib.suppress(Exception):
@@ -854,11 +887,9 @@ class HistoryStore:
         age = older_than if older_than is not None else timedelta(days=self.retention_days)
         if age < timedelta(0):
             raise ValueError("older_than must not be negative")
-        # A longer age would overflow the date arithmetic; nothing is that old anyway.
-        age = min(age, timedelta(days=MAX_RETENTION_DAYS))
         if not self.path.is_file():
             return 0
-        cutoff = (datetime.now(UTC) - age).strftime(_TIME_FORMAT)
+        cutoff = self._cutoff(age)
         with self._service() as conn:
             conn.execute("BEGIN IMMEDIATE")
             deleted = conn.execute(
@@ -955,6 +986,24 @@ def _break_stale(lock: Path) -> bool:
         with contextlib.suppress(OSError):
             grave.unlink()
     return True
+
+
+def _prune_batch(conn: sqlite3.Connection, cutoff: str) -> None:
+    """Delete up to _PRUNE_BATCH operations (their attempts cascade) older than ``cutoff``,
+    oldest first, inside the caller's transaction. A failure, the budget's progress handler
+    interrupting it included, is rolled back to the savepoint and the caller's writes stay."""
+    conn.execute("SAVEPOINT prune")
+    try:
+        conn.execute(
+            "DELETE FROM operations WHERE id IN (SELECT id FROM operations "
+            "WHERE occurred_at_utc < ? ORDER BY occurred_at_utc LIMIT ?)",
+            (cutoff, _PRUNE_BATCH),
+        )
+    except Exception:
+        # Out of time: let the rollback and the caller's COMMIT run to the end.
+        conn.set_progress_handler(None, 0)
+        conn.execute("ROLLBACK TO prune")
+    conn.execute("RELEASE prune")
 
 
 def _migrate(conn: sqlite3.Connection) -> None:

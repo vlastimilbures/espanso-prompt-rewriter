@@ -168,3 +168,28 @@ def stub_provider(monkeypatch):
     stub = StubProvider()
     monkeypatch.setattr(cli, "make_provider", stub)
     return stub
+
+
+@pytest.fixture
+def history_rows(monkeypatch):
+    """Gives history writes a generous time budget (the real ~0.25 s drops writes on a loaded
+    CI runner) and returns a reader: history_rows("operations") lists that table of the
+    per-test usage history as dicts, [] when nothing was written."""
+    import sqlite3
+    from contextlib import closing
+
+    from prompt_workflow import history
+
+    monkeypatch.setattr(history, "_BUDGET", 2.25)
+    monkeypatch.setattr(history, "_WRITE_BUDGET", 2.0)
+
+    def read(table: str) -> list[dict]:
+        path = history.history_path()
+        if not path.is_file():
+            return []
+        with closing(sqlite3.connect(path)) as conn:
+            conn.row_factory = sqlite3.Row
+            order = "occurred_at_utc" if table == "operations" else "operation_id, seq"
+            return [dict(r) for r in conn.execute(f"SELECT * FROM {table} ORDER BY {order}")]  # noqa: S608
+
+    return read

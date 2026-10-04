@@ -12,11 +12,14 @@ from typing import TYPE_CHECKING
 import pyperclip
 import typer
 
+from . import recorder
 from .clipboard_guard import is_concealed
 from .config import EFFORTS, KEEP, TIERS, Settings
 from .factory import PROVIDER_NAMES, make_provider
-from .gate import GatedProvider
+from .gate import GateBlocked, GatedProvider
 from .prompt_builder import (
+    ALIASES,
+    PROFILES,
     TEMPLATE_MARKER,
     repair_template_tags,
     strip_outer_fence,
@@ -100,11 +103,19 @@ def _main() -> None:
             stream.reconfigure(encoding="utf-8", errors="replace")
 
 
+class ClipboardUnavailable(ProviderError):
+    """The clipboard could not be read or written."""
+
+
+class ConcealedClipboard(ProviderError):
+    """The clipboard held a password-manager item, which was cleared and not sent."""
+
+
 def _clipboard[T](op: Callable[..., T], *args: str) -> T:
     try:
         return op(*args)
     except pyperclip.PyperclipException as exc:
-        raise ProviderError(f"Clipboard unavailable: {exc}") from exc
+        raise ClipboardUnavailable(f"Clipboard unavailable: {exc}") from exc
 
 
 def _read_input(source: str, text: str | None) -> str:
@@ -117,7 +128,7 @@ def _read_input(source: str, text: str | None) -> str:
             # next trigger would send the password. Espanso restores the empty clipboard instead.
             with contextlib.suppress(pyperclip.PyperclipException):
                 pyperclip.copy("")
-            raise ProviderError(
+            raise ConcealedClipboard(
                 "The clipboard held a password-manager item (marked concealed); it was cleared "
                 "and not sent. Copy the draft first"
             )
@@ -135,6 +146,31 @@ def _sent_despite_note(built: object) -> str:
     if isinstance(built, GatedProvider) and built.sent_despite:
         return f"[prompt-workflow: sent despite: {', '.join(built.sent_despite)}]\n\n"
     return ""
+
+
+def _failure(exc: Exception, rec: recorder.Recorder) -> str:
+    """The history outcome of a run that printed a marker for ``exc``."""
+    if isinstance(exc, ConcealedClipboard):
+        return recorder.CONCEALED_REFUSED
+    if isinstance(exc, ClipboardUnavailable):
+        return recorder.CLIPBOARD_FAILED
+    if isinstance(exc, GateBlocked):
+        return recorder.GATE_BLOCKED
+    if not isinstance(exc, ProviderError | ValueError):
+        return recorder.UNEXPECTED_ERROR
+    # Providers raise after their HTTP call returned only when the reply's content is bad.
+    if isinstance(exc, ProviderError) and rec.answered:
+        return recorder.VALIDATION_FAILED
+    return recorder.ERROR_MARKER
+
+
+# Set only by the managed Espanso matches, each to its own literal value; hidden from --help.
+_TRIGGER_ID = typer.Option(
+    None,
+    "--trigger-id",
+    hidden=True,
+    help=f"Usage-history trigger: {', '.join(recorder.TRIGGER_IDS)}",
+)
 
 
 # Options are plain strings, not Enum choices: Typer would reject a bad value with a usage
@@ -171,11 +207,15 @@ def improve(
         help="Send this draft once despite labels, IDs, emails or IBANs the gate flagged "
         "(never keys, cards or passwords); the output says so",
     ),
+    trigger_id: str | None = _TRIGGER_ID,
 ) -> None:
     """Improve a draft prompt. Errors are printed inline so Espanso shows them."""
+    rec = recorder.Recorder("improve", trigger_id)
     built: object = None
     try:
-        cfg = Settings.load().for_call(
+        loaded = Settings.load()
+        rec.track(loaded)
+        cfg = loaded.for_call(
             tier, model=model, effort=effort, max_tokens=max_tokens, timeout=timeout
         )
         raw = _read_input(source, text)
@@ -189,8 +229,12 @@ def improve(
         # Data-protection gate: make_provider wraps anything that can send the draft off this
         # machine in GatedProvider, so it cannot be bypassed. The result is cleaned here too
         # because --copy puts it on the clipboard.
-        system = system_prompt(profile or cfg.profile, cfg.persona, cfg.profile_overrides)
-        built = make_provider(provider or cfg.provider, cfg, allow_flagged=allow_flagged)
+        name = profile or cfg.profile
+        system = system_prompt(name, cfg.persona, cfg.profile_overrides)
+        rec.profile_id = name if name in PROFILES else ALIASES.get(name, name)
+        built = make_provider(
+            provider or cfg.provider, cfg, allow_flagged=allow_flagged, observer=rec.observer
+        )
         result = built.generate(draft, system)
         # Cleaned first, so an invisible character cannot hide a fence from the strip. A reply
         # wrapped in one code fence would be pasted with the fence (flash-lite wrapped 16 of 36
@@ -206,23 +250,34 @@ def improve(
         expected = isinstance(exc, ProviderError | ValueError)
         error = f"[prompt-workflow: {'' if expected else 'unexpected error: '}{exc}]"
         _emit(_sent_despite_note(built) + error)
+        rec.emitted()
+        rec.outcome = _failure(exc, rec)
+        # After the paste text is out, so history can never change it (see recorder.py).
+        rec.finish()
         raise typer.Exit(0) from None
 
     _emit(_sent_despite_note(built) + result)
+    rec.emitted()
+    rec.finish()
 
 
 PERSONA_PLACEHOLDER = "I am working as [role] in [company]."
 
 
 @app.command()
-def persona() -> None:
+def persona(trigger_id: str | None = _TRIGGER_ID) -> None:
     """Print PROMPT_PERSONA for the -p- snippet, or a fill-in placeholder when unset."""
+    rec = recorder.Recorder("persona", trigger_id)
     try:
-        text = Settings.load().persona or PERSONA_PLACEHOLDER
+        cfg = Settings.load()
+        rec.track(cfg)
+        text = cfg.persona or PERSONA_PLACEHOLDER
     except Exception:
         # Same contract as improve: never a traceback or blank expansion in Espanso.
         text = PERSONA_PLACEHOLDER
     _emit(text)
+    rec.emitted()
+    rec.finish()
 
 
 # Deployment commands. Not on the trigger path: each imports the deploy module only when run,

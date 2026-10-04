@@ -115,11 +115,24 @@ prompt-workflow espanso status  # missing / in sync / stale / modified / foreign
   holding a nonce; a stale one is broken by renaming it first). The services (`stats`, `export`, `prune`,
   `reset`) raise `HistoryError`; `reset()` deletes the file only on `UnusableHistory` (corrupt
   or newer schema), never when it is merely locked. `health()` never raises and sets
-  `tracking_incomplete` when writes were lost or the files cannot be written. Nothing calls
-  `prune()` automatically yet (#89/#92). `PROMPT_HISTORY` (default `true`) and
+  `tracking_incomplete` when writes were lost or the files cannot be written. The write that creates the
+  database gets `_CREATE_EXTRA` (0.75 s) on top of both budgets. `record(prune=True)` (the
+  recorder's call) also deletes up to `_PRUNE_BATCH` operations past the retention, under a
+  savepoint in the same transaction, so a failed prune never costs the record. `PROMPT_HISTORY` (default `true`) and
   `PROMPT_HISTORY_RETENTION_DAYS` configure it; estimates come only from a user `prices.toml`
   in the config dir and are kept apart from reported costs. `sqlite3`, `tomllib`, `csv` and
-  `decimal` are imported inside functions, and `cli.py` does not import the module yet (#89).
+  `decimal` are imported inside functions, and `recorder.py` imports the module only when a run is recorded.
+- `recorder.py` — records each `improve`/`persona` run (#89). `Recorder.track(cfg)` turns it
+  on when `PROMPT_HISTORY` is true (settings that fail to load record nothing); its `observer`
+  goes to `make_provider(observer=...)` and only collects `AttemptUsage` in memory; `finish()`
+  flushes stdout, then writes the operation and every attempt in one `history.record(...,
+  prune=True)` after `_emit()`, so history never changes stdout, the exit code or a retry, and
+  a rejected reply's charge is kept. `cli._failure()` maps the marker's exception to the
+  outcome: `ConcealedClipboard` -> `concealed_refused`, `ClipboardUnavailable` ->
+  `clipboard_failed`, `gate.GateBlocked` -> `gate_blocked`, a non-ProviderError/ValueError ->
+  `unexpected_error`, a ProviderError after a 2xx last attempt (`Recorder.answered`) ->
+  `validation_failed`, else `error_marker`. Off, it never imports `history`/`sqlite3`
+  (`tests/test_trigger_contract.py` runs both ways).
 - `prompt_builder.py` — `PROFILES` maps a profile name (`default`, `general`) to a system
   prompt used to instruct the rewrite; `ALIASES` keeps the retired `default-pro` resolving to `default`. `render()` fills the `{{PERSONA_RULE}}` token from
   `PROMPT_PERSONA` (also printed by the `persona` subcommand for the `-p-` snippet). `default` (the
@@ -231,6 +244,13 @@ overrides any `--provider` a trigger passes; `PROMPT_PROVIDER` only sets the bar
   checks each value against the CLI. `-ic-`
   (Anthropic) stays commented out in `prompts-llm.yml`. The data-protection gate is a heuristic,
   not a guarantee — cloud triggers should only be used where company policy permits.
+- Every CLI match (commented-out `-ic-` and `-p-`'s `persona` call too) passes its own literal
+  `--trigger-id <id>` right after the subcommand: the trigger without dashes, from
+  `recorder.TRIGGER_IDS` (`i iok ip if il ilm ic p`), stored in the usage history as `-i-`.
+  Never a `{{form}}` value. An unknown id is recorded as `direct` with no trigger and never
+  fails the run; the option is hidden from `--help` and is never inferred from other flags.
+  `tests/test_yaml.py` checks each match's id; `tests/test_triggers.py` replays each and
+  checks what is recorded. Changing a match file needs `scripts/update_match_history.py`.
 
 ### Releases
 

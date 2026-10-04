@@ -17,7 +17,7 @@ matches:
       - name: output
         type: shell
         params:
-          cmd: "\"__PROMPT_WORKFLOW__\" improve --provider openrouter --source clipboard"
+          cmd: "\"__PROMPT_WORKFLOW__\" improve --trigger-id i --provider openrouter --source clipboard"
 
   # Same rewrite as -i-, sent once although the gate flagged a confidentiality label, a
   # Vietnamese ID number, an email address or an IBAN. Keys, tokens, passwords, cards and
@@ -31,7 +31,7 @@ matches:
       - name: output
         type: shell
         params:
-          cmd: "\"__PROMPT_WORKFLOW__\" improve --provider openrouter --allow-flagged --source clipboard"
+          cmd: "\"__PROMPT_WORKFLOW__\" improve --trigger-id iok --provider openrouter --allow-flagged --source clipboard"
 
   # Same rewrite on the pro tier: a reasoning model (OPENROUTER_PRO_MODEL) for hard,
   # multi-part drafts. Slower (~5-8 s) but more rigorous. Same cloud caveats as above.
@@ -43,7 +43,7 @@ matches:
       - name: output
         type: shell
         params:
-          cmd: "\"__PROMPT_WORKFLOW__\" improve --provider openrouter --tier pro --source clipboard"
+          cmd: "\"__PROMPT_WORKFLOW__\" improve --trigger-id ip --provider openrouter --tier pro --source clipboard"
 
   # Same rewrite, but a popup picks the model and its settings for this one call.
   # Built on the pro tier, so "default" in each list means the OPENROUTER_PRO_* setting.
@@ -89,7 +89,7 @@ matches:
       - name: output
         type: shell
         params:
-          cmd: "\"__PROMPT_WORKFLOW__\" improve --provider openrouter --tier pro --source clipboard --model {{form1.model}} --effort {{form1.effort}} --max-tokens {{form1.maxtokens}} --timeout {{form1.timeout}}"
+          cmd: "\"__PROMPT_WORKFLOW__\" improve --trigger-id if --provider openrouter --tier pro --source clipboard --model {{form1.model}} --effort {{form1.effort}} --max-tokens {{form1.maxtokens}} --timeout {{form1.timeout}}"
 
   - trigger: "-il-"
     left_word: true
@@ -99,7 +99,7 @@ matches:
       - name: output
         type: shell
         params:
-          cmd: "\"__PROMPT_WORKFLOW__\" improve --provider ollama --profile general --source clipboard"
+          cmd: "\"__PROMPT_WORKFLOW__\" improve --trigger-id il --provider ollama --profile general --source clipboard"
 
   - trigger: "-ilm-"
     left_word: true
@@ -109,7 +109,7 @@ matches:
       - name: output
         type: shell
         params:
-          cmd: "\"__PROMPT_WORKFLOW__\" improve --provider lmstudio --profile general --source clipboard"
+          cmd: "\"__PROMPT_WORKFLOW__\" improve --trigger-id ilm --provider lmstudio --profile general --source clipboard"
 
   # Claude cloud trigger, disabled by default. It sends clipboard content
   # to the Anthropic API. Uncomment only if company policy permits, and note
@@ -122,4 +122,4 @@ matches:
   #     - name: output
   #       type: shell
   #       params:
-  #         cmd: "\"__PROMPT_WORKFLOW__\" improve --provider anthropic --profile general --source clipboard"
+  #         cmd: "\"__PROMPT_WORKFLOW__\" improve --trigger-id ic --provider anthropic --profile general --source clipboard"

@@ -123,6 +123,7 @@ average about 14, so on the high side), CLI 0.15.0:
 | `import prompt_workflow.cli`, cumulative (`-X importtime`) | 128–138 ms | 164–207 ms |
 | `prompt-workflow persona`, wall time (median of 15) | 185 ms | 238 ms |
 | Modules the guarded trigger runs add to a bare interpreter | 293 | 294 |
+| The same with the usage history recording (#89, 2026-10-05) | 307 | 306 |
 
 The largest parts of the import are `importlib.metadata` (about 50 ms, for `__version__` in
 `prompt_workflow/__init__.py`), httpx (about 30 ms) and Typer (about 19 ms). CI runner numbers
@@ -143,8 +144,11 @@ apart from the launcher. Run either several times on an idle machine and take th
 `tests/test_trigger_contract.py` guards the budget without timing anything, since wall-clock
 tests flake on a loaded machine. It runs `improve` and `persona` in a fresh interpreter
 (clipboard and argument input, a local and a cloud provider, a provider error and a settings
-error) and fails if any of them imports `textual`, `rich.console`, `sqlite3`, `tomli_w`,
-`tomlkit` or `keyring`, or if they add more than `MODULE_CEILING` (400) modules. A new heavy
+error) and fails if any of them imports `textual`, `rich.console`, `tomli_w`, `tomlkit`,
+`keyring` or the deploy module, or if they add more than `MODULE_CEILING` (400) modules. It runs
+them with the usage history on and off: on, the run is recorded after its output, so
+`sqlite3` loads (307 modules on 3.12, 306 on 3.14); off (`PROMPT_HISTORY=false`), `sqlite3` and
+`history` must not load at all (296). A new heavy
 dependency belongs behind a lazy import in the command that needs it, never on the trigger
 path. Raise the ceiling only with new measurements here.
 
@@ -167,6 +171,7 @@ espanso-prompt-rewriter/
 │   ├── clipboard_guard.py        refuses password-manager (concealed) clipboard items
 │   ├── redaction.py              the gate's sensitive-content patterns
 │   ├── history.py                local usage history (SQLite, metadata only, fail-open)
+│   ├── recorder.py               records each improve/persona run in the usage history
 │   ├── prompt_builder.py         loads built-in and user profiles, fills in the persona rule
 │   ├── profiles.py               migrate a checkout's own profiles to the user directory
 │   ├── assets.py                 the packaged Espanso match files (importlib.resources)
@@ -240,6 +245,10 @@ instead of typing short replies key by key.
       params:
         cmd: "\"__PROMPT_WORKFLOW__\" improve --provider ollama --profile regulation --source clipboard"
 ```
+
+A match of your own runs without `--trigger-id`: the managed matches' ids are a fixed
+allowlist, so the usage history records your trigger as `direct`. A new managed trigger adds
+its id to `recorder.TRIGGER_IDS` (the test fails until each CLI match passes its own).
 
 Any change to a file in `espanso/match/` needs
 `uv run python scripts/update_match_history.py` (also run it at every release, after tagging):

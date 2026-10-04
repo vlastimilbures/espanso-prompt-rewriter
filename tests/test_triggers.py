@@ -181,7 +181,49 @@ def test_pro_triggers_pass_no_profile():
 
 
 # Only -iok- sends a flagged draft per call; every other trigger keeps the gate's block.
+# (Each build also gets the usage-history observer, so only allow_flagged is compared.)
 @pytest.mark.parametrize("trigger", list(EXPECTED))
 def test_only_iok_allows_flagged(stub_provider, trigger):
     _replay(stub_provider, trigger)
-    assert stub_provider.options == [{"allow_flagged": trigger == "-iok-"}]
+    assert [o["allow_flagged"] for o in stub_provider.options] == [trigger == "-iok-"]
+    assert set(stub_provider.options[0]) == {"allow_flagged", "observer"}
+
+
+# Each trigger's real command is recorded once in the usage history, as that trigger.
+@pytest.mark.parametrize("trigger", list(EXPECTED))
+def test_trigger_is_recorded_as_itself(stub_provider, history_rows, trigger):
+    _replay(stub_provider, trigger)
+    (op,) = history_rows("operations")
+    assert (op["origin"], op["trigger_id"], op["kind"], op["outcome"]) == (
+        "espanso_managed",
+        trigger,
+        "improve",
+        "ok",
+    )
+    assert op["profile_id"] == EXPECTED[trigger][1]
+
+
+def _persona_argv() -> list[str]:
+    match = next(
+        m
+        for m in yaml.safe_load((MATCH_DIR / "prompts-template.yml").read_text("utf-8"))["matches"]
+        if m["trigger"] == "-p-"
+    )
+    (cmd,) = [v["params"]["cmd"] for v in match["vars"] if v.get("type") == "shell"]
+    argv = shlex.split(cmd)
+    assert argv[0] == "__PROMPT_WORKFLOW__"
+    return argv[1:]
+
+
+# -p- is counted once, through persona: its one CLI call, recorded as -p-.
+def test_persona_trigger_is_recorded_once(history_rows):
+    result = runner.invoke(app, _persona_argv())
+    assert result.exit_code == 0
+    (op,) = history_rows("operations")
+    assert (op["origin"], op["trigger_id"], op["kind"], op["outcome"]) == (
+        "espanso_managed",
+        "-p-",
+        "persona",
+        "ok",
+    )
+    assert history_rows("attempts") == []
