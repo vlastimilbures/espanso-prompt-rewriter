@@ -60,6 +60,11 @@ All notable changes to this project are documented here. The format follows
   tokens, passwords, cards, private keys, a bare token and `PROMPT_EXTRA_PATTERNS` matches are
   never sent this way. The block message now offers `-iok-` when it applies, and no longer
   recommends `ALLOW_CLOUD_OVERRIDE`.
+- Tests freeze the trigger contract (#82): the exact stdout bytes of `improve` and `persona`
+  (success, each error marker, the `sent despite` note, the persona placeholder), and an import
+  guard that runs both in a fresh interpreter and fails if they load `textual`, `rich.console`,
+  `sqlite3`, `tomli_w`, `tomlkit` or `keyring`, or more than 400 modules. CONTRIBUTING records
+  the measured start-up time under "Trigger start-up budget". Nothing the CLI prints changes.
 
 ### Changed
 - Loading settings no longer copies `.env` values into the process environment (#83). A pure,

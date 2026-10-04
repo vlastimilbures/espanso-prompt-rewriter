@@ -44,6 +44,8 @@ uv run pytest -m live
   as `[prompt-workflow: …]` with exit code 0. Espanso cannot show stderr or exit codes, so a
   traceback or a blank line reaches the user as a silent failure. Print only through
   `cli._emit()`, which strips control and invisible characters from whatever gets pasted.
+  `tests/test_trigger_contract.py` compares the whole stdout of `improve` and `persona` byte
+  for byte; a change there is a change to what every trigger pastes.
 - **The gate.** Build providers only through `factory.make_provider()`. It wraps every provider
   that can send the draft off the machine in `GatedProvider`: the cloud ones always, a local one
   when its base URL is not loopback or the Ollama model is a cloud model.
@@ -60,6 +62,41 @@ uv run pytest -m live
   `fix:`, `docs:`, `refactor:`, `test:`, `chore:`, `ci:`.
 - **Changelog.** Add a line under *Unreleased* in [CHANGELOG.md](CHANGELOG.md) for anything a user
   would notice.
+
+## Trigger start-up budget
+
+Espanso starts a fresh `prompt-workflow` process for every trigger, so everything `cli.py`
+imports is paid on each expansion. Measured on 2026-10-04 on an Apple M5 MacBook (macOS, load
+average about 14, so on the high side), CLI 0.15.0:
+
+| Measure | Python 3.12 | Python 3.14 |
+| --- | --- | --- |
+| `import prompt_workflow.cli`, cumulative (`-X importtime`) | 128–138 ms | 164–207 ms |
+| `prompt-workflow persona`, wall time (median of 15) | 185 ms | 238 ms |
+| Modules a trigger run adds to a bare interpreter | 293 | 294 |
+
+The largest parts of the import are `importlib.metadata` (about 50 ms, for `__version__` in
+`prompt_workflow/__init__.py`), httpx (about 30 ms) and Typer (about 19 ms). CI runner numbers
+(Linux, Windows) are still to be recorded from a CI run.
+
+Re-measure with:
+
+```bash
+uv run python -X importtime -c "import prompt_workflow.cli" 2>&1 | sort -t'|' -k2 -n | tail
+uv run python -c "import subprocess, sys, time; t = time.perf_counter(); \
+  subprocess.run([sys.executable, '-m', 'prompt_workflow.cli', 'persona'], check=True); \
+  print(f'\n{(time.perf_counter() - t) * 1000:.0f} ms')"
+```
+
+The second line runs through `python -m`, as the installed `prompt-workflow` script does
+apart from the launcher. Run either several times on an idle machine and take the median.
+
+`tests/test_trigger_contract.py` guards the budget without timing anything, since wall-clock
+tests flake on a loaded machine. It runs `improve` and `persona` in a fresh interpreter and
+fails if they import `textual`, `rich.console`, `sqlite3`, `tomli_w`, `tomlkit` or `keyring`,
+or more than `MODULE_CEILING` (400) modules. A new heavy dependency belongs behind a lazy
+import in the command that needs it, never on the trigger path. Raise the ceiling only with
+new measurements here.
 
 ## Project layout
 
@@ -94,6 +131,7 @@ espanso-prompt-rewriter/
 │   └── bench_models.py           score models on template fidelity, latency, cost
 ├── tests/                        unit tests, no network (fake_http in conftest.py)
 │   ├── test_live.py              opt-in real OpenRouter calls (pytest -m live)
+│   ├── test_trigger_contract.py  exact trigger output, imports and module budget
 │   └── test_docs.py              README and .env.example list every setting
 ├── .github/                      CI (tests, gitleaks), Dependabot, issue and PR templates
 ├── .env.example                  every setting with its default; copy to .env
