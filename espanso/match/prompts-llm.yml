@@ -11,6 +11,7 @@ matches:
   # guarantee — only use this trigger where company policy permits.
   - trigger: "-i-"
     replace: "{{output}}"
+    force_mode: clipboard
     vars:
       - name: output
         type: shell
@@ -21,6 +22,7 @@ matches:
   # multi-part drafts. Slower (~5-8 s) but more rigorous. Same cloud caveats as above.
   - trigger: "-ip-"
     replace: "{{output}}"
+    force_mode: clipboard
     vars:
       - name: output
         type: shell
@@ -36,6 +38,7 @@ matches:
   # effort with 8000+ or the rewrite can come back cut short. Same cloud caveats as above.
   - trigger: "-if-"
     replace: "{{output}}"
+    force_mode: clipboard
     vars:
       - name: form1
         type: form
@@ -73,6 +76,7 @@ matches:
 
   - trigger: "-il-"
     replace: "{{output}}"
+    force_mode: clipboard
     vars:
       - name: output
         type: shell
@@ -81,6 +85,7 @@ matches:
 
   - trigger: "-ilm-"
     replace: "{{output}}"
+    force_mode: clipboard
     vars:
       - name: output
         type: shell
@@ -92,6 +97,7 @@ matches:
   # that the CLI still blocks sensitive content unless ALLOW_CLOUD_OVERRIDE=true.
   # - trigger: "-ic-"
   #   replace: "{{output}}"
+  #   force_mode: clipboard
   #   vars:
   #     - name: output
   #       type: shell

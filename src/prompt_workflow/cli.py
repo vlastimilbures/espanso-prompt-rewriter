@@ -19,7 +19,7 @@ app = typer.Typer(add_completion=False, no_args_is_help=True)
 # a whole document) that should neither go to the cloud nor stall the gate's scan.
 MAX_DRAFT_CHARS = 50_000
 
-# Characters no prompt needs that do harm where Espanso types the text: C0/C1 controls other
+# Characters no prompt needs that do harm where Espanso pastes the text: C0/C1 controls other
 # than tab and newline (an escape sequence can end a terminal's bracketed paste, so the lines
 # after it run as commands), bidi overrides (text that reads differently than it is), and
 # Unicode tag characters (invisible text that can smuggle instructions to the next model).

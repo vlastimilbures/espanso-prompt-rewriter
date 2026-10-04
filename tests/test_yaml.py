@@ -22,6 +22,25 @@ def _load(path: Path) -> dict:
     return yaml.safe_load(path.read_text(encoding="utf-8"))
 
 
+def _commented_matches(path: Path) -> list[dict]:
+    """Matches shipped commented out (such as -ic-): each `# - trigger:` block, uncommented."""
+    blocks: list[list[str]] = []
+    current: list[str] | None = None
+    for line in path.read_text(encoding="utf-8").splitlines():
+        body = line.lstrip()
+        if body.startswith("# - trigger:"):
+            current = []
+            blocks.append(current)
+        elif current is None or not body.startswith("#"):
+            current = None
+            continue
+        current.append(line.replace("# ", "", 1))
+    try:
+        return [match for block in blocks for match in yaml.safe_load("\n".join(block))]
+    except yaml.YAMLError as exc:
+        raise AssertionError(f"{path.name}: a commented-out match does not parse") from exc
+
+
 # Every match file has a top-level matches: list.
 def test_match_files_have_matches_list():
     for path in MATCH_FILES:
@@ -57,6 +76,35 @@ def test_shell_commands_start_with_quoted_cli():
         assert cmd.startswith('"__PROMPT_WORKFLOW__" '), f"{trigger} must start with the CLI"
         assert cmd.count('"') == 2, f"{trigger} must quote only the CLI path"
         assert "__REPO_DIR__" not in cmd, f"{trigger} still uses __REPO_DIR__"
+
+
+def _calls_cli(match: dict) -> bool:
+    """Whether a match runs the CLI, through a shell cmd or script args."""
+    for var in match.get("vars", []):
+        params = var.get("params", {})
+        if "__PROMPT_WORKFLOW__" in f"{params.get('cmd', '')} {params.get('args', '')}":
+            return True
+    return False
+
+
+# Every match that runs the CLI, including the commented-out ones, pastes its output via
+# the clipboard. Espanso's default backend would type output shorter than
+# clipboard_threshold (100 chars) key by key instead.
+def test_cli_matches_paste_via_clipboard():
+    matches = [m for path in MATCH_FILES for m in _load(path)["matches"]]
+    matches += [m for path in MATCH_FILES for m in _commented_matches(path)]
+    cli_matches = [m for m in matches if _calls_cli(m)]
+    expected = {"-i-", "-ip-", "-if-", "-il-", "-ilm-", "-ic-", "-p-"}
+    assert {m["trigger"] for m in cli_matches} >= expected
+    # Backstop: every CLI call in the raw text belongs to one of those matches, so none can
+    # hide in global_vars or in a commented block the parser above does not recognise.
+    calls = sum(
+        len(re.findall(r'__PROMPT_WORKFLOW__\\?"', p.read_text("utf-8"))) for p in MATCH_FILES
+    )
+    assert calls == len(cli_matches)
+    assert not [p.name for p in MATCH_FILES if "global_vars" in _load(p)]
+    for match in cli_matches:
+        assert match.get("force_mode") == "clipboard", f"{match['trigger']} must set force_mode"
 
 
 # Every --profile passed to the CLI is a profile prompt_builder.PROFILES actually defines,

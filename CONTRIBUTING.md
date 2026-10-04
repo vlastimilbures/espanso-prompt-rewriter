@@ -115,10 +115,13 @@ espanso-prompt-rewriter/
 Add a match to `espanso/match/prompts-llm.yml`. Shell commands start with the quoted
 `__PROMPT_WORKFLOW__` placeholder, which the install scripts replace with the absolute CLI path.
 Quote nothing else: `cmd.exe` mangles a command line holding more than one quoted part.
+Set `force_mode: clipboard` on every match that runs the CLI, so Espanso pastes the output
+instead of typing short replies key by key.
 
 ```yaml
 - trigger: "-ireg-"
   replace: "{{output}}"
+  force_mode: clipboard
   vars:
     - name: output
       type: shell
@@ -126,7 +129,8 @@ Quote nothing else: `cmd.exe` mangles a command line holding more than one quote
         cmd: "\"__PROMPT_WORKFLOW__\" improve --provider ollama --profile regulation --source clipboard"
 ```
 
-`tests/test_yaml.py` checks the placeholder and quoting, and that the profile and provider exist.
+`tests/test_yaml.py` checks the placeholder, quoting and `force_mode`, and that the profile and
+provider exist.
 
 ### Add a setting
 
