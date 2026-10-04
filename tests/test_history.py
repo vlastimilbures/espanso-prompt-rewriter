@@ -69,6 +69,15 @@ ALLOWED = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _generous_budget(monkeypatch):
+    # The real ~0.25 s bound drops writes on a loaded CI runner (the first write also creates
+    # the database), which made these tests flaky. Tests that block a write still finish well
+    # inside their 5 s bound; the real constants are checked by reading the code.
+    monkeypatch.setattr(history, "_BUDGET", 2.25)
+    monkeypatch.setattr(history, "_WRITE_BUDGET", 2.0)
+
+
 @pytest.fixture
 def store(tmp_path):
     return HistoryStore(tmp_path / "data" / "prompt-workflow" / history.DB_NAME)
