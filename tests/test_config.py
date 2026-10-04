@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from prompt_workflow import config
-from prompt_workflow.config import Settings, _load_dotenv, split_model_spec
+from prompt_workflow.config import ConfigLayers, Finding, Settings, env_names, split_model_spec
 
 
 # Settings() reads env vars at instantiation, not at import time.
@@ -184,10 +184,10 @@ def test_load_dotenv_explicit_path_does_not_override(tmp_path, monkeypatch):
     monkeypatch.setenv("PROMPT_WORKFLOW_ENV", str(env_file))
     monkeypatch.setenv("PROMPT_PROVIDER", "anthropic")
 
-    _load_dotenv()
+    settings = Settings.load()
 
-    assert os.environ["OLLAMA_MODEL"] == "from-file"
-    assert os.environ["PROMPT_PROVIDER"] == "anthropic"
+    assert settings.ollama_model == "from-file"
+    assert settings.provider == "anthropic"
 
 
 # .env only sets the settings this package reads: a proxy or CA bundle variable there would
@@ -200,16 +200,18 @@ def test_load_dotenv_exports_only_known_settings(tmp_path, monkeypatch):
     lines = [f"{name}=http://127.0.0.1:9" for name in others]
     (tmp_path / ".env").write_text("\n".join([*lines, "OLLAMA_MODEL=from-file", ""]))
 
-    _load_dotenv()
+    layers = ConfigLayers.resolve()
 
-    assert os.environ["OLLAMA_MODEL"] == "from-file"
+    assert layers.settings().ollama_model == "from-file"
     assert not [name for name in others if name in os.environ]
+    assert not [name for layer in layers.layers for name in others if name in layer.values]
+    assert set(layers.entries) == set(env_names())
 
 
 def _no_explicit_env(tmp_path, monkeypatch, project: Path, user: Path) -> None:
     monkeypatch.delenv("PROMPT_WORKFLOW_ENV")
     monkeypatch.setattr(config, "_PROJECT_ROOT", project)
-    monkeypatch.setattr(config, "_user_config_dir", lambda: user)
+    monkeypatch.setattr(config, "_user_config_dir", lambda _environ: user)
 
 
 # A .env in the current directory or its parents is never loaded: a planted file in an
@@ -222,9 +224,11 @@ def test_load_dotenv_ignores_cwd_and_parents(tmp_path, monkeypatch):
     monkeypatch.chdir(nested)
     _no_explicit_env(tmp_path, monkeypatch, tmp_path / "none", tmp_path / "none")
 
-    _load_dotenv()
+    layers = ConfigLayers.resolve()
 
-    assert "ALLOW_CLOUD_OVERRIDE" not in os.environ
+    assert layers.settings().allow_cloud_override is False
+    assert layers.entries["ALLOW_CLOUD_OVERRIDE"].source == "default"
+    assert [layer.source for layer in layers.layers] == ["default", "env"]
 
 
 # The repo .env (editable install) wins over the user config dir .env.
@@ -237,9 +241,10 @@ def test_load_dotenv_prefers_project_root(tmp_path, monkeypatch):
     (user / ".env").write_text("OLLAMA_MODEL=from-user\n")
     _no_explicit_env(tmp_path, monkeypatch, project, user)
 
-    _load_dotenv()
+    layers = ConfigLayers.resolve()
 
-    assert os.environ["OLLAMA_MODEL"] == "from-repo"
+    assert layers.settings().ollama_model == "from-repo"
+    assert layers.entries["OLLAMA_MODEL"].source == f"file:{project / '.env'}"
 
 
 # Without a project checkout (no pyproject.toml), the user config dir .env is used.
@@ -251,9 +256,10 @@ def test_load_dotenv_falls_back_to_user_config(tmp_path, monkeypatch):
     (user / ".env").write_text("OLLAMA_MODEL=from-user\n")
     _no_explicit_env(tmp_path, monkeypatch, project, user)
 
-    _load_dotenv()
+    layers = ConfigLayers.resolve()
 
-    assert os.environ["OLLAMA_MODEL"] == "from-user"
+    assert layers.settings().ollama_model == "from-user"
+    assert layers.entries["OLLAMA_MODEL"].source == f"file:{user / '.env'}"
 
 
 # Comment lines, blank lines, and lines without '=' are skipped; '=' inside a
@@ -270,10 +276,10 @@ def test_load_dotenv_parses_lines(tmp_path, monkeypatch):
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.delenv("LMSTUDIO_MODEL", raising=False)
 
-    _load_dotenv()
+    settings = Settings.load()
 
-    assert os.environ["OPENROUTER_API_KEY"] == "sk-abc=def"
-    assert os.environ["LMSTUDIO_MODEL"] == "local-model"
+    assert settings.openrouter_api_key == "sk-abc=def"
+    assert settings.lmstudio_model == "local-model"
 
 
 # Booleans are "true" or "false" in any case.
@@ -407,8 +413,7 @@ def test_empty_api_key_is_kept_as_empty(monkeypatch):
 def test_load_dotenv_accepts_export_prefix(tmp_path, monkeypatch):
     (tmp_path / ".env").write_text("export OLLAMA_MODEL=exported\n")
     monkeypatch.chdir(tmp_path)
-    _load_dotenv()
-    assert os.environ["OLLAMA_MODEL"] == "exported"
+    assert Settings.load().ollama_model == "exported"
 
 
 # Only a matching pair of surrounding quotes is removed; inner or lone quotes survive.
@@ -417,10 +422,10 @@ def test_load_dotenv_quote_handling(tmp_path, monkeypatch):
         'OLLAMA_MODEL="it\'s"\nLMSTUDIO_MODEL=\'a"\nPROMPT_PROFILE="general"  \n'
     )
     monkeypatch.chdir(tmp_path)
-    _load_dotenv()
-    assert os.environ["OLLAMA_MODEL"] == "it's"
-    assert os.environ["LMSTUDIO_MODEL"] == "'a\""
-    assert os.environ["PROMPT_PROFILE"] == "general"
+    settings = Settings.load()
+    assert settings.ollama_model == "it's"
+    assert settings.lmstudio_model == "'a\""
+    assert settings.profile == "general"
 
 
 # An inline ` # comment` after an unquoted value is not part of the value; a quoted value
@@ -433,11 +438,11 @@ def test_load_dotenv_strips_inline_comments(tmp_path, monkeypatch):
         "OLLAMA_MODEL=#\n"
     )
     monkeypatch.chdir(tmp_path)
-    _load_dotenv()
-    assert os.environ["OPENROUTER_PROVIDER"] == "openai"
-    assert os.environ["PROMPT_PERSONA"] == "I am #1 here"
-    assert os.environ["LMSTUDIO_MODEL"] == "model#v2"
-    assert os.environ["OLLAMA_MODEL"] == "#"
+    settings = Settings.load()
+    assert settings.openrouter_provider == "openai"
+    assert settings.persona == "I am #1 here"
+    assert settings.lmstudio_model == "model#v2"
+    assert settings.ollama_model == "#"
 
 
 # PROMPT_PERSONA is empty unless configured.
@@ -445,3 +450,120 @@ def test_persona_default_and_override(monkeypatch):
     assert Settings().persona == ""
     monkeypatch.setenv("PROMPT_PERSONA", "I am a tester.")
     assert Settings().persona == "I am a tester."
+
+
+# Loading reads the .env again each time: an edit shows up in the same process, which the
+# old os.environ.setdefault() loader hid behind the first load's values.
+def test_load_sees_an_edited_env_file(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text("OLLAMA_MODEL=first\n")
+    assert Settings.load().ollama_model == "first"
+    env_file.write_text("OLLAMA_MODEL=second\nPROMPT_PROVIDER=ollama\n")
+    settings = Settings.load()
+    assert (settings.ollama_model, settings.provider) == ("second", "ollama")
+
+
+# Loading never writes the process environment, so child processes inherit nothing from .env.
+def test_load_leaves_os_environ_unchanged(tmp_path):
+    lines = [f"{name}=x" for name in ("OLLAMA_MODEL", "LMSTUDIO_MODEL", "PROMPT_PERSONA", "FOO")]
+    (tmp_path / ".env").write_text("\n".join([*lines, "OLLAMA_THINK=true", ""]))
+    before = dict(os.environ)
+    assert Settings.load().ollama_think is True
+    ConfigLayers.resolve(strict=False)
+    assert dict(os.environ) == before
+
+
+# Each key reports where its value came from; a real env var shadowing a .env value says so.
+def test_provenance(tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text("OLLAMA_MODEL=from-file\nPROMPT_PROVIDER=ollama\n")
+    monkeypatch.setenv("PROMPT_PROVIDER", "lmstudio")
+    monkeypatch.setenv("LMSTUDIO_MODEL", "from-env")
+
+    layers = ConfigLayers.resolve()
+
+    file = f"file:{env_file}"
+    assert [layer.source for layer in layers.layers] == ["default", file, "env"]
+    got = {
+        name: (
+            layers.entries[name].value,
+            layers.entries[name].source,
+            layers.entries[name].shadows,
+        )
+        for name in ("OLLAMA_MODEL", "PROMPT_PROVIDER", "LMSTUDIO_MODEL", "OPENROUTER_MODEL")
+    }
+    assert got == {
+        "OLLAMA_MODEL": ("from-file", file, ()),
+        "PROMPT_PROVIDER": ("lmstudio", "env", (file,)),
+        "LMSTUDIO_MODEL": ("from-env", "env", ()),
+        "OPENROUTER_MODEL": ("google/gemini-3.5-flash-lite", "default", ()),
+    }
+    assert layers.findings == ()
+    assert layers.settings() == Settings.load()
+
+
+# Entries and layers never print a value, which may be an API key.
+def test_provenance_repr_hides_values(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", FAKE_KEY)
+    layers = ConfigLayers.resolve()
+    assert "cdcd" not in repr(layers)
+    assert "cdcd" not in repr(layers.entries["OPENROUTER_API_KEY"])
+
+
+# A broken .env: strict mode raises today's exact error; repair mode returns the same text as
+# findings and falls back to the next lower layer, so management commands can still run.
+def test_repair_mode_returns_findings(tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        f"PROMPT_PERSONA=I am a tester.OPENROUTER_API_KEY={FAKE_KEY}\n"
+        "OPENROUTER_MAX_TOKENS=lots\n"
+        "OLLAMA_MODEL=from-file\n"
+        "OLLAMA_THINK=1\n"
+    )
+    monkeypatch.setenv("PROMPT_TIMEOUT_SECONDS", "inf")
+    merged = "PROMPT_PERSONA in .env runs into the next line; add the missing newline"
+    with pytest.raises(ValueError, match=f"^{merged}$"):
+        Settings.load()
+
+    layers = ConfigLayers.resolve(strict=False)
+
+    file = f"file:{env_file}"
+    assert layers.findings == (
+        Finding(file, merged),
+        Finding("env", "PROMPT_TIMEOUT_SECONDS must be a number above 0, got 'inf'"),
+        Finding(file, "OLLAMA_THINK must be true or false, got '1'"),
+        Finding(file, "OPENROUTER_MAX_TOKENS must be a whole number above 0, got 'lots'"),
+    )
+    assert "cdcd" not in repr(layers.findings)
+    settings = layers.settings()
+    assert (settings.persona, settings.timeout, settings.ollama_think) == ("", 30.0, False)
+    assert (settings.openrouter_max_tokens, settings.ollama_model) == (2400, "from-file")
+    assert layers.entries["PROMPT_TIMEOUT_SECONDS"].source == "default"
+
+
+# Strict mode reports a bad number with today's message, from the .env as from the env.
+def test_strict_bad_number_in_env_file(tmp_path):
+    (tmp_path / ".env").write_text("OPENROUTER_MAX_TOKENS=lots\n")
+    message = "^OPENROUTER_MAX_TOKENS must be a whole number above 0, got 'lots'$"
+    with pytest.raises(ValueError, match=message):
+        Settings.load()
+
+
+# Repair mode falls back past a bad env value to a valid .env value, not to the default.
+def test_repair_mode_falls_back_to_next_layer(tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text("PROMPT_TIMEOUT_SECONDS=12\n")
+    monkeypatch.setenv("PROMPT_TIMEOUT_SECONDS", "soon")
+    layers = ConfigLayers.resolve(strict=False)
+    assert layers.settings().timeout == 12.0
+    assert layers.entries["PROMPT_TIMEOUT_SECONDS"].source == f"file:{env_file}"
+    assert [finding.source for finding in layers.findings] == ["env"]
+
+
+# resolve() takes the environment as a mapping, so a caller can resolve another one.
+def test_resolve_takes_an_environment_mapping(tmp_path):
+    env_file = tmp_path / "other.env"
+    env_file.write_text("OLLAMA_MODEL=from-file\n")
+    environ = {"PROMPT_WORKFLOW_ENV": str(env_file), "PROMPT_PROVIDER": "ollama"}
+    settings = ConfigLayers.resolve(environ).settings()
+    assert (settings.provider, settings.ollama_model) == ("ollama", "from-file")
