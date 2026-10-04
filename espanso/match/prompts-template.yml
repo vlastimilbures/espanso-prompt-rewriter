@@ -10,6 +10,7 @@ matches:
         type: shell
         params:
           cmd: "\"__PROMPT_WORKFLOW__\" persona"
+    force_mode: clipboard
     replace: |
       <CONTEXT>
       {{persona}}
@@ -48,4 +49,3 @@ matches:
       <OUTPUTS>
       structured .md, well formatted with clear headings/subheadings
       </OUTPUTS>
-    force_mode: clipboard

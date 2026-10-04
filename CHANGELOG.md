@@ -23,7 +23,8 @@ All notable changes to this project are documented here. The format follows
   reported as `invalid header value (check the API key)`.
 - Every trigger that runs the CLI (`-i-`, `-ip-`, `-if-`, `-il-`, `-ilm-`, `-ic-`, `-p-`) now
   sets `force_mode: clipboard`, so Espanso always pastes the result instead of typing short
-  replies key by key. Re-run the installer to redeploy the match files.
+  replies key by key. This overrides any Espanso `backend` setting for these triggers. Re-run
+  the installer to redeploy the match files.
 
 ## 0.12.0
 
