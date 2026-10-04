@@ -121,10 +121,12 @@ class StubProvider:
         self.result = "improved"
         self.exc = None
         self.built = []
+        self.options = []
         self.calls = []
 
-    def __call__(self, name, cfg):
+    def __call__(self, name, cfg, **options):
         self.built.append((name, cfg))
+        self.options.append(options)
         return self
 
     def generate(self, prompt, system_prompt):

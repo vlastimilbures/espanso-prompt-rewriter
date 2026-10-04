@@ -67,7 +67,7 @@ uv run pytest -m live
 espanso-prompt-rewriter/
 ├── espanso/                      deployed into Espanso by the installers
 │   ├── match/
-│   │   ├── prompts-llm.yml       -i- -ip- -if- -il- -ilm- (-ic-): call the CLI
+│   │   ├── prompts-llm.yml       -i- -ip- -if- -iok- -il- -ilm- (-ic-): call the CLI
 │   │   ├── prompts-core.yml      -prompt- -risk-: static snippets and forms
 │   │   └── prompts-template.yml  -p-: the empty golden template, opens with your persona
 │   └── config/

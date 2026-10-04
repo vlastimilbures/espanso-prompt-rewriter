@@ -35,8 +35,29 @@ All notable changes to this project are documented here. The format follows
   stale-clipboard slip. URLs, paths, emails, UUIDs, hashes, versions, dates and lower-case
   slugs and file names are not. A single word is never a prompt, so a mixed-case identifier
   with a digit is blocked too.
+- An email address next to a password (`jane@example.com:…`) is a hard `credential_pair`
+  finding, and `scheme://:password@host` (no user name) counts as `url_credentials` (#21).
+
+### Added
+- `-iok-` (`--allow-flagged`) sends one draft that the gate blocked only for soft findings: a
+  confidentiality label, a Vietnamese ID number, an email address or an IBAN (#21). The paste
+  starts with `[prompt-workflow: sent despite: …]`, and the next draft is checked as usual. Keys,
+  tokens, passwords, cards, private keys, a bare token and `PROMPT_EXTRA_PATTERNS` matches are
+  never sent this way. The block message now offers `-iok-` when it applies, and no longer
+  recommends `ALLOW_CLOUD_OVERRIDE`.
 
 ### Changed
+- The gate stops blocking ordinary drafts (#21). A confidentiality label counts only when
+  written as one: upper case, alone on a line or opening one before `:` or a dash, in
+  brackets, a `Classification:`/`Sensitivity:`/`Độ mật:` field, *highly/company/strictly
+  confidential*, *internal only* or *do not distribute*. "Output restricted to 5 bullets",
+  "confidential information" and "customer data" in prose pass. Vietnamese *mật* counts in
+  upper case, alone or opening a line, or as *tài liệu/văn bản/thông tin mật*, *tối mật* or
+  *tuyệt mật*, so *bảo mật* (security), *mật độ* (density) and *mật khẩu* (password) in prose
+  pass. A 12-digit number counts as a CCCD only with a valid province and century code, and
+  never inside an AWS ARN; a 9-digit number needs a document word next to it (CMND, CCCD, CMT,
+  *chứng minh nhân dân*, *căn cước*, *hộ chiếu*, *passport*, *national ID*, *ID card*), not a
+  bare "ID" or *số*.
 - Carriage returns, vertical tabs, form feeds, NEL and the Unicode line and paragraph
   separators become newlines instead of disappearing.
 - A draft over 50,000 characters is refused before it is cleaned, so a pasted multi-megabyte

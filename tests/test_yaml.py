@@ -94,7 +94,7 @@ def test_cli_matches_paste_via_clipboard():
     matches = [m for path in MATCH_FILES for m in _load(path)["matches"]]
     matches += [m for path in MATCH_FILES for m in _commented_matches(path)]
     cli_matches = [m for m in matches if _calls_cli(m)]
-    expected = {"-i-", "-ip-", "-if-", "-il-", "-ilm-", "-ic-", "-p-"}
+    expected = {"-i-", "-ip-", "-if-", "-iok-", "-il-", "-ilm-", "-ic-", "-p-"}
     assert {m["trigger"] for m in cli_matches} >= expected
     # Backstop: every CLI call in the raw text belongs to one of those matches, so none can
     # hide in global_vars or in a commented block the parser above does not recognise.

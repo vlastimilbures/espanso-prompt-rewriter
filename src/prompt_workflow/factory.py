@@ -79,7 +79,9 @@ def _leaves_machine(name: str, cfg: Settings) -> bool:
     return name in ("openrouter", "anthropic")
 
 
-def _gate(inner: Provider, cfg: Settings) -> GatedProvider:
+def _gate(
+    inner: Provider, cfg: Settings, allow_flagged: bool = False, name: str = "openrouter"
+) -> GatedProvider:
     # make_provider refuses earlier with a clearer message; this keeps the guarantee for any
     # provider added later that returns through _gate().
     if cfg.local_only:
@@ -90,6 +92,8 @@ def _gate(inner: Provider, cfg: Settings) -> GatedProvider:
         inner,
         allow_override=cfg.allow_cloud_override,
         extra_patterns=compile_extra(cfg.extra_patterns),
+        allow_flagged=allow_flagged,
+        name=name,
     )
 
 
@@ -97,6 +101,7 @@ def make_provider(
     name: str,
     cfg: Settings,
     *,
+    allow_flagged: bool = False,
     extra_body: dict[str, object] | None = None,
     on_response: Callable[[dict[str, object]], None] | None = None,
     title: str = APP_TITLE,
@@ -105,6 +110,9 @@ def make_provider(
     machine (see _leaves_machine) comes wrapped in the data-protection gate, and with
     PROMPT_LOCAL_ONLY=true it is refused before anything is built. Nothing built here can
     skip either.
+
+    ``allow_flagged`` (--allow-flagged) lets the gate send a draft whose findings are all
+    soft, once; it never touches PROMPT_LOCAL_ONLY or a provider that stays on this machine.
 
     ``extra_body``, ``on_response`` and ``title`` only apply to OpenRouter; they let
     scripts/bench_models.py request usage/cost data through the same construction path.
@@ -123,7 +131,7 @@ def make_provider(
             think=cfg.ollama_think,
             temperature=cfg.temperature,
         )
-        return _gate(ollama, cfg) if remote else ollama
+        return _gate(ollama, cfg, allow_flagged, name) if remote else ollama
     if name == "lmstudio":
         lmstudio = OpenAICompatibleProvider(
             base_url=cfg.lmstudio_base_url,
@@ -132,7 +140,7 @@ def make_provider(
             temperature=cfg.temperature,
             label="LM Studio",
         )
-        return _gate(lmstudio, cfg) if remote else lmstudio
+        return _gate(lmstudio, cfg, allow_flagged, name) if remote else lmstudio
     if name == "openrouter":
         return _gate(
             OpenAICompatibleProvider(
@@ -148,6 +156,8 @@ def make_provider(
                 on_response=on_response,
             ),
             cfg,
+            allow_flagged,
+            name,
         )
     if name == "anthropic":
         return _gate(
@@ -160,5 +170,7 @@ def make_provider(
                 temperature=cfg.temperature,
             ),
             cfg,
+            allow_flagged,
+            name,
         )
     raise ProviderError(f"Unknown provider {safe_repr(name)}. Use {', '.join(PROVIDER_NAMES)}.")

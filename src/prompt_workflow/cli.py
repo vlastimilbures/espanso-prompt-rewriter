@@ -11,6 +11,7 @@ import typer
 
 from .config import EFFORTS, KEEP, TIERS, Settings
 from .factory import PROVIDER_NAMES, make_provider
+from .gate import GatedProvider
 from .prompt_builder import TEMPLATE_MARKER, repair_template_tags, system_prompt
 from .providers.base import ProviderError
 from .redaction import DEFAULT_IGNORABLE
@@ -104,6 +105,14 @@ def _read_input(source: str, text: str | None) -> str:
     raise ProviderError("source must be clipboard, stdin, or argument")
 
 
+def _sent_despite_note(built: object) -> str:
+    """A draft the gate let through with --allow-flagged says so where it is pasted, even when
+    the call failed after the gate, naming only the findings."""
+    if isinstance(built, GatedProvider) and built.sent_despite:
+        return f"[prompt-workflow: sent despite: {', '.join(built.sent_despite)}]\n\n"
+    return ""
+
+
 # Options are plain strings, not Enum choices: Typer would reject a bad value with a usage
 # error on stderr and exit 2, which Espanso cannot show. make_provider() reports it inline.
 @app.command()
@@ -132,8 +141,15 @@ def improve(
     copy: bool = typer.Option(
         False, help="Also copy output to clipboard (overwrites --source clipboard's draft)"
     ),
+    allow_flagged: bool = typer.Option(
+        False,
+        "--allow-flagged",
+        help="Send this draft once despite labels, IDs, emails or IBANs the gate flagged "
+        "(never keys, cards or passwords); the output says so",
+    ),
 ) -> None:
     """Improve a draft prompt. Errors are printed inline so Espanso shows them."""
+    built: object = None
     try:
         cfg = Settings.load().for_call(
             tier, model=model, effort=effort, max_tokens=max_tokens, timeout=timeout
@@ -150,7 +166,8 @@ def improve(
         # machine in GatedProvider, so it cannot be bypassed. The result is cleaned here too
         # because --copy puts it on the clipboard.
         system = system_prompt(profile or cfg.profile, cfg.persona)
-        result = make_provider(provider or cfg.provider, cfg).generate(draft, system)
+        built = make_provider(provider or cfg.provider, cfg, allow_flagged=allow_flagged)
+        result = built.generate(draft, system)
         if TEMPLATE_MARKER in system:
             result = repair_template_tags(result)
         result = _clean(result)
@@ -160,10 +177,11 @@ def improve(
         # Nothing may traceback or exit nonzero: Espanso cannot surface stderr, so emit a
         # visible bracketed marker instead of a blank expansion.
         expected = isinstance(exc, ProviderError | ValueError)
-        _emit(f"[prompt-workflow: {'' if expected else 'unexpected error: '}{exc}]")
+        error = f"[prompt-workflow: {'' if expected else 'unexpected error: '}{exc}]"
+        _emit(_sent_despite_note(built) + error)
         raise typer.Exit(0) from None
 
-    _emit(result)
+    _emit(_sent_despite_note(built) + result)
 
 
 PERSONA_PLACEHOLDER = "I am working as [role] in [company]."

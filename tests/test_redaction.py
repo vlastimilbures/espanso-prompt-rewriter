@@ -300,6 +300,12 @@ def test_custom_pattern_matches_raw_text():
         "-u a:b " * 30_000,
         "curl\n-u a:b\n" * 17_000,
         "curlx -u a:b " * 16_000,
+        "\n**Confidential" * 15_000,
+        "Classification: " * 12_000,
+        "a@b.cd " * 30_000,
+        "\n- confidential " * 12_000,
+        "tài liệu " * 25_000,
+        "[confidential " * 15_000,
     ],
     ids=[
         "dots",
@@ -332,6 +338,12 @@ def test_custom_pattern_matches_raw_text():
         "user-options",
         "curl-then-options",
         "not-curl-options",
+        "label-markdown",
+        "classification-fields",
+        "emails",
+        "label-lines",
+        "vn-label",
+        "brackets",
     ],
 )
 def test_scan_is_fast_on_adversarial_input(text):
@@ -458,51 +470,62 @@ MUST_DETECT = [
         id="basic-utf8",
     ),
     pytest.param("Basic " + base64.b64encode(b"a:b").decode(), "basic_auth", id="basic-short"),
+    # Labels and IDs that stay flagged after #21 narrowed them.
+    pytest.param("CONFIDENTIAL: Q3 forecast", "confidential_label", id="label-upper"),
+    pytest.param("Confidential: Q3 forecast", "confidential_label", id="label-line-start"),
+    pytest.param("> Restricted - board only", "confidential_label", id="label-quoted-dash"),
+    pytest.param("[restricted] Q3 forecast", "confidential_label", id="label-bracketed"),
+    pytest.param("Strictly confidential, do not forward", "confidential_label", id="strictly"),
+    pytest.param("Please do not distribute this deck", "confidential_label", id="no-distribution"),
+    pytest.param("Đây là tài liệu tối mật của công ty", "confidential_label", id="vn-top-secret"),
+    pytest.param("Thông tin mật: kế hoạch sáp nhập", "confidential_label", id="vn-secret-info"),
+    pytest.param("MẬT\nKế hoạch quý 4", "confidential_label", id="vn-header"),
+    pytest.param("Tài liệu lưu hành nội bộ", "confidential_label", id="vn-internal"),
+    pytest.param("CCCD: 001099012345", "vietnam_id_12", id="cccd"),
+    pytest.param("079203001234 là số của tôi", "vietnam_id_12", id="cccd-bare"),
+    pytest.param("Số CMND 123456789 của anh ấy", "vietnam_id_9", id="cmnd"),
+    pytest.param("hộ chiếu số 012345678", "vietnam_id_9", id="vn-passport"),
+    pytest.param("Số CMT 123456789", "vietnam_id_9", id="cmt"),
+    pytest.param("Confidential\nQ3 forecast", "confidential_label", id="label-alone"),
+    pytest.param("# Confidential", "confidential_label", id="label-heading"),
+    pytest.param("**Confidential**: Q3 forecast", "confidential_label", id="label-markdown"),
+    pytest.param("Highly confidential \u2013 board", "confidential_label", id="highly"),
+    pytest.param("Company Confidential", "confidential_label", id="company"),
+    pytest.param("Proprietary and Confidential", "confidential_label", id="proprietary"),
+    pytest.param("Classification: Restricted", "confidential_label", id="classification"),
+    pytest.param("Sensitivity: Internal", "confidential_label", id="sensitivity"),
+    pytest.param("see the [confidential] notes", "confidential_label", id="bracket-mid-line"),
+    pytest.param("Độ mật: Mật", "confidential_label", id="vn-field"),
+    pytest.param("Tiêu đề: MẬT - Kế hoạch", "confidential_label", id="vn-upper-mid-line"),
+    pytest.param("Kế hoạch (MẬT)", "confidential_label", id="vn-upper-paren"),
+    pytest.param("Mật: thông tin sáp nhập", "confidential_label", id="vn-line-start"),
+    pytest.param("Nội bộ\nKế hoạch", "confidential_label", id="vn-internal-alone"),
+    pytest.param("Yarn: install deps\n079203001234: A", "vietnam_id_12", id="cccd-after-yarn"),
+    # An email next to a password: hard, so -iok- cannot send it as just "email".
+    pytest.param(f"jane@example.com:{_FAKE}!", "credential_pair", id="email-colon-password"),
+    pytest.param(f"smtp login jane@example.com / {_FAKE}", "credential_pair", id="email-slash"),
+    pytest.param(f"redis://:{_FAKE}@cache.example.com:6379", "url_credentials", id="url-no-user"),
+    pytest.param(f"Tài khoản: jane@example.com, mk: {_FAKE}", "password_value", id="vn-mk"),
 ]
 
-# Ordinary drafts the gate must let through. The xfail rows are #21's false positives.
-_FP_21 = pytest.mark.xfail(strict=True, reason="#21: over-broad label and ID patterns")
+# Ordinary drafts the gate must let through.
 MUST_PASS = [
-    pytest.param("Output restricted to 5 bullets.", id="restricted", marks=_FP_21),
+    pytest.param("Output restricted to 5 bullets.", id="restricted"),
     pytest.param(
-        "Draft an NDA template that defines what counts as confidential information.",
-        id="nda",
-        marks=_FP_21,
+        "Draft an NDA template that defines what counts as confidential information.", id="nda"
     ),
     pytest.param(
-        "Write a script that deduplicates customer data from two CRMs.",
-        id="customer-data",
-        marks=_FP_21,
+        "Write a script that deduplicates customer data from two CRMs.", id="customer-data"
     ),
-    pytest.param(
-        "Viết hướng dẫn bảo mật cho nhân viên mới.",
-        id="vn-security",
-        marks=_FP_21,
-    ),
-    pytest.param(
-        "Phân tích mật độ dân số Hà Nội.",
-        id="vn-density",
-        marks=_FP_21,
-    ),
-    pytest.param("Công thức trà mật ong gừng.", id="vn-honey", marks=_FP_21),
-    pytest.param(
-        "Viết email nhắc nhân viên đổi mật khẩu mỗi 90 ngày.",
-        id="vn-password-prose",
-        marks=_FP_21,
-    ),
-    pytest.param(
-        "Fix this policy for arn:aws:iam::123456789012:role/Deploy", id="arn", marks=_FP_21
-    ),
-    pytest.param(
-        "Customer asks about order 202410041234, draft a reply.", id="order-12", marks=_FP_21
-    ),
-    pytest.param("Bug ID: ticket 123456789 crashes on login", id="bug-id-9", marks=_FP_21),
-    pytest.param(
-        "Tóm tắt hợp đồng số 123456789 cho sếp.",
-        id="vn-contract-9",
-        marks=_FP_21,
-    ),
-    pytest.param("123e4567-e89b-12d3-a456-426614174000", id="uuid", marks=_FP_21),
+    pytest.param("Viết hướng dẫn bảo mật cho nhân viên mới.", id="vn-security"),
+    pytest.param("Phân tích mật độ dân số Hà Nội.", id="vn-density"),
+    pytest.param("Công thức trà mật ong gừng.", id="vn-honey"),
+    pytest.param("Viết email nhắc nhân viên đổi mật khẩu mỗi 90 ngày.", id="vn-password-prose"),
+    pytest.param("Fix this policy for arn:aws:iam::123456789012:role/Deploy", id="arn"),
+    pytest.param("Customer asks about order 202410041234, draft a reply.", id="order-12"),
+    pytest.param("Bug ID: ticket 123456789 crashes on login", id="bug-id-9"),
+    pytest.param("Tóm tắt hợp đồng số 123456789 cho sếp.", id="vn-contract-9"),
+    pytest.param("123e4567-e89b-12d3-a456-426614174000", id="uuid"),
     pytest.param("the model has a token count of 128000 tokens", id="token-count"),
     pytest.param("Write a policy explaining why passwords must be 12 characters.", id="pw-policy"),
     pytest.param("Explain how password: hashing with bcrypt works", id="pw-colon-prose"),
@@ -538,14 +561,30 @@ MUST_PASS = [
     pytest.param("Write docs: the password is SHA256-hashed with a salt.", id="pw-hashed"),
     pytest.param("The new password is 6-digit, numeric only.", id="pw-6-digit"),
     pytest.param("The password was bcrypt2-hashed before 2020.", id="pw-bcrypt"),
-    pytest.param(
-        "Hướng dẫn đổi mật khẩu Office365 cho nhân viên mới.", id="vn-pw-product", marks=_FP_21
-    ),
+    pytest.param("Hướng dẫn đổi mật khẩu Office365 cho nhân viên mới.", id="vn-pw-product"),
     pytest.param("maxToken: 16384000", id="max-token-count"),
     pytest.param("Rename variable masterKeyId: 12345678", id="key-id"),
     pytest.param("jwks signing_key_id: kid-2024-10-04", id="signing-key-id"),
     pytest.param("meta-llama/llama-3.1-8b-instruct", id="model-slug"),
     pytest.param("notes2026.md", id="file-name-lower"),
+    pytest.param("Prepare an FAQ; access is restricted: admins only", id="restricted-colon-prose"),
+    pytest.param("Gửi thông tin mật khẩu mới cho nhân viên", id="vn-password-info"),
+    pytest.param("Kiểm tra thông tin mật độ xây dựng", id="vn-density-info"),
+    pytest.param("account 123456789012 owns the bucket", id="aws-account-id"),
+    # An account ID that happens to be CCCD-shaped is still not an ID inside an ARN.
+    pytest.param("Grant arn:aws:iam::001099012345:role/Deploy read access", id="arn-cccd-shaped"),
+    pytest.param("Use the CCCD format 0790xxxxxxxx in the form", id="cccd-placeholder"),
+    pytest.param("Order 001499123456 shipped", id="cccd-bad-century"),
+    pytest.param("Ticket 003012345678 closed", id="cccd-bad-province"),
+    pytest.param("Read arn:aws:s3:::bucket/001099012345.json", id="arn-resource"),
+    pytest.param("Mật ong có tốt không?", id="vn-honey-line-start"),
+    pytest.param("Confidential computing explained for managers", id="confidential-computing"),
+    pytest.param("Restricted-access endpoints need review", id="restricted-hyphen"),
+    pytest.param("Giữ thông tin mật thiết với khách hàng", id="vn-close"),
+    pytest.param("Viết tài liệu mật thư cho trò chơi", id="vn-cipher"),
+    pytest.param("chứng minh rằng 100000007 là số nguyên tố", id="vn-prove"),
+    pytest.param("cmt line 123456789", id="cmt-lower"),
+    pytest.param("labels: internal-api", id="k8s-label"),
 ]
 
 
@@ -621,3 +660,16 @@ def test_basic_auth_needs_user_password(text):
 )
 def test_curl_user_needs_the_curl_command(text, flagged):
     assert ("curl_user" in scan(text)) == flagged
+
+
+# An email next to a date, a description or a word without digits is just an email (soft).
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Send to jane@example.com, 2024-10-04 latest",
+        "jane@example.com 2FA-enabled account",
+        "jane@example.com about the Q3 plan",
+    ],
+)
+def test_email_without_password_is_soft(text):
+    assert scan_draft(text) == ["email"]

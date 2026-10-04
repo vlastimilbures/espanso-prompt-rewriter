@@ -354,3 +354,40 @@ def test_invalid_extra_pattern_raises(monkeypatch):
     monkeypatch.setenv("PROMPT_EXTRA_PATTERNS", "a[")
     with pytest.raises(ValueError, match="PROMPT_EXTRA_PATTERNS entry 1"):
         make_provider("openrouter", Settings())
+
+
+# allow_flagged reaches the gate of every provider that leaves the machine, and nothing else.
+@pytest.mark.parametrize("name", ["openrouter", "anthropic"])
+def test_make_provider_passes_allow_flagged_to_gate(monkeypatch, name):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    provider = make_provider(name, Settings.load(), allow_flagged=True)
+    assert isinstance(provider, GatedProvider)
+    assert provider._allow_flagged is True
+    assert make_provider(name, Settings.load())._allow_flagged is False
+
+
+# A remote Ollama or LM Studio gets the flag and its name through its gate too; a local one
+# is not gated at all.
+@pytest.mark.parametrize(
+    ("name", "remote_cfg", "local_type"),
+    [
+        ("ollama", Settings(ollama_base_url="https://ollama.example.com"), OllamaProvider),
+        (
+            "lmstudio",
+            Settings(lmstudio_base_url="https://lm.example.com"),
+            OpenAICompatibleProvider,
+        ),
+    ],
+)
+def test_allow_flagged_on_remote_and_local_models(name, remote_cfg, local_type):
+    remote = make_provider(name, remote_cfg, allow_flagged=True)
+    assert isinstance(remote, GatedProvider)
+    assert (remote._allow_flagged, remote._name) == (True, name)
+    assert isinstance(make_provider(name, Settings(), allow_flagged=True), local_type)
+
+
+# PROMPT_LOCAL_ONLY still wins over --allow-flagged.
+def test_local_only_beats_allow_flagged():
+    with pytest.raises(ProviderError, match="PROMPT_LOCAL_ONLY"):
+        make_provider("openrouter", Settings(local_only=True), allow_flagged=True)
