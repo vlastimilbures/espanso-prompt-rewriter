@@ -22,6 +22,9 @@ def isolated_env(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     # Point the loader at a per-test file so the developer's real repo .env never loads.
     monkeypatch.setenv("PROMPT_WORKFLOW_ENV", str(tmp_path / ".env"))
+    # ...and its real user profile directory is never read either (prompt_builder).
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("APPDATA", str(tmp_path / "config"))
     # Never probe the developer's real clipboard: a concealed item there would fail tests.
     import prompt_workflow.cli as cli
 

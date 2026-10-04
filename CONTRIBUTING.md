@@ -106,7 +106,7 @@ path. Raise the ceiling only with new measurements here.
 ```text
 espanso-prompt-rewriter/
 ├── espanso/                      deployed into Espanso by the installers
-│   ├── match/
+│   ├── match/                    also shipped in the wheel (config/ is not), see assets.py
 │   │   ├── prompts-llm.yml       -i- -ip- -if- -iok- -il- -ilm- (-ic-): call the CLI
 │   │   ├── prompts-core.yml      -prompt- -risk-: static snippets and forms
 │   │   └── prompts-template.yml  -p-: the empty golden template, opens with your persona
@@ -119,7 +119,9 @@ espanso-prompt-rewriter/
 │   ├── gate.py                   GatedProvider: scans every draft that can leave the machine
 │   ├── clipboard_guard.py        refuses password-manager (concealed) clipboard items
 │   ├── redaction.py              the gate's sensitive-content patterns
-│   ├── prompt_builder.py         loads profiles, fills in the persona rule
+│   ├── prompt_builder.py         loads built-in and user profiles, fills in the persona rule
+│   ├── profiles.py               migrate a checkout's own profiles to the user directory
+│   ├── assets.py                 the packaged Espanso match files (importlib.resources)
 │   ├── prompts/
 │   │   ├── default.md            golden-template rewrite (-i-, -ip-, -if-)
 │   │   └── general.md            lighter "make this precise" rewrite (local triggers)
@@ -132,7 +134,8 @@ espanso-prompt-rewriter/
 ├── scripts/
 │   ├── install_macos.sh          install the CLI and deploy the match files
 │   ├── install_windows.ps1       the same for Windows
-│   └── bench_models.py           score models on template fidelity, latency, cost
+│   ├── bench_models.py           score models on template fidelity, latency, cost
+│   └── check_wheel.py            CI: what an installed wheel really contains
 ├── tests/                        unit tests, no network (fake_http in conftest.py)
 │   ├── test_live.py              opt-in real OpenRouter calls (pytest -m live)
 │   ├── test_trigger_contract.py  exact trigger output, imports and module budget
@@ -148,8 +151,19 @@ espanso-prompt-rewriter/
 
 ### Add a profile
 
+A profile for your own use does not belong in the repo: put it in the user profile directory,
+`~/.config/prompt-workflow/profiles/<name>.md` (`%APPDATA%\prompt-workflow\profiles\` on
+Windows), where an upgrade cannot replace it. See
+[README](README.md#profiles-and-persona); a same-named file overrides a built-in only when
+`PROMPT_PROFILE_OVERRIDES` lists it. `profiles.migrate_profiles()` copies profiles a checkout
+added or edited under `src/prompt_workflow/prompts/` into that directory (it never deletes or
+overwrites).
+
+To ship a new built-in profile:
+
 1. Add `src/prompt_workflow/prompts/<name>.md` containing the system prompt as plain prose. It is
-   picked up automatically.
+   picked up automatically. The name must match `prompt_builder.PROFILE_NAME` (lower-case
+   letters, digits, `-`, `_`).
 2. Optionally include `{{PERSONA_RULE}}` where the user's persona should be applied (see
    `prompt_builder.render()`).
 3. Add a test in `tests/test_prompts.py`.

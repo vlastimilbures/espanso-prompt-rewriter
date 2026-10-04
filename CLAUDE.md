@@ -94,6 +94,22 @@ Espanso does not inherit shell PATH):
   it with `--profile general` via `check_general()`, and `test_general_profile_contract` pins its
   phrases. `strip_outer_fence()` removes a fence around a whole reply; the CLI and the bench
   apply it to every profile before the tag repair.
+- User profiles: `system_prompt()` also reads `<user config dir>/profiles/<name>.md`
+  (`user_profiles_dir()`, the dir `config._user_config_dir()` gives `.env`), but only for a name
+  that is not built in, or a built-in listed in `PROMPT_PROFILE_OVERRIDES` (strictly parsed;
+  built-in names only). A user `default.md` without that opt-in is ignored, never a silent swap,
+  and a built-in that is not opted in touches no file. Names must match `PROFILE_NAME` (lower case,
+  no dots, separators or Windows device names, so `--profile` cannot leave the dir and `Default`
+  never opens `default.md` on a case-insensitive FS) and the listed file name exactly. `user_profiles()` reports each file as
+  added/overrides/shadowed/invalid name, plus opted-in built-ins without a file (missing), for
+  the doctor/profiles commands (#92). `profiles.migrate_profiles()` copies a checkout's added
+  or modified `src/prompt_workflow/prompts/*.md` (against `git_pristine_profiles()` or the
+  packaged `PROFILES`) into that dir: copy only, exclusive create, never deletes or overwrites.
+- `assets.py` — the Espanso match files as package data. Hatch `force-include` copies the repo's
+  `espanso/match/` (the source of truth) to `prompt_workflow/espanso/match/` in the wheel;
+  `espanso/config/` is not shipped. An editable install falls back to the checkout's folder.
+  CI's `wheel` job builds sdist + wheel, installs the wheel in a clean venv outside the checkout
+  and runs `scripts/check_wheel.py` (match files, profiles, `persona`) on all three OSes.
 
 ### Data-protection gate
 

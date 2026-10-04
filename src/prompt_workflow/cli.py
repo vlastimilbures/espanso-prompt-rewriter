@@ -184,7 +184,7 @@ def improve(
         # Data-protection gate: make_provider wraps anything that can send the draft off this
         # machine in GatedProvider, so it cannot be bypassed. The result is cleaned here too
         # because --copy puts it on the clipboard.
-        system = system_prompt(profile or cfg.profile, cfg.persona)
+        system = system_prompt(profile or cfg.profile, cfg.persona, cfg.profile_overrides)
         built = make_provider(provider or cfg.provider, cfg, allow_flagged=allow_flagged)
         result = built.generate(draft, system)
         # Cleaned first, so an invisible character cannot hide a fence from the strip. A reply
