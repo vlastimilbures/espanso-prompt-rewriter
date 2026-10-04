@@ -168,23 +168,25 @@ def post_json(
     return body  # type: ignore[return-value]
 
 
-_THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
-# A block the model never closed (cut off at the token cap) is reasoning to the end.
-_UNCLOSED_BLOCK = re.compile(r"<think>.*\Z", re.DOTALL | re.IGNORECASE)
-_ORPHAN_TAG = re.compile(r"</?think>", re.IGNORECASE)
+# Models such as the qwen3 family open a reply with their reasoning; a later <think> is part
+# of the answer (a prompt about reasoning tags), so only a leading block is reasoning. The lazy
+# match ends at the first closing tag, or runs to the end of a block the model never closed
+# (cut off at the token cap). A leading stray closing tag is matched on its own.
+_LEADING_THINK = re.compile(
+    r"\A\s*(?:<think>.*?(?:</think>|\Z)|</think>)", re.DOTALL | re.IGNORECASE
+)
 
 
 def strip_thinking(text: str) -> str:
-    """Remove reasoning blocks emitted by models such as the qwen3 family.
+    """Remove the reasoning a model such as the qwen3 family emits before its answer.
 
-    Handles complete <think>...</think> spans, a block left open when a response is
-    truncated (dropped to the end), and stray closing tags. Leading and trailing
-    whitespace is normalized.
+    Strips leading <think>...</think> blocks, a leading block left open when a response is
+    truncated (dropped to the end), and a leading stray closing tag. A <think> later in the
+    text is answer text and is kept. Leading and trailing whitespace is normalized.
     """
-    cleaned = _THINK_BLOCK.sub("", text)
-    cleaned = _UNCLOSED_BLOCK.sub("", cleaned)
-    cleaned = _ORPHAN_TAG.sub("", cleaned)
-    return cleaned.strip()
+    while match := _LEADING_THINK.match(text):
+        text = text[match.end() :]
+    return text.strip()
 
 
 # Appended to a rewrite the model stopped at its output cap, so a cut-off prompt is never

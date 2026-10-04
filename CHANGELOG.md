@@ -33,6 +33,9 @@ turns every trigger into an inline error naming the variable, so fix it in `.env
 - `pytest -m live` runs again. Since 0.11.0 it failed with a `TypeError` before any network
   call. An offline twin now runs the same command and checks on a canned reply in every
   default test run.
+- A rewrite that mentions `<think>` or `</think>` after its start, such as a prompt about
+  reasoning tags, is no longer cut short or pasted with the tags removed. Only reasoning at the
+  start of the reply (a closed or unclosed `<think>` block, or a stray `</think>`) is stripped.
 
 ## 0.14.0
 

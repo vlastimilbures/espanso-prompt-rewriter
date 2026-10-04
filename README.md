@@ -106,8 +106,8 @@ step. A quick note to yourself would get "execute now" and a self-review checkli
   with your role.
 - 🧯 **Never a blank expansion.** Errors arrive inline as `[prompt-workflow: …]`, because Espanso
   cannot show stderr or exit codes.
-- 🧹 **Clean output.** `<think>…</think>` reasoning blocks, control characters and invisible
-  Unicode never reach the app you are typing in.
+- 🧹 **Clean output.** A leading `<think>…</think>` reasoning block, control characters and
+  invisible Unicode never reach the app you are typing in.
 - 📊 **Benchmarked model choice and prompt.** A bundled benchmark scores models on template
   fidelity, injection and language edge cases, latency and real cost.
 
@@ -507,7 +507,7 @@ uv run python scripts/bench_models.py --system-prompt-file candidate.md   # A/B 
 | `[prompt-workflow: … in .env runs into the next line; add the missing newline]` | Two lines of `.env` were saved as one. Split them. |
 | `[prompt-workflow: … request failed: invalid header value (check the API key)]` | The API key in `.env` contains a line break or another character a key never has. Paste it again. |
 | `-il-` or `-ilm-` says `Blocked cloud call` | `OLLAMA_BASE_URL` / `LMSTUDIO_BASE_URL` points at another machine, or the Ollama model is a cloud model, so the gate applies. Use a model on `localhost` for sensitive drafts. |
-| Reasoning text appears in the output | Set `OLLAMA_THINK=false`. `<think>` blocks are stripped; extend `strip_thinking` in `providers/base.py` for other tag formats. |
+| Reasoning text appears in the output | Set `OLLAMA_THINK=false`. A `<think>` block at the start of the reply is stripped (a later one is kept as answer text); extend `strip_thinking` in `providers/base.py` for other tag formats. |
 
 For fully local use, pull a model (`ollama pull qwen3:8b`) or load one in LM Studio and enable
 its local server, then check it answers: `curl http://localhost:11434/api/tags` or
