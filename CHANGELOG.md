@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## 0.14.0
+
 Upgrading: re-run the installer (`./scripts/install_macos.sh` or
 `.\scripts\install_windows.ps1`) to deploy the `-p-` template fix. If your `.env` sets
 `PROMPT_PRO_PROFILE=default-pro`, remove the line or leave it empty: both tiers now send
