@@ -48,3 +48,4 @@ matches:
       <OUTPUTS>
       structured .md, well formatted with clear headings/subheadings
       </OUTPUTS>
+    force_mode: clipboard

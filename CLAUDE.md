@@ -82,6 +82,9 @@ return through `_gate()`.
   scripts substitute `__PROMPT_WORKFLOW__` with the resolved absolute path to the installed CLI.
   Only that path is quoted (`cmd.exe` mangles more than one quoted part); there is no `cd`.
   The installers deploy `espanso/config/` only with `--with-config` / `-WithConfig`.
+- Every match that runs the CLI (including commented-out ones and `-p-`) sets
+  `force_mode: clipboard`, so output is always pasted: Espanso's default backend would type output
+  shorter than 100 characters key by key. `tests/test_yaml.py` enforces it.
 - `espanso/match/prompts-core.yml` holds static, non-LLM form-based snippets (no CLI call).
 - `-i-` (OpenRouter, `default` profile) is the live cloud trigger, and `-ip-` is
   the same rewrite with `--tier pro` (reasoning model). `-if-` puts an Espanso form
