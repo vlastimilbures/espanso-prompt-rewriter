@@ -1,6 +1,7 @@
 import json
 import socket
 import threading
+import time
 import urllib.request
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -66,7 +67,7 @@ def test_ollama_request_shape(fake_http):
     OllamaProvider("http://x/", "m", timeout=7, think=True, temperature=0.2).generate(
         "draft", "sys"
     )
-    assert fake_http.client_kwargs == [{"timeout": 7, "transport": None}]
+    assert fake_http.client_kwargs == [{"timeout": httpx.Timeout(7), "transport": None}]
     assert fake_http.calls == [
         {
             "url": "http://x/api/chat",
@@ -604,7 +605,7 @@ def test_remote_provider_keeps_proxy(monkeypatch, route):
 def test_post_json_direct_only_on_loopback(fake_http, url, remote):
     post_json("X", url, 5, json={})
     (kwargs,) = fake_http.client_kwargs
-    assert kwargs["timeout"] == 5
+    assert kwargs["timeout"] == httpx.Timeout(5)
     assert (kwargs["transport"] is None) is remote
     assert is_loopback(url) is not remote
 
@@ -627,3 +628,155 @@ def test_bad_header_value_is_not_repeated(monkeypatch, name):
         with pytest.raises(ProviderError, match="invalid header value") as caught:
             provider.generate("d", "s")
     assert "cdcd" not in str(caught.value)
+
+
+# --- Retry and time limit. ----------------------------------------------------------------
+
+OK = {"json_data": _ollama_body("ok")}
+
+
+def _remote(timeout=30):
+    return OllamaProvider("http://x", "m", timeout=timeout)
+
+
+# A rate limit or an unavailable upstream is tried once more after a short wait.
+@pytest.mark.parametrize("status", [429, 502, 503, 504, 529])
+def test_transient_status_is_retried_once(fake_http, status):
+    fake_http.queue({"status_code": status}, OK)
+    assert _remote().generate("d", "s") == "ok"
+    assert len(fake_http.requests) == 2
+    assert fake_http.sleeps == [1.0]
+
+
+# The retry waits as long as Retry-After asks, up to 3 seconds.
+@pytest.mark.parametrize(("retry_after", "wait"), [("2", 2.0), ("0", 0.0), ("2.5", 2.5)])
+def test_retry_after_is_honoured(fake_http, retry_after, wait):
+    fake_http.queue({"status_code": 429, "headers": {"Retry-After": retry_after}}, OK)
+    assert _remote().generate("d", "s") == "ok"
+    assert fake_http.sleeps == [wait]
+
+
+# A server that asks for a longer wait, or gives a date, gets no retry: a sooner one would
+# only be refused again, and Espanso is blocked while the CLI waits.
+@pytest.mark.parametrize("retry_after", ["30", "Wed, 21 Oct 2026 07:28:00 GMT", "nan"])
+def test_long_retry_after_is_not_retried(fake_http, retry_after):
+    fake_http.queue({"status_code": 429, "headers": {"Retry-After": retry_after}}, OK)
+    with pytest.raises(ProviderError, match=r"^Ollama returned HTTP 429"):
+        _remote().generate("d", "s")
+    assert len(fake_http.requests) == 1
+    assert fake_http.sleeps == []
+
+
+# Other errors are not retried: a 500 is usually the request itself, a 4xx always is.
+@pytest.mark.parametrize("status", [400, 401, 402, 404, 500])
+def test_other_statuses_are_not_retried(fake_http, status):
+    fake_http.queue({"status_code": status}, OK)
+    with pytest.raises(ProviderError, match=f"^Ollama returned HTTP {status}"):
+        _remote().generate("d", "s")
+    assert len(fake_http.requests) == 1
+
+
+# A refused connection to another machine is retried; to this machine it means the local
+# server is not running, so it is reported at once.
+def test_connect_error_is_retried_only_for_a_remote_host(fake_http):
+    fake_http.queue(httpx.ConnectError("refused"), OK)
+    assert _remote().generate("d", "s") == "ok"
+    assert len(fake_http.requests) == 2
+
+    fake_http.queue(httpx.ConnectError("refused"), OK)
+    with pytest.raises(ProviderError, match=r"^Ollama request failed: refused") as caught:
+        OllamaProvider("http://localhost:11434", "m").generate("d", "s")
+    assert caught.value.transient is True
+    assert len(fake_http.requests) == 3
+
+
+# A timeout is never retried: the server may still be generating, and billing, the reply.
+def test_timeout_is_not_retried(fake_http):
+    fake_http.queue(httpx.ReadTimeout("slow"), OK)
+    with pytest.raises(ProviderError, match=r"^Ollama timed out after 30s"):
+        _remote().generate("d", "s")
+    assert len(fake_http.requests) == 1
+
+
+# An unavailable upstream reported inside a 200 reply is retried; another code is not.
+def test_ok_status_with_upstream_error_is_retried(fake_http):
+    fake_http.queue({"json_data": {"error": {"code": 502, "message": "Upstream down"}}}, OK)
+    assert _remote().generate("d", "s") == "ok"
+    assert len(fake_http.requests) == 2
+
+    fake_http.queue({"json_data": {"error": {"code": 400, "message": "Bad input"}}}, OK)
+    with pytest.raises(ProviderError, match=r"^Ollama returned an error \(code 400\)"):
+        _remote().generate("d", "s")
+    assert len(fake_http.requests) == 3
+
+
+# Only one retry: a second failure is reported, as itself.
+def test_second_failure_is_reported(fake_http):
+    fake_http.queue({"status_code": 503}, {"status_code": 502}, OK)
+    with pytest.raises(ProviderError, match=r"^Ollama returned HTTP 502") as caught:
+        _remote().generate("d", "s")
+    assert caught.value.transient is True
+    assert len(fake_http.requests) == 2
+
+
+# The retry shares the call's time limit: none is made without a second of it left, and a
+# retry gets only what is left.
+def test_retry_fits_the_time_limit(fake_http):
+    fake_http.queue({"status_code": 503})
+    with pytest.raises(ProviderError, match=r"^Ollama returned HTTP 503"):
+        _remote(timeout=1.5).generate("d", "s")
+    assert len(fake_http.requests) == 1
+
+    fake_http.queue({"status_code": 503}, OK)
+    assert _remote(timeout=30).generate("d", "s") == "ok"
+    first, second = (kwargs["timeout"] for kwargs in fake_http.client_kwargs[1:])
+    assert first == httpx.Timeout(30, connect=10)
+    assert second.read < 29
+
+
+@contextmanager
+def _trickle_server(interval: float, chunks: int) -> Iterator[str]:
+    """A loopback server that sends a newline every ``interval`` seconds, ``chunks`` times,
+    and only then the JSON reply: httpx's read timer restarts with every newline."""
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_POST(self):
+            self.rfile.read(int(self.headers["Content-Length"]))
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            try:
+                for _ in range(chunks):
+                    self.wfile.write(b"\n")
+                    self.wfile.flush()
+                    time.sleep(interval)
+                self.wfile.write(json.dumps(_ollama_body("late")).encode())
+            except OSError:  # the client gave up
+                pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(
+        target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True
+    ).start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+# The time limit holds even when the server keeps the connection alive with a byte now and
+# then: the call ends within one gap between bytes of the limit, not when the server is done.
+def test_trickling_server_hits_the_time_limit(monkeypatch):
+    for var in ("HTTP_PROXY", "ALL_PROXY", "http_proxy", "all_proxy"):
+        monkeypatch.delenv(var, raising=False)
+    with _trickle_server(interval=0.2, chunks=25) as url:
+        started = time.monotonic()
+        with pytest.raises(ProviderError, match=r"^Ollama timed out after 1s") as caught:
+            OllamaProvider(url, "m", timeout=1).generate("d", "s")
+        elapsed = time.monotonic() - started
+    assert caught.value.transient is True
+    assert elapsed < 2

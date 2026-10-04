@@ -6,6 +6,7 @@ import httpx
 import pytest
 
 from prompt_workflow.config import env_names
+from prompt_workflow.providers import base
 
 
 @pytest.fixture(autouse=True)
@@ -48,6 +49,8 @@ class FakeHttp:
     def __init__(self):
         self.requests: list[httpx.Request] = []
         self.client_kwargs: list[dict] = []
+        # Each wait post_json made before a retry, in seconds; nothing really sleeps.
+        self.sleeps: list[float] = []
         self.exc: Exception | None = None
         self._queue: list = []
         self._reply: dict = {}
@@ -106,6 +109,7 @@ def fake_http(monkeypatch):
         return real_client(*args, **{**kwargs, "transport": httpx.MockTransport(fake.handler)})
 
     monkeypatch.setattr(httpx, "Client", client)
+    monkeypatch.setattr(base, "_sleep", fake.sleeps.append)
     return fake
 
 

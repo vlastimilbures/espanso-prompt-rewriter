@@ -241,7 +241,7 @@ prompt-workflow persona          # prints PROMPT_PERSONA (used by -p-)
 | `--tier`     | `standard`                  | `pro` uses the `OPENROUTER_PRO_*` settings      |
 | `--effort`   | tier's setting              | `none`, `minimal`, `low`, `medium`, `high`      |
 | `--max-tokens` | tier's setting            | Output cap for this call                        |
-| `--timeout`  | tier's setting              | Request timeout in seconds for this call        |
+| `--timeout`  | tier's setting              | Time limit in seconds for this call, retry included |
 | `--source`   | `clipboard`                 | `clipboard`, `stdin` or `argument`              |
 | `--text`     | —                           | The draft, with `--source argument`             |
 | `--copy`     | off                         | Also copy the result to the clipboard           |
@@ -284,7 +284,7 @@ short and does not look like a key.
 | `PROMPT_PROVIDER`            | `openrouter`                   | Provider when `--provider` is not given (the bare CLI; every trigger passes its own) |
 | `PROMPT_PROFILE`             | `default`                      | Profile when `--profile` is not given (`-i-`, and `-if-` on a non-pro model) |
 | `PROMPT_PERSONA`             | *(empty)*                      | Your first-person role, see [persona](#profiles-and-persona) |
-| `PROMPT_TIMEOUT_SECONDS`     | `30`                           | Request timeout                                           |
+| `PROMPT_TIMEOUT_SECONDS`     | `30`                           | Time limit for one call, retry included                   |
 | `PROMPT_TEMPERATURE`         | `0.2`                          | Kept low so fixed template wording survives               |
 | `OPENROUTER_API_KEY`         | —                              | Required for OpenRouter                                   |
 | `OPENROUTER_MODEL`           | `google/gemini-3.5-flash-lite` | See [benchmark](#model-benchmark)                         |
@@ -296,7 +296,7 @@ short and does not look like a key.
 | `OPENROUTER_PRO_MODEL`       | `openai/gpt-6-luna`            | Model for `--tier pro` / `-ip-`                   |
 | `OPENROUTER_PRO_PROVIDER`    | `openai`                       | Endpoint pin for the pro tier                             |
 | `OPENROUTER_PRO_REASONING_EFFORT` | `low`                     | Reasoning effort for the pro tier                         |
-| `PROMPT_PRO_TIMEOUT_SECONDS` | `60`                           | Request timeout for the pro tier                          |
+| `PROMPT_PRO_TIMEOUT_SECONDS` | `60`                           | Time limit for one pro-tier call, retry included          |
 | `PROMPT_PRO_PROFILE`         | (empty)                        | Profile for the pro tier (`-ip-`, `-if-`) when it runs `OPENROUTER_PRO_MODEL`; empty = `PROMPT_PROFILE` |
 | `ANTHROPIC_API_KEY`          | —                              | Required for Anthropic                                    |
 | `ANTHROPIC_MODEL`            | `claude-sonnet-5`              |                                                           |
@@ -491,7 +491,7 @@ uv run python scripts/bench_models.py --system-prompt-file candidate.md   # A/B 
 | `[prompt-workflow: OPENROUTER_API_KEY is not configured]` | The key is missing from `.env`, or `.env` is not in one of the [places the CLI looks](#configuration). |
 | `[prompt-workflow: OpenRouter returned HTTP 401: check the API key…]` | Wrong key. Replace it in `.env`. |
 | `[prompt-workflow: OpenRouter returned HTTP 402: out of credits…]` | Add credits to your OpenRouter account. |
-| `[prompt-workflow: … returned HTTP 429: rate limited…]`, `… HTTP 5xx: provider unavailable…` or `… returned an error (code …)` | The provider is busy or down. Trigger again in a moment, or pick another endpoint in `-if-`. The text after the hint is the provider's own reason. |
+| `[prompt-workflow: … returned HTTP 429: rate limited…]`, `… HTTP 5xx: provider unavailable…` or `… returned an error (code …)` | The provider is busy or down. A rate limit (unless it asks to wait more than 3 s), a 502/503/504/529 or a refused connection to another machine was already retried once within the time limit. Trigger again in a moment, or pick another endpoint in `-if-`. The text after the hint is the provider's own reason. |
 | `[prompt-workflow: … HTTP 400: bad request…]` or `… HTTP 404: not found…` | Check the model slug, the endpoint pin and the base URL; the provider's reason follows the hint. |
 | `[prompt-workflow: …_API_KEY contains a non-ASCII or invisible character…]` | The key was pasted with a smart quote or an invisible character. Paste it again as plain text. |
 | `[prompt-workflow: OPENROUTER_REASONING_EFFORT must be empty or one of …]` | Fix the value in `.env` (`OPENROUTER_PRO_REASONING_EFFORT` likewise). |
