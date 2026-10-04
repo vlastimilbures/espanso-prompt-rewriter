@@ -39,9 +39,13 @@ def changed_profiles(source_dir: Path, pristine: Mapping[str, str]) -> dict[str,
     changed = {}
     for path in sorted(source_dir.glob("*.md")):
         name = path.stem
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise ValueError(f"Cannot read profile {name}.md ({type(exc).__name__})") from None
         if name not in pristine:
             changed[name] = "added"
-        elif path.read_text(encoding="utf-8").strip() != pristine[name].strip():
+        elif text.strip() != pristine[name].strip():
             changed[name] = "modified"
     return changed
 
@@ -73,12 +77,14 @@ def git_pristine_profiles(checkout: Path, rev: str | None = None) -> dict[str, s
             except subprocess.CalledProcessError:
                 rev = "HEAD"
         listing = run("ls-tree", "--name-only", f"{rev}:{PROMPTS_PATH}").split("\n")
-        return {
-            name.removesuffix(".md"): run("show", f"{rev}:{PROMPTS_PATH}/{name}")
-            for name in listing
-            if name.endswith(".md")
-        }
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        pristine = {}
+        for name in (n for n in listing if n.endswith(".md")):
+            try:
+                pristine[name.removesuffix(".md")] = run("show", f"{rev}:{PROMPTS_PATH}/{name}")
+            except UnicodeDecodeError:
+                raise ValueError(f"Cannot read profile {name} at {rev} (not UTF-8)") from None
+        return pristine
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, UnicodeDecodeError) as exc:
         raise ValueError(f"git could not read {PROMPTS_PATH} at {rev}") from exc
 
 
@@ -103,6 +109,11 @@ def migrate_profiles(
                     out.write(data)
                 status = COPIED
             except FileExistsError:
-                status = IDENTICAL if target.read_bytes() == data else EXISTS
+                # Whatever is there (a dangling link, a folder) is left alone and reported.
+                try:
+                    same = target.read_bytes() == data
+                except OSError:
+                    same = False
+                status = IDENTICAL if same else EXISTS
         report.append(Migration(name, change, source, target, status))
     return report

@@ -31,8 +31,10 @@ ALIASES = {"default-pro": "default"}
 PERSONA_TOKEN = "{{PERSONA_RULE}}"  # noqa: S105 - a template placeholder, not a secret
 
 # A user profile's name is its file name without `.md`: no dots, separators or spaces, so a
-# --profile value cannot reach outside the profile directory.
-PROFILE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
+# --profile value cannot reach outside the profile directory. Lower case only, so `Default`
+# can never reach a user default.md through a case-insensitive file system (macOS, Windows),
+# and never a Windows device name (`con.md` opens the console there).
+PROFILE_NAME = re.compile(r"(?!(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$)[a-z0-9][a-z0-9_-]{0,63}")
 
 
 def user_profiles_dir() -> Path:
@@ -47,8 +49,13 @@ def _read_user_profile(name: str) -> str | None:
     touches no file."""
     if not PROFILE_NAME.fullmatch(name):
         return None
+    folder = user_profiles_dir()
     try:
-        text = (user_profiles_dir() / f"{name}.md").read_text(encoding="utf-8").strip()
+        # The exact file name must be listed: a case-insensitive file system would otherwise
+        # open `Mine.MD` for `mine`, which Linux would not, and user_profiles() reports invalid.
+        if f"{name}.md" not in {p.name for p in folder.iterdir()}:
+            return None
+        text = (folder / f"{name}.md").read_text(encoding="utf-8").strip()
     except FileNotFoundError:
         return None
     except (OSError, UnicodeDecodeError) as exc:
@@ -87,7 +94,8 @@ def system_prompt(profile: str, persona: str = "", overrides: Collection[str] = 
     if template is None:
         template = PROFILES.get(name)
     if template is None:
-        own = [p.name for p in user_profiles(overrides) if p.status == ADDED]
+        # Built-ins first, in the order they always had; the user's own after them, sorted.
+        own = sorted(p.name for p in user_profiles(overrides) if p.status == ADDED)
         known = ", ".join([*PROFILES, *own])
         raise ValueError(f"Unknown profile: {safe_repr(profile)}. Choose from: {known}")
     return render(template, persona)
@@ -115,13 +123,14 @@ def user_profiles(overrides: Collection[str] = ()) -> list[UserProfile]:
     doctor or `profiles` command to report. Overrides without a file come last as MISSING."""
     folder = user_profiles_dir()
     try:
-        paths = sorted(p for p in folder.iterdir() if p.suffix == ".md" and p.is_file())
+        paths = sorted(p for p in folder.iterdir() if p.suffix.lower() == ".md" and p.is_file())
     except OSError:
         paths = []
     found = []
     for path in paths:
         name = path.stem
-        if not PROFILE_NAME.fullmatch(name):
+        # `x.MD` is never selected either: lookups need the exact `<name>.md`.
+        if path.suffix != ".md" or not PROFILE_NAME.fullmatch(name):
             status = INVALID_NAME
         elif name in PROFILES:
             status = OVERRIDES if name in overrides else SHADOWED

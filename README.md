@@ -354,7 +354,7 @@ A profile is a system prompt in [`src/prompt_workflow/prompts/`](src/prompt_work
 on Windows; `$XDG_CONFIG_HOME/prompt-workflow/profiles/` when that is set), next to the user
 `.env`. The file holds the system prompt as plain text, may use `{{PERSONA_RULE}}` like the
 built-ins, and is selected by its name: `--profile <name>`, `PROMPT_PROFILE` or
-`PROMPT_PRO_PROFILE`. A name is letters, digits, `-` and `_` (no dots or spaces).
+`PROMPT_PRO_PROFILE`. A name is lower-case letters, digits, `-` and `_` (no dots or spaces, not a Windows device name such as `con`), and the file must be named exactly `<name>.md`.
 
 A file named like a built-in (`default.md`, `general.md`) is ignored, so a stray copy cannot
 silently change what every trigger sends. To replace a built-in on purpose, list it in

@@ -162,8 +162,8 @@ overwrites).
 To ship a new built-in profile:
 
 1. Add `src/prompt_workflow/prompts/<name>.md` containing the system prompt as plain prose. It is
-   picked up automatically. The name must match `prompt_builder.PROFILE_NAME` (letters, digits,
-   `-`, `_`).
+   picked up automatically. The name must match `prompt_builder.PROFILE_NAME` (lower-case
+   letters, digits, `-`, `_`).
 2. Optionally include `{{PERSONA_RULE}}` where the user's persona should be applied (see
    `prompt_builder.render()`).
 3. Add a test in `tests/test_prompts.py`.

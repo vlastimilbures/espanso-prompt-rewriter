@@ -1,6 +1,8 @@
 """The user profile directory (#85): new names, explicit overrides of a built-in, the report
 a doctor command shows, the migration out of a checkout, and the packaged match files."""
 
+import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -102,8 +104,55 @@ def test_profile_name_cannot_leave_the_directory(tmp_path, name):
 def test_unknown_profile_lists_user_profiles():
     _write("regulation")
     _write("default")
-    with pytest.raises(ValueError, match=r"Choose from: default, general, regulation$"):
+    _write("aaa")
+    # Built-ins keep the order the message always had; the user's own follow, sorted.
+    known = ", ".join([*PROFILES, "aaa", "regulation"])
+    with pytest.raises(ValueError, match=re.escape(f"Choose from: {known}") + "$"):
         system_prompt("nope")
+    for path in user_profiles_dir().iterdir():
+        path.unlink()
+    with pytest.raises(ValueError, match="Unknown profile") as info:
+        system_prompt("nope")
+    assert str(info.value) == f"Unknown profile: 'nope'. Choose from: {', '.join(PROFILES)}"
+
+
+# Names are lower case and matched exactly, so every OS behaves like Linux: `Default` or
+# `DEFAULT-PRO` never opens a user default.md on a case-insensitive file system, and `Mine.md`
+# or `mine.MD` is not the profile `mine`.
+@pytest.mark.parametrize("name", ["Default", "DEFAULT", "DEFAULT-PRO", "General", "Mine"])
+def test_profile_names_are_case_sensitive_everywhere(name, stub_provider):
+    _write("default")
+    _write("Mine")
+    with pytest.raises(ValueError, match="Unknown profile"):
+        system_prompt(name, "", ("default",) if name == "Default" else ())
+    result = _improve("--profile", name)
+    assert result.stdout.startswith("[prompt-workflow: Unknown profile")
+    assert stub_provider.calls == []
+
+
+def test_exact_file_name_is_required():
+    _write("Mine")
+    (user_profiles_dir() / "other.MD").write_text(MINE, "utf-8")
+    for name in ("mine", "other"):
+        with pytest.raises(ValueError, match="Unknown profile"):
+            system_prompt(name)
+    assert {p.name: p.status for p in user_profiles()} == {
+        "Mine": "invalid name",
+        "other": "invalid name",
+    }
+
+
+# Windows device names are never profile names (`con.md` opens the console there).
+@pytest.mark.parametrize("name", ["con", "prn", "aux", "nul", "com1", "com9", "lpt1", "lpt9"])
+def test_windows_device_names_are_rejected(name):
+    assert not prompt_builder.PROFILE_NAME.fullmatch(name)
+    with pytest.raises(ValueError, match="Unknown profile"):
+        system_prompt(name)
+
+
+@pytest.mark.parametrize("name", ["console", "com10", "lpt", "nul-x", "aux_1", "a", "my-2"])
+def test_names_near_device_names_are_allowed(name):
+    assert prompt_builder.PROFILE_NAME.fullmatch(name)
 
 
 # An empty or unreadable user profile is an inline error naming the file, not the path.
@@ -254,6 +303,53 @@ def test_git_pristine_profiles(tmp_path):
     assert set(profiles.changed_profiles(cloned, pristine)) == {"default", "regulation"}
     with pytest.raises(ValueError, match="git could not read"):
         profiles.git_pristine_profiles(clone, "no-such-rev")
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
+def test_git_pristine_profiles_rejects_non_utf8(tmp_path):
+    prompts = _checkout(tmp_path)
+    (prompts / "latin.md").write_bytes(b"caf\xe9")
+    repo = prompts.parents[2]
+    _git(repo, "init", "-q")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "base")
+    with pytest.raises(ValueError, match=r"Cannot read profile latin\.md at HEAD") as info:
+        profiles.git_pristine_profiles(repo)
+    assert str(tmp_path) not in str(info.value)
+
+
+# A source the loader could not read either is an error naming the profile, not a crash.
+def test_changed_profiles_reports_unreadable_source(tmp_path):
+    prompts = _checkout(tmp_path)
+    (prompts / "latin.md").write_bytes(b"caf\xe9")
+    with pytest.raises(ValueError, match=r"Cannot read profile latin\.md \(UnicodeDecode"):
+        profiles.changed_profiles(prompts, PROFILES)
+    (prompts / "latin.md").unlink()
+    (prompts / "folder.md").mkdir()
+    with pytest.raises(ValueError, match=r"Cannot read profile folder\.md") as info:
+        profiles.changed_profiles(prompts, PROFILES)
+    assert str(tmp_path) not in str(info.value)
+
+
+# Whatever already holds a target's name (a folder, a dangling link) is left alone and
+# reported, and the other profiles are still copied.
+def test_migrate_skips_odd_targets(tmp_path):
+    prompts = _checkout(tmp_path)
+    for name in ("alpha", "beta", "gamma"):
+        (prompts / f"{name}.md").write_text(name, "utf-8")
+    dest = user_profiles_dir()
+    (dest / "alpha.md").mkdir(parents=True)
+    expected = {"alpha": "exists", "beta": "exists", "gamma": "copied"}
+    try:
+        os.symlink(tmp_path / "nowhere.md", dest / "beta.md")
+    except OSError:  # Windows without the symlink privilege
+        expected["beta"] = "copied"
+
+    report = {m.name: m.status for m in profiles.migrate_profiles(prompts, PROFILES)}
+    assert report == expected
+    assert (dest / "alpha.md").is_dir()
+    assert (dest / "gamma.md").read_text("utf-8") == "gamma"
+    assert not (tmp_path / "nowhere.md").exists()
 
 
 def test_git_pristine_profiles_needs_git(monkeypatch, tmp_path):
