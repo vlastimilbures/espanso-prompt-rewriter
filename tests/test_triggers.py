@@ -37,6 +37,7 @@ COMMANDS = _improve_commands()
 # trigger -> (provider, profile, tier) with no profile settings in the environment.
 EXPECTED = {
     "-i-": ("openrouter", "default", "standard"),
+    "-iok-": ("openrouter", "default", "standard"),
     "-ip-": ("openrouter", "default", "pro"),
     "-if-": ("openrouter", "default", "pro"),
     "-il-": ("ollama", "general", "standard"),
@@ -64,6 +65,7 @@ def _argv(trigger: str, **picks: str) -> list[str]:
 def _replay(stub, trigger: str, **picks: str) -> tuple[str, Settings, str]:
     """(provider name, settings, system prompt) the trigger's command hands the provider."""
     stub.built.clear()
+    stub.options.clear()
     stub.calls.clear()
     result = runner.invoke(app, _argv(trigger, **picks))
     assert (result.exit_code, result.stdout) == (0, "improved")
@@ -176,3 +178,10 @@ def test_pro_triggers_pass_no_profile():
     for trigger, (cmd, _) in COMMANDS.items():
         if re.search(r"--tier[ =]pro\b", cmd):
             assert "--profile" not in cmd, trigger
+
+
+# Only -iok- sends a flagged draft per call; every other trigger keeps the gate's block.
+@pytest.mark.parametrize("trigger", list(EXPECTED))
+def test_only_iok_allows_flagged(stub_provider, trigger):
+    _replay(stub_provider, trigger)
+    assert stub_provider.options == [{"allow_flagged": trigger == "-iok-"}]

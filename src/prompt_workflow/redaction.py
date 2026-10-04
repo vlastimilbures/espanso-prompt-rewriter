@@ -8,9 +8,9 @@ import unicodedata
 from collections.abc import Callable
 
 # Patterns that suggest content should not leave the device for a cloud model.
-# These are heuristics, not a guarantee: false positives are handled via
-# ALLOW_CLOUD_OVERRIDE, but false negatives are expected and should not be
-# treated as a compliance control on their own.
+# These are heuristics, not a guarantee: a draft blocked only for SOFT_FINDINGS can be sent
+# once with --allow-flagged (-iok-), but false negatives are expected and the patterns
+# should not be treated as a compliance control on their own.
 #
 # Every repeat that can run across ordinary text is bounded ({1,64}, not +): scan() tries
 # each pattern at every position, so an unbounded class there makes a large clipboard
@@ -41,14 +41,28 @@ _WITH_LETTER = r"(?=[^\s\"']{0,256}[A-Za-z])"
 # A password in prose is not a description of one ("is base64-encoded", "is 6-digit").
 _NOT_A_DESCRIPTION = r"(?![^\s\"']{0,64}-[a-z]{3,20}\b)"
 
+# A confidentiality label as a line holds it: "Confidential", "Highly confidential",
+# "Internal use only", Vietnamese "Mật" (secret), "Nội bộ" (internal).
+_LABEL = (
+    r"(?:(?:strictly|highly|company|proprietary and)\s)?"
+    r"(?:confidential|restricted|internal(?: use)? only|tối mật|tuyệt mật|mật|nội bộ)"
+)
+
 _PATTERNS: dict[str, re.Pattern[str]] = {
     # Separators copied from PDFs and web pages: up to three spaces, tabs, dots, slashes,
     # underscores, hyphens, dashes or minus signs, or one line break (see _is_card).
     "payment_card": re.compile(
         r"\b(?:\d(?:[ \t./_\u2010-\u2015\u2212-]{1,3}|[ \t]?\r?\n)?){13,19}\b"
     ),
+    # A CCCD citizen ID: checked against its province and century digits (see _is_cccd).
     "vietnam_id_12": re.compile(r"\b\d{12}\b"),
-    "vietnam_id_9": re.compile(r"\b(?:CMND|CCCD|ID|passport|số)\D{0,20}\d{9}\b", re.IGNORECASE),
+    # A 9-digit CMND or passport number, only next to a word that names the document; a bare
+    # "ID" or "số" (number) is too common before ticket and contract numbers.
+    "vietnam_id_9": re.compile(
+        r"\b(?:CMND|CCCD|(?-i:CMT)|chứng minh (?:nhân dân|thư)|căn cước(?: công dân)?|hộ chiếu"
+        r"|passport|national ID|ID card)\D{0,20}\d{9}\b",
+        re.IGNORECASE,
+    ),
     "email": re.compile(r"\b[\w.+-]{1,64}@[\w-]{1,63}\.[\w.-]{1,253}\b"),
     # Vendor keys contain '-'/'_' after a short prefix (sk-or-v1-, sk-ant-api03-, sk-proj-),
     # so the key bodies allow both.
@@ -70,7 +84,7 @@ _PATTERNS: dict[str, re.Pattern[str]] = {
     "bearer_token": re.compile(r"\bBearer\s+[A-Za-z0-9._-]{16,}\b", re.IGNORECASE),
     # scheme://user:password@host
     "url_credentials": re.compile(
-        r"\b[a-z][a-z0-9+.-]{0,31}://[^\s/:@]{1,256}:[^\s/@]{1,256}@", re.IGNORECASE
+        r"\b[a-z][a-z0-9+.-]{0,31}://[^\s/:@]{0,256}:[^\s/@]{1,256}@", re.IGNORECASE
     ),
     # password=..., DB_PASSWORD: ..., "clientSecret": "...", SECRET_KEY = '...'. The name may
     # follow '_' or '-' (access_token, AWS_SECRET_ACCESS_KEY), where \b would not match. A
@@ -87,7 +101,7 @@ _PATTERNS: dict[str, re.Pattern[str]] = {
         _NAME_START
         + rf"{_PW_WORDS}(?:\s{{1,4}}[^\s:=]{{1,20}}){{0,4}}?\s{{1,4}}(?:is|was)(?:\s{{0,4}}:)?"
         + rf"\s{{1,4}}[\"']?{_NOT_A_DESCRIPTION}{_WITH_DIGIT}[^\s\"']{{6}}"
-        + r"|\bmật\s{1,4}khẩu(?:\s{1,4}[^\s:=]{1,20}){0,3}?\s{0,4}(?:là|[:=])\s{0,4}[\"']?"
+        + r"|\b(?:mật\s{1,4}khẩu|mk)(?:\s{1,4}[^\s:=]{1,20}){0,3}?\s{0,4}(?:là|[:=])\s{0,4}[\"']?"
         + rf"{_WITH_DIGIT}[^\s\"']{{6}}",
         re.IGNORECASE,
     ),
@@ -107,9 +121,35 @@ _PATTERNS: dict[str, re.Pattern[str]] = {
     # Checked against the country's length and the mod-97 checksum (see _is_iban). A lookahead,
     # so every start is a candidate and an invalid IBAN cannot swallow a valid one after it.
     "iban": re.compile(r"(?=\b([A-Z]{2}\d{2}(?:[ -]{0,2}[A-Z0-9]){11,30})\b)", re.IGNORECASE),
+    # A classification label, not the word in prose ("Output restricted to 5 bullets", "an
+    # NDA defines confidential information", "bảo mật" = security, "mật độ" = density):
+    # upper case, at the start of a line followed by ':' or a dash, in brackets, or a phrase
+    # used only as a label. Vietnamese: "tài liệu mật" (secret document), "tối mật" (top
+    # secret), "lưu hành nội bộ" (internal circulation); not "mật khẩu" (password).
     "confidential_label": re.compile(
-        r"\b(confidential|restricted|internal only|customer data|mật|nội bộ)\b",
-        re.IGNORECASE,
+        # Upper case anywhere.
+        r"(?-i:\b(?:CONFIDENTIAL|RESTRICTED|INTERNAL(?: USE)? ONLY|DO NOT DISTRIBUTE"
+        r"|TỐI MẬT|TUYỆT MẬT|MẬT|NỘI BỘ)\b)"
+        # Alone on a line ("# Confidential", "Nội bộ"), or opening one before ':' or a dash
+        # ("**Confidential**: Q3", "Restricted - board only"; not "Restricted-access").
+        rf"|^[^\w\n]{{0,6}}{_LABEL}[^\w\n]{{0,6}}$"
+        rf"|^[^\w\n]{{0,6}}{_LABEL}[*_\"]{{0,3}}\s{{0,2}}(?::|\s-|-(?!\w)|[\]\)\u2013\u2014])"
+        r"|\[(?:strictly confidential|confidential|restricted|internal(?: use)? only)\]"
+        r"|\b(?:internal(?: use)? only|(?:strictly|highly|company) confidential"
+        r"|proprietary and confidential|do not distribute|not for distribution)\b"
+        # A classification field: "Classification: Restricted", "Độ mật: Mật".
+        r"|\b(?:classification|sensitivity|độ mật)[*_\"]{0,3}\s{0,2}:\s{0,2}[*_\"]{0,3}"
+        r"(?:highly confidential|confidential|restricted|internal|secret|tối mật|tuyệt mật|mật)\b"
+        r"|\b(?:tài liệu|văn bản|thông tin)\s{1,2}(?:tối mật|tuyệt mật|mật)\b"
+        r"(?!\s{1,2}(?:khẩu|độ|ong|mã|thiết|thư|mía))"
+        r"|\b(?:tối mật|tuyệt mật|lưu hành nội bộ)\b",
+        re.IGNORECASE | re.MULTILINE,
+    ),
+    # An email next to a password-like word: "jane@example.com:Summer2024!", "login
+    # jane@example.com / Summer2024". Hard, unlike a bare email.
+    "credential_pair": re.compile(
+        r"\b[\w.+-]{1,64}@[\w-]{1,63}\.[\w.-]{1,253}(?:\s{0,4}[:/,|]\s{0,4}|\s{1,4})"
+        rf"{_NOT_A_DESCRIPTION}{_WITH_DIGIT}{_WITH_LETTER}[^\s\"']{{6}}"
     ),
 }
 
@@ -178,6 +218,32 @@ def _is_basic_auth(match: re.Match[str]) -> bool:
     return text.isprintable() and ":" in text
 
 
+# Text before a match that puts it inside an AWS ARN, with no whitespace in between.
+_INSIDE_ARN = re.compile(r"\barn:aws[\w-]{0,20}:\S{0,256}$", re.IGNORECASE)
+
+# CCCD province codes (the first three digits; Circular 07/2016/TT-BCA), still valid for
+# cards issued before the 2025 province merger.
+_CCCD_PROVINCES = frozenset(
+    f"{code:03}"
+    for code in (
+        1, 2, 4, 6, 8, 10, 11, 12, 14, 15, 17, 19, 20, 22, 24, 25, 26, 27, 30, 31, 33, 34, 35,
+        36, 37, 38, 40, 42, 44, 45, 46, 48, 49, 51, 52, 54, 56, 58, 60, 62, 64, 66, 67, 68, 70,
+        72, 74, 75, 77, 79, 80, 82, 83, 84, 86, 87, 89, 91, 92, 93, 94, 95, 96,
+    )
+)  # fmt: skip
+
+
+def _is_cccd(match: re.Match[str]) -> bool:
+    """Whether 12 digits are shaped like a CCCD: a province code, then a sex/century digit
+    (0-3 for births in 1900-2099). Digits inside an AWS ARN (arn:aws:iam::<account>:role/x)
+    are not one, whatever they are."""
+    digits = match.group()
+    if digits[:3] not in _CCCD_PROVINCES or digits[3] not in "0123":
+        return False
+    before = match.string[max(0, match.start() - 300) : match.start()]
+    return not _INSIDE_ARN.search(before)
+
+
 # IBAN length per country (SWIFT IBAN registry).
 _IBAN_LENGTHS = {
     "AD": 24, "AE": 23, "AL": 28, "AT": 20, "AZ": 28, "BA": 20, "BE": 16, "BG": 22, "BH": 22,
@@ -215,6 +281,7 @@ def _is_iban(match: re.Match[str]) -> bool:
 # later valid one.
 _VALIDATORS: dict[str, Callable[[re.Match[str]], bool]] = {
     "payment_card": _is_card,
+    "vietnam_id_12": _is_cccd,
     "basic_auth": _is_basic_auth,
     "curl_user": _after_curl,
     "iban": _is_iban,
@@ -337,6 +404,12 @@ def scan(text: str, extra: tuple[re.Pattern[str], ...] = ()) -> list[str]:
     findings = [name for name, p in _PATTERNS.items() if found(p, _VALIDATORS.get(name))]
     findings += [f"custom_{i}" for i, p in enumerate(extra, 1) if found(p, None)]
     return findings
+
+
+# Findings a user may send once with --allow-flagged (-iok-): labels and identifiers that are
+# often harmless in context. Everything else (keys, tokens, passwords, cards, private keys,
+# bare_token and the user's own patterns) is never sent that way.
+SOFT_FINDINGS = frozenset({"confidential_label", "vietnam_id_12", "vietnam_id_9", "email", "iban"})
 
 
 def scan_draft(text: str, extra: tuple[re.Pattern[str], ...] = ()) -> list[str]:

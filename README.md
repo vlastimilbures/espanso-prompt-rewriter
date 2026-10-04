@@ -187,6 +187,7 @@ with the output of `echo "$(uv tool dir --bin)/prompt-workflow"`, then run `espa
 | `-i-`             | Rewrites the clipboard into the golden template              | OpenRouter | `default` |
 | `-ip-`            | Same rewrite on the pro tier (reasoning model, slower)       | OpenRouter | `default` |
 | `-if-`            | Same rewrite; a popup picks model, effort, tokens, timeout   | OpenRouter | `default` |
+| `-iok-`           | `-i-`, sent once despite a flagged label, ID, email or IBAN  | OpenRouter | `default` |
 | `-il-`            | General prompt improvement, fully local                      | Ollama     | `general` |
 | `-ilm-`           | General prompt improvement, fully local                      | LM Studio  | `general` |
 | `-ic-`            | General improvement via Claude (commented out by default)    | Anthropic  | `general` |
@@ -204,7 +205,7 @@ Triggers expand only at the start of a word: after a space, tab, newline, punctu
 such as `a[n-i-1]` or `only-if-cached` does not fire them, but `s[-i-1]` or `x = -i-1` still
 does. If a trigger follows anything else (a letter, digit, `-`, `=`, `/` …), type a space first.
 
-The improve triggers (`-i-`, `-ip-`, `-if-`, `-il-`, `-ilm-`) read your current clipboard. Cloud
+The improve triggers (`-i-`, `-ip-`, `-if-`, `-iok-`, `-il-`, `-ilm-`) read your current clipboard. Cloud
 triggers pass through the [data-protection gate](#privacy-and-data-protection) first. To enable `-ic-`,
 uncomment it in [`espanso/match/prompts-llm.yml`](espanso/match/prompts-llm.yml) and re-run the
 installer.
@@ -377,8 +378,17 @@ ollama.com). The gate blocks drafts containing:
   …`, `mật khẩu là …`)
 - a draft that is a single password- or token-like word, such as a vault password left on the
   clipboard
-- confidentiality labels such as *confidential*, *restricted*, *internal only*, *customer data*
-- Vietnamese national ID formats (12-digit, and 9-digit next to an ID keyword)
+- an email address next to a password (`jane@example.com:…`, `login jane@… / …`)
+- confidentiality labels written as labels: upper case (`CONFIDENTIAL`, `RESTRICTED`, `MẬT`,
+  `NỘI BỘ`), alone on a line or opening one (`# Confidential`, `**Confidential**:`,
+  `Restricted - …`), in brackets (`[restricted]`), a classification field (`Classification:
+  Restricted`, `Độ mật: Mật`), *highly/company/strictly confidential*, *internal only*, *do not
+  distribute*, and Vietnamese *tài liệu/văn bản/thông tin mật*, *tối mật*, *lưu hành nội bộ*.
+  The words in prose ("output restricted to 5 bullets", "confidential information", *bảo mật*,
+  *mật độ*, *mật khẩu*) are not flagged.
+- Vietnamese national IDs: a 12-digit CCCD with a valid province and century code (not digits
+  inside an AWS ARN), and a 9-digit number next to CMND, CCCD, CMT, *chứng minh nhân dân/thư*,
+  *căn cước*, *hộ chiếu*, *passport*, *national ID* or *ID card*
 - your own patterns from `PROMPT_EXTRA_PATTERNS`, for example
   `PROMPT_EXTRA_PATTERNS="project[- ]falcon;CUST-\d{6}"` (case-insensitive; reported as
   `custom_1`, `custom_2`, … so the pattern itself never appears in the message)
@@ -393,7 +403,12 @@ The draft is also scanned in a normalised form, so no-break or zero-width spaces
 variation selectors, Hangul fillers and fullwidth digits cannot split a card number or key.
 
 A blocked draft pastes `[prompt-workflow: Blocked cloud call. Sensitive content detected: …]`
-instead of calling the API. `ALLOW_CLOUD_OVERRIDE=true` disables the block. No code path builds a
+instead of calling the API. When every finding is a label, a Vietnamese ID, an email address or
+an IBAN, you can send that one draft with `-iok-` (`--allow-flagged`): the paste then starts with
+`[prompt-workflow: sent despite: …]`, and the next draft is checked as usual. Keys, tokens,
+passwords, cards, private keys, a bare token and your own `PROMPT_EXTRA_PATTERNS` are never sent
+this way. `ALLOW_CLOUD_OVERRIDE=true` turns the gate off for every finding and every later call;
+prefer `-iok-` for a one-off. No code path builds a
 provider that can reach another machine without the gate. Cloud base URLs must be `https://`
 (plain `http` only to `localhost`), so a key is never sent in clear text. Keys stay in `.env`,
 which is gitignored, never logged and never shown in a traceback.
@@ -512,7 +527,8 @@ uv run python scripts/bench_models.py --system-prompt-file candidate.md   # A/B 
 | `[prompt-workflow: OPENROUTER_REASONING_EFFORT must be empty or one of …]` | Fix the value in `.env` (`OPENROUTER_PRO_REASONING_EFFORT` likewise). |
 | `… the model stopped early (content_filter)]` at the end, or `… declined the request (refusal)` | A content filter or the model's safety policy stopped the rewrite. Rephrase the draft or use another model. |
 | `[prompt-workflow: Ollama request failed: …]` | Start Ollama (`ollama serve`) and pull the model (`ollama pull qwen3:8b`). |
-| `[prompt-workflow: Blocked cloud call. …]` | The [gate](#privacy-and-data-protection) matched. Use a local trigger, or override if policy permits. |
+| `[prompt-workflow: Blocked cloud call. …]` | The [gate](#privacy-and-data-protection) matched. Remove the content or use a local trigger. If the message offers `-iok-` and the content may leave your machine, use `-iok-` for this draft. |
+| `[prompt-workflow: sent despite: …]` at the top of a rewrite | You used `-iok-`; the draft was sent despite those findings. Delete the line. |
 | `[prompt-workflow: Input is too long …]` | The clipboard holds more than 50,000 characters. Copy just the draft. |
 | `… output truncated at max tokens]` at the end, or `… used the whole max-tokens budget` | The model hit its output cap, often by spending it on reasoning. Raise `OPENROUTER_MAX_TOKENS`, or pick a larger max tokens (or lower effort) in `-if-`. |
 | A `base.yml.bak-…` file appeared in Espanso's `match` folder | Versions before 0.9 deployed `-p-` as `match/base.yml`, the file Espanso creates for your own snippets. The installer backed up that copy and replaced it with `prompts-template.yml`. Older installers overwrote `base.yml` without a backup, so snippets you kept there before first installing this project can only come from your own backups. |

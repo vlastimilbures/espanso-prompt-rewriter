@@ -188,8 +188,9 @@ def test_merged_env_line_is_reported_not_pasted(tmp_path):
             "default",
         ],
         ["--provider", "anthropic", "--profile", "general"],
+        ["--provider", "openrouter", "--allow-flagged"],
     ],
-    ids=["-i-", "-ip-", "-if-", "-ic-"],
+    ids=["-i-", "-ip-", "-if-", "-ic-", "-iok-"],
 )
 def test_local_only_blocks_cloud_triggers(monkeypatch, fake_http, args):
     monkeypatch.setenv("PROMPT_LOCAL_ONLY", "true")
@@ -498,3 +499,62 @@ def test_output_is_utf8_under_legacy_code_page(tmp_path):
     )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.decode("utf-8") == persona
+
+
+# --allow-flagged sends a draft with only soft findings once, and the paste opens with a
+# visible note naming the findings, never their values.
+def test_allow_flagged_sends_once_with_note(monkeypatch, fake_http):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    fake_http.reply({"choices": [{"message": {"content": "rewrite"}}]})
+    draft = "CONFIDENTIAL: summarise the board minutes for jane@example.com"
+    result = improve(
+        "--provider", "openrouter", "--allow-flagged", "--text", draft, "--source", "argument"
+    )
+    assert result.stdout == "[prompt-workflow: sent despite: email, confidential_label]\n\nrewrite"
+    assert len(fake_http.requests) == 1
+    assert "jane@" not in result.stdout
+
+
+# Nothing persists: the next call without the flag is blocked again, with no request.
+def test_allow_flagged_is_per_call(monkeypatch, fake_http):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    fake_http.reply({"choices": [{"message": {"content": "rewrite"}}]})
+    draft = "CONFIDENTIAL: summarise the board minutes"
+    improve("--provider", "openrouter", "--allow-flagged", "--source", "argument", "--text", draft)
+    result = improve("--provider", "openrouter", "--source", "argument", "--text", draft)
+    assert result.stdout.startswith("[prompt-workflow: Blocked cloud call.")
+    assert len(fake_http.requests) == 1
+
+
+# A hard finding stays blocked with --allow-flagged, and nothing is sent.
+def test_allow_flagged_blocks_hard_finding(monkeypatch, fake_http):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    draft = "CONFIDENTIAL: card 4111 1111 1111 1111"
+    result = improve(
+        "--provider", "openrouter", "--allow-flagged", "--source", "argument", "--text", draft
+    )
+    assert result.stdout.startswith("[prompt-workflow: Blocked cloud call.")
+    assert "-iok- never sends payment_card" in result.stdout
+    assert fake_http.requests == []
+
+
+# --copy puts only the rewrite on the clipboard, without the note.
+def test_allow_flagged_copy_has_no_note(monkeypatch, fake_http):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    fake_http.reply({"choices": [{"message": {"content": "rewrite"}}]})
+    copied = []
+    monkeypatch.setattr(cli.pyperclip, "copy", copied.append)
+    args = ("--provider", "openrouter", "--allow-flagged", "--copy", "--source", "argument")
+    result = improve(*args, "--text", "Output is CONFIDENTIAL")
+    assert result.stdout.startswith("[prompt-workflow: sent despite: confidential_label]")
+    assert copied == ["rewrite"]
+
+
+# A flagged draft that was sent and then failed still says it was sent.
+def test_allow_flagged_note_on_failed_call(monkeypatch, fake_http):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    fake_http.reply({"error": {"message": "bad key"}}, status_code=401)
+    args = ("--provider", "openrouter", "--allow-flagged", "--source", "argument")
+    result = improve(*args, "--text", "Output is CONFIDENTIAL")
+    assert result.stdout.startswith("[prompt-workflow: sent despite: confidential_label]\n\n")
+    assert "HTTP 401" in result.stdout

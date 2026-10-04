@@ -78,6 +78,10 @@ everything that can send the draft off the machine (`_leaves_machine()`) in `gat
 the Ollama model is a `cloud`-tagged one. The gate runs `redaction.scan_draft()` (built-in patterns,
 the user's `PROMPT_EXTRA_PATTERNS`, and the whole-draft `bare_token` rule, which `safe_repr()`'s
 `scan()` leaves out) and blocks the call unless `ALLOW_CLOUD_OVERRIDE=true`.
+`make_provider(..., allow_flagged=True)` (`--allow-flagged`, the `-iok-` trigger) lets one call
+through when every finding is in `redaction.SOFT_FINDINGS` (labels, Vietnamese IDs, email, IBAN);
+any other finding, including `custom_N`, stays blocked. The CLI then prefixes the output with
+`[prompt-workflow: sent despite: …]` (finding names only) from `GatedProvider.sent_despite`.
 It also requires `https` cloud base URLs (plain `http` only to loopback).
 `providers.base.post_json()` (the only HTTP call) gives a loopback URL its own `HTTPTransport`,
 which makes httpx skip env and system proxies for it; every other URL keeps the proxy.
@@ -99,7 +103,8 @@ overrides any `--provider` a trigger passes; `PROMPT_PROVIDER` only sets the bar
 - Every match (commented-out ones too) sets `left_word: true`, so a trigger fires only after a
   word separator (space, punctuation, bracket, newline), never inside a word such as
   `a[n-i-1]`; `tests/test_yaml.py` enforces it.
-- `-i-` (OpenRouter, `PROMPT_PROFILE`) is the live cloud trigger, and `-ip-` is
+- `-i-` (OpenRouter, `PROMPT_PROFILE`) is the live cloud trigger, `-iok-` is the same call
+  with `--allow-flagged`, and `-ip-` is
   the same rewrite with `--tier pro` (reasoning model, `PROMPT_PRO_PROFILE` if set). Only `-il-`,
   `-ilm-` and the commented `-ic-` pass `--profile general`; `tests/test_triggers.py` replays every trigger's real
   command and checks its provider, profile and tier. `-if-` puts an Espanso form
