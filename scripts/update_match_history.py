@@ -1,5 +1,10 @@
 """Regenerate src/prompt_workflow/match_history.py: the SHA-256 of every espanso/match/ source
-any release shipped (each `v*` tag that has the file) plus the checkout's current one.
+anyone could have deployed. That is the union of
+- every digest the module already lists (a digest is never dropped),
+- each `v*` tag's version of each file,
+- the file at every commit that changed it on this branch and on the default branch
+  (origin/HEAD), since an editable install runs an untagged commit,
+- the checkout's current files.
 
 deploy.py uses it to recognise a match file an older install script wrote (no stamp, no
 manifest) as ours and stale instead of foreign. Run at every release, after tagging, and
@@ -13,6 +18,7 @@ tests/test_deploy.py fails when the module misses a tagged or the current source
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
@@ -49,6 +55,52 @@ def tagged_digests() -> dict[str, set[str]]:
     return found
 
 
+def _refs() -> list[str]:
+    """This branch and, when the clone knows it, the default branch."""
+    refs = ["HEAD"]
+    found = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", "origin/HEAD"],  # noqa: S607
+        cwd=REPO,
+        capture_output=True,
+        timeout=30,
+        check=False,
+    )
+    if found.returncode == 0:
+        refs.append("origin/HEAD")
+    return refs
+
+
+def history_digests() -> dict[str, set[str]]:
+    """Digest of each match file at every commit that changed espanso/match/, on this branch
+    and the default branch. Each distinct blob is read once."""
+    blobs: dict[str, set[str]] = {}
+    commits = _git("log", "--format=%H", *_refs(), "--", MATCH.as_posix()).split()
+    for commit in dict.fromkeys(commits):
+        for line in _git("ls-tree", commit, f"{MATCH.as_posix()}/").splitlines():
+            meta, _, path = line.partition("\t")
+            name = Path(path).name
+            if meta.split()[1] == "blob" and name.endswith(".yml"):
+                blobs.setdefault(meta.split()[2], set()).add(name)
+    found: dict[str, set[str]] = {}
+    for blob, names in blobs.items():
+        text = _git("cat-file", "blob", blob)
+        for name in names:
+            found.setdefault(name, set()).add(digest(text))
+    return found
+
+
+def listed_digests() -> dict[str, set[str]]:
+    """What match_history.py lists now; {} when it does not exist yet."""
+    if not MODULE.exists():
+        return {}
+    spec = importlib.util.spec_from_file_location("_listed_match_history", MODULE)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load {MODULE}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return {name: set(found) for name, found in module.KNOWN_SOURCES.items()}
+
+
 def current_digests() -> dict[str, set[str]]:
     return {
         p.name: {digest(p.read_bytes().decode("utf-8"))}
@@ -76,9 +128,10 @@ def render_module(digests: dict[str, set[str]]) -> str:
 
 
 def collect() -> dict[str, set[str]]:
-    merged = tagged_digests()
-    for name, found in current_digests().items():
-        merged.setdefault(name, set()).update(found)
+    merged: dict[str, set[str]] = {}
+    for source in (listed_digests(), tagged_digests(), history_digests(), current_digests()):
+        for name, found in source.items():
+            merged.setdefault(name, set()).update(found)
     return merged
 
 

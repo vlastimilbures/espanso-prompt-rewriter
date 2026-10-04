@@ -24,6 +24,10 @@ All notable changes to this project are documented here. The format follows
   Without it a run is recorded as `direct`; an unknown value is recorded unattributed and never
   fails. What a trigger pastes is unchanged. Run `prompt-workflow espanso deploy` to update the
   deployed matches; older ones keep working and are recorded as `direct`.
+- `scripts/update_match_history.py` never drops a digest `match_history.py` already lists, and
+  also records the match files at every commit that changed them on the branch and on the
+  default branch, so a file an editable install of an untagged commit deployed is recognised
+  as ours (`stale`), not `foreign`.
 - Managed Espanso deployment (#86): `prompt-workflow espanso deploy|status|detach`. `deploy`
   shows a plan and a diff and asks first (`--yes` skips); a second run with nothing to change
   does nothing. A manifest in the per-device data dir (`~/.local/share/prompt-workflow/`,

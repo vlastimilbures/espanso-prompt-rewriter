@@ -21,11 +21,15 @@ KNOWN_SOURCES: dict[str, frozenset[str]] = {
             "2f4a39feed880856a5f11ac5ae4a37a7ff690a88a07a3afc58b3556d9aedfa09",
             "591c2fc3e1d65ab9288957e04eca1e1919f56814c0ad71512991b4a3d192a077",
             "8ae1421a528c7fded5459e46bdf92838ce6ec6686b3f5b9a191226ed76dae082",
+            "8f9eb7a8d4cd42606df54f7e3e3ea7cdcfd9e57770dbd39fc6ed020bc3d3d21c",
+            "9454bff8830e3ab38934a0f1a97cb42fdad6769cc0249cce38a456dc1dfe796c",
             "9bc66c69044c3b795126cb5819f70dce11435f7167bf6ad1fdc94d0614b02c4e",
+            "e7e437e9e07e78de55f181d8f263f31dbe06bc3617defca8b2665bbed548ed77",
         }
     ),
     "prompts-template.yml": frozenset(
         {
+            "1b967f502089e307a885ba7b3eb3a85782629c443bc4bc50ac864364b1c0e0ad",
             "53292b9f1d1c24e3771606b69c7c6bff9feacca9395b9668e36d6762752ad1b1",
             "5b3b9f2541e3dafebd033c724febb77b8e9a4478d17f3deaad364a5195e85153",
             "a064a91c8e05437d00e3b708434d492d1e6903eba912b9bf19488b97d46a648b",

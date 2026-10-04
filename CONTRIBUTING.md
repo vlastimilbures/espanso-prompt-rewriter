@@ -252,7 +252,10 @@ its id to `recorder.TRIGGER_IDS` (the test fails until each CLI match passes its
 
 Any change to a file in `espanso/match/` needs
 `uv run python scripts/update_match_history.py` (also run it at every release, after tagging):
-it records the source's digest in `src/prompt_workflow/match_history.py`, so `espanso deploy`
+it records the source's digest in `src/prompt_workflow/match_history.py` (together with every
+digest already listed, which is never dropped, each release tag's version and the file at every
+commit that changed it on this branch and on the default branch, since an editable install
+runs an untagged commit), so `espanso deploy`
 later recognises a file this version wrote as its own (stale) rather than foreign, and
 `tests/test_deploy.py` fails until it is run.
 
