@@ -117,47 +117,66 @@ def _win32() -> tuple[Any, Any]:
         win_dll("kernel32", use_last_error=True),
     )
     dword, handle, lpwstr = wintypes.DWORD, wintypes.HANDLE, wintypes.LPWSTR
-    signatures = {
-        kernel.GetCurrentProcess: ([], handle),
-        kernel.CloseHandle: ([handle], wintypes.BOOL),
-        kernel.LocalFree: ([c_void_p], c_void_p),
-        advapi.OpenProcessToken: ([handle, dword, POINTER(handle)], wintypes.BOOL),
-        advapi.GetTokenInformation: (
-            [handle, c_int, c_void_p, dword, POINTER(dword)],
-            wintypes.BOOL,
+    # A list, not a dict: ctypes function pointers are unhashable.
+    signatures = [
+        (kernel.GetCurrentProcess, ([], handle)),
+        (kernel.CloseHandle, ([handle], wintypes.BOOL)),
+        (kernel.LocalFree, ([c_void_p], c_void_p)),
+        (advapi.OpenProcessToken, ([handle, dword, POINTER(handle)], wintypes.BOOL)),
+        (
+            advapi.GetTokenInformation,
+            (
+                [handle, c_int, c_void_p, dword, POINTER(dword)],
+                wintypes.BOOL,
+            ),
         ),
-        advapi.ConvertSidToStringSidW: ([c_void_p, POINTER(lpwstr)], wintypes.BOOL),
-        advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW: (
-            [wintypes.LPCWSTR, dword, POINTER(c_void_p), POINTER(dword)],
-            wintypes.BOOL,
+        (advapi.ConvertSidToStringSidW, ([c_void_p, POINTER(lpwstr)], wintypes.BOOL)),
+        (
+            advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW,
+            (
+                [wintypes.LPCWSTR, dword, POINTER(c_void_p), POINTER(dword)],
+                wintypes.BOOL,
+            ),
         ),
-        advapi.GetSecurityDescriptorDacl: (
-            [c_void_p, POINTER(wintypes.BOOL), POINTER(c_void_p), POINTER(wintypes.BOOL)],
-            wintypes.BOOL,
+        (
+            advapi.GetSecurityDescriptorDacl,
+            (
+                [c_void_p, POINTER(wintypes.BOOL), POINTER(c_void_p), POINTER(wintypes.BOOL)],
+                wintypes.BOOL,
+            ),
         ),
-        advapi.SetNamedSecurityInfoW: (
-            [lpwstr, c_int, dword, c_void_p, c_void_p, c_void_p, c_void_p],
-            dword,
-        ),
-        advapi.GetNamedSecurityInfoW: (
-            [
-                wintypes.LPCWSTR,
-                c_int,
+        (
+            advapi.SetNamedSecurityInfoW,
+            (
+                [lpwstr, c_int, dword, c_void_p, c_void_p, c_void_p, c_void_p],
                 dword,
-                c_void_p,
-                c_void_p,
-                c_void_p,
-                c_void_p,
-                POINTER(c_void_p),
-            ],
-            dword,
+            ),
         ),
-        advapi.ConvertSecurityDescriptorToStringSecurityDescriptorW: (
-            [c_void_p, dword, dword, POINTER(lpwstr), POINTER(dword)],
-            wintypes.BOOL,
+        (
+            advapi.GetNamedSecurityInfoW,
+            (
+                [
+                    wintypes.LPCWSTR,
+                    c_int,
+                    dword,
+                    c_void_p,
+                    c_void_p,
+                    c_void_p,
+                    c_void_p,
+                    POINTER(c_void_p),
+                ],
+                dword,
+            ),
         ),
-    }
-    for function, (argtypes, restype) in signatures.items():
+        (
+            advapi.ConvertSecurityDescriptorToStringSecurityDescriptorW,
+            (
+                [c_void_p, dword, dword, POINTER(lpwstr), POINTER(dword)],
+                wintypes.BOOL,
+            ),
+        ),
+    ]
+    for function, (argtypes, restype) in signatures:
         function.argtypes, function.restype = argtypes, restype
     return advapi, kernel
 
