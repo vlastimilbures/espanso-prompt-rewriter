@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Added
+- Per-attempt usage metadata for every provider (#87), the data source for the coming usage
+  history. `make_provider(..., observer=...)` passes an observer to each provider, inside the
+  gate, and every HTTP attempt (both attempts of a retry, a timeout, a non-2xx reply) reports
+  one `AttemptUsage`: status, error kind, latency, tokens (uncached input, cache read and
+  write, output, reasoning), the cost as a `Decimal` with its unit, and the cost state. A
+  missing cost is `None` with state `unknown`, never 0; a reported 0 stays 0. OpenRouter's
+  `usage.cost` is in credits, and a BYOK call's upstream cost is kept apart from it; local
+  Ollama and LM Studio are `not_applicable`. Usage is recorded before the reply is
+  finalised, so a reply that then fails still has its tokens on record. Records never hold the
+  prompt, the response, a raw body or a key. No trigger output changes: nothing passes an
+  observer yet.
+
 ### Security
 - A clipboard item that a password manager marked as concealed is refused before it is read,
   for every trigger, and cleared, so Espanso's restore cannot put it back unmarked for the next

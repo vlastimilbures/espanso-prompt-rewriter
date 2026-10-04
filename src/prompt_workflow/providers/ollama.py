@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .base import ProviderError, chat_messages, finalize_content, post_json
+from .usage import Meter, UsageObserver, ollama_usage
 
 
 @dataclass
@@ -15,6 +16,10 @@ class OllamaProvider:
     # Off by default: disables reasoning for thinking-capable models such as qwen3.
     think: bool = False
     temperature: float | None = None
+    # Receives one AttemptUsage per HTTP attempt; see providers/usage.py. ``local`` says the
+    # model runs on this machine (loopback, not a cloud model), so it has no cost to report.
+    observer: UsageObserver | None = field(default=None, repr=False, compare=False)
+    local: bool = False
 
     def __post_init__(self) -> None:
         self.base_url = self.base_url.rstrip("/")
@@ -28,7 +33,14 @@ class OllamaProvider:
         }
         if self.temperature is not None:
             payload["options"] = {"temperature": self.temperature}
-        data = post_json("Ollama", f"{self.base_url}/api/chat", self.timeout, json=payload)
+        meter = (
+            Meter(self.observer, "ollama", self.model, ollama_usage, self.local)
+            if self.observer is not None
+            else None
+        )
+        data = post_json(
+            "Ollama", f"{self.base_url}/api/chat", self.timeout, json=payload, meter=meter
+        )
 
         try:
             content = data["message"]["content"]  # type: ignore[index]

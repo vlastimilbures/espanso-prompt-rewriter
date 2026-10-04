@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .base import ProviderError, finalize_content, post_json
+from .usage import Meter, UsageObserver, anthropic_usage
 
 # The Messages API pins its schema via a required version header.
 ANTHROPIC_VERSION = "2023-06-01"
@@ -22,6 +23,8 @@ class AnthropicProvider:
     timeout: float = 30
     max_tokens: int = 1200
     temperature: float | None = None
+    # Receives one AttemptUsage per HTTP attempt; see providers/usage.py.
+    observer: UsageObserver | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         self.base_url = self.base_url.rstrip("/")
@@ -40,8 +43,18 @@ class AnthropicProvider:
         }
         if self.temperature is not None:
             payload["temperature"] = self.temperature
+        meter = (
+            Meter(self.observer, "anthropic", self.model, anthropic_usage)
+            if self.observer is not None
+            else None
+        )
         data = post_json(
-            "Anthropic", f"{self.base_url}/v1/messages", self.timeout, headers=headers, json=payload
+            "Anthropic",
+            f"{self.base_url}/v1/messages",
+            self.timeout,
+            headers=headers,
+            json=payload,
+            meter=meter,
         )
 
         try:
