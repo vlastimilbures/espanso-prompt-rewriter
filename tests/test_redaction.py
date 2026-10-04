@@ -264,7 +264,8 @@ def test_custom_pattern_matches_raw_text():
 
 
 # scan() stays linear on long runs that used to make the email, URL and secret patterns
-# quadratic (80k chars took 15 s and froze Espanso).
+# quadratic (80k chars took 15 s and froze Espanso). CPU time, not wall time, so a busy
+# machine cannot fail it; a quadratic pattern still takes many times the budget.
 # Explicit ids: a 200k-char node id breaks Windows, where pytest puts it in an env var.
 @pytest.mark.parametrize(
     "text",
@@ -296,6 +297,9 @@ def test_custom_pattern_matches_raw_text():
         "CZ65-0-" * 30_000,
         "1/" * 100_000,
         "aPASSWORD" * 20_000,
+        "-u a:b " * 30_000,
+        "curl\n-u a:b\n" * 17_000,
+        "curlx -u a:b " * 16_000,
     ],
     ids=[
         "dots",
@@ -325,12 +329,15 @@ def test_custom_pattern_matches_raw_text():
         "iban-dashes",
         "slashed-digits",
         "compound-names",
+        "user-options",
+        "curl-then-options",
+        "not-curl-options",
     ],
 )
 def test_scan_is_fast_on_adversarial_input(text):
-    started = time.perf_counter()
+    started = time.process_time()
     scan_draft(text)
-    assert time.perf_counter() - started < 2
+    assert time.process_time() - started < 2
 
 
 # Error messages repeat a short, harmless value; anything that could be a secret is described.
@@ -599,3 +606,18 @@ def test_iban_needs_checksum_and_length(text):
 )
 def test_basic_auth_needs_user_password(text):
     assert "basic_auth" not in scan(text)
+
+
+# -u belongs to curl only on the same logical line; a later line or another command is not curl.
+@pytest.mark.parametrize(
+    ("text", "flagged"),
+    [
+        (f"{_HTTP_CLI} https://x \\\n  -H 'a: b' \\\n  -u admin:{_FAKE}", True),
+        (f"{_HTTP_CLI} https://x\nssh -u admin:{_FAKE}", False),
+        (f"curly -u admin:{_FAKE}", False),
+        (f"tar -u admin:{_FAKE}", False),
+    ],
+    ids=["continued-twice", "next-line", "other-word", "other-command"],
+)
+def test_curl_user_needs_the_curl_command(text, flagged):
+    assert ("curl_user" in scan(text)) == flagged

@@ -95,12 +95,9 @@ _PATTERNS: dict[str, re.Pattern[str]] = {
     # would match.
     "basic_auth": re.compile(r"\bBasic\s{1,4}([A-Za-z0-9+/]{4,512}={0,2})", re.IGNORECASE),
     # curl -u user:password, --user=user:password, also after a "\" line continuation; "-u
-    # user" alone makes curl prompt instead.
-    "curl_user": re.compile(
-        r"\bcurl\b(?:[^\n]|\\\r?\n){0,256}?\s(?:-u|--user)(?:\s{1,4}|=)?[\"']?[^\s:\"']{1,64}"
-        r":(?!\$)[^\s\"']",
-        re.IGNORECASE,
-    ),
+    # user" alone makes curl prompt instead. Anchored on the option, which is rare, rather
+    # than on "curl"; _after_curl() then checks the command it belongs to.
+    "curl_user": re.compile(r"\s(?:-u|--user)(?:\s{1,4}|=)?[\"']?[^\s:\"']{1,64}:(?!\$)[^\s\"']"),
     "npm_token": re.compile(r"\bnpm_[A-Za-z0-9]{36}\b"),
     # Azure storage/service-bus connection strings and SAS URL signatures.
     "azure_key": re.compile(
@@ -160,6 +157,16 @@ def _is_card(match: re.Match[str]) -> bool:
     return False
 
 
+def _after_curl(match: re.Match[str]) -> bool:
+    """Whether the -u option belongs to a curl command: "curl" earlier in the same logical
+    line (lines joined by a trailing backslash), within 256 characters."""
+    before = match.string[max(0, match.start() - 256) : match.start()]
+    if "curl" not in before.lower():
+        return False
+    command = re.split(r"(?<!\\)\r?\n", before)[-1]
+    return re.search(r"\bcurl\b", command, re.IGNORECASE) is not None
+
+
 def _is_basic_auth(match: re.Match[str]) -> bool:
     """Whether the Basic credentials decode to printable UTF-8 user:password."""
     encoded = match.group(1)
@@ -186,15 +193,21 @@ _IBAN_LENGTHS = {
 }  # fmt: skip
 
 
+# IBAN letters as the numbers mod-97 reads them: A=10 ... Z=35.
+_IBAN_LETTERS = {ord(c): str(ord(c) - 55) for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"}
+
+
 def _is_iban(match: re.Match[str]) -> bool:
     """Whether the match starts with an IBAN of its country's length and a valid mod-97
     checksum. The regex is greedy, so a following word is cut off by the length."""
-    compact = re.sub(r"[ -]", "", match.group(1)).upper()
-    length = _IBAN_LENGTHS.get(compact[:2])
-    if length is None or len(compact) < length:
+    candidate = match.group(1)
+    length = _IBAN_LENGTHS.get(candidate[:2].upper())
+    if length is None:
         return False
-    iban = compact[:length]
-    return int("".join(str(int(c, 36)) for c in iban[4:] + iban[:4])) % 97 == 1
+    iban = candidate.replace(" ", "").replace("-", "")[:length].upper()
+    if len(iban) < length:
+        return False
+    return int((iban[4:] + iban[:4]).translate(_IBAN_LETTERS)) % 97 == 1
 
 
 # Patterns whose raw regex match is too broad: a finding needs one match that also
@@ -203,6 +216,7 @@ def _is_iban(match: re.Match[str]) -> bool:
 _VALIDATORS: dict[str, Callable[[re.Match[str]], bool]] = {
     "payment_card": _is_card,
     "basic_auth": _is_basic_auth,
+    "curl_user": _after_curl,
     "iban": _is_iban,
 }
 
