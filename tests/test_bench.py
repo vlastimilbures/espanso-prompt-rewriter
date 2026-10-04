@@ -1,10 +1,14 @@
+import hashlib
+import json
+import re
+import sys
 from pathlib import Path
 
 import pytest
 from bench_module import bench
 
 from prompt_workflow.config import Settings
-from prompt_workflow.prompt_builder import system_prompt
+from prompt_workflow.prompt_builder import PROFILES, system_prompt
 from prompt_workflow.providers.base import ProviderError
 from prompt_workflow.redaction import scan
 
@@ -293,11 +297,108 @@ def test_run_one_scores_and_records(fake_http, monkeypatch, tmp_path):
     assert (tmp_path / "a_b__at__c_d__board__1.txt").read_text() == GOOD
 
 
-# The bench scores the same system prompt the CLI would send, persona included.
-def test_run_one_uses_configured_persona(fake_http, monkeypatch, tmp_path):
+def _system(fake_http, call=-1):
+    return fake_http.calls[call]["json"]["messages"][0]["content"]
+
+
+# run_one renders the persona it is given, never the runner's PROMPT_PERSONA, and defaults
+# to the fictitious example.
+def test_run_one_renders_given_persona(fake_http, monkeypatch, tmp_path):
     monkeypatch.setenv("OPENROUTER_API_KEY", "k")
-    monkeypatch.setenv("PROMPT_PERSONA", "I am a tester.")
+    monkeypatch.setenv("PROMPT_PERSONA", "I am a private person.")
     fake_http.reply({"choices": [{"message": {"content": GOOD}}]})
     bench.run_one(Settings(), "a/b", "board", 1, tmp_path, bench.Budget(1.0))
-    system = fake_http.calls[0]["json"]["messages"][0]["content"]
-    assert 'open with "I am a tester."' in system
+    assert f'open with "{bench.EXAMPLE_PERSONA}"' in _system(fake_http)
+    bench.run_one(Settings(), "a/b", "board", 1, tmp_path, bench.Budget(1.0), persona="I test.")
+    assert 'open with "I test."' in _system(fake_http)
+    assert "I am a private person." not in _system(fake_http, 0) + _system(fake_http)
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [("example", bench.EXAMPLE_PERSONA), ("none", ""), ("env", "I am a tester.")],
+)
+def test_bench_persona_modes(monkeypatch, mode, expected):
+    monkeypatch.setenv("PROMPT_PERSONA", "I am a tester.")
+    assert bench.bench_persona(mode, Settings()) == expected
+
+
+def _sha(text):
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _main(monkeypatch, outdir, *extra):
+    argv = ["bench", "--models", "a/b", "--drafts", "board", "--runs", "1", "--outdir", str(outdir)]
+    monkeypatch.setattr(sys, "argv", [*argv, *extra])
+    bench.main()
+    return json.loads((outdir / "meta.json").read_text(encoding="utf-8"))
+
+
+# Two runners with different private personas send the same system prompt by default, and
+# nothing written to the run directory contains either persona.
+def test_default_run_is_reproducible_and_private(fake_http, monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k")
+    fake_http.reply({"choices": [{"message": {"content": GOOD}}]})
+    systems = []
+    for i, private in enumerate(["I head the Secret Unit.", "I run Hidden Corp."]):
+        monkeypatch.setenv("PROMPT_PERSONA", private)
+        meta = _main(monkeypatch, tmp_path / str(i))
+        systems.append(_system(fake_http))
+        written = "".join(f.read_text(encoding="utf-8") for f in (tmp_path / str(i)).iterdir())
+        assert private not in written + capsys.readouterr().out
+        assert meta["persona"] == "example"
+        assert meta["prompt"] == "default"
+        assert meta["prompt_sha256"] == _sha(PROFILES["default"])
+        assert meta["system_prompt_sha256"] == _sha(systems[-1])
+    assert systems[0] == systems[1]
+    assert bench.EXAMPLE_PERSONA in systems[0]
+
+
+# --persona env renders the runner's own persona and records only the mode; a candidate
+# file is recorded by name, never by its local path.
+def test_env_persona_records_mode_only(fake_http, monkeypatch, tmp_path):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k")
+    monkeypatch.setenv("PROMPT_PERSONA", "I head the Secret Unit.")
+    fake_http.reply({"choices": [{"message": {"content": GOOD}}]})
+    candidate = tmp_path / "candidate.md"
+    candidate.write_text("{{PERSONA_RULE}} <CONTEXT>\n", encoding="utf-8")
+    out = tmp_path / "out"
+    meta = _main(monkeypatch, out, "--persona", "env", "--system-prompt-file", str(candidate))
+    assert 'open with "I head the Secret Unit."' in _system(fake_http)
+    assert meta["persona"] == "env"
+    assert meta["prompt"] == "candidate.md"
+    assert meta["prompt_sha256"] == _sha(candidate.read_text(encoding="utf-8").strip())
+    assert meta["system_prompt_sha256"] is None  # a hash of a private sentence can be guessed
+    raw = (out / "meta.json").read_text(encoding="utf-8")
+    assert "Secret" not in raw
+    assert str(tmp_path) not in raw
+
+
+# meta.json describes one run, so a directory holding another run's outputs is refused.
+def test_outdir_must_be_empty(fake_http, monkeypatch, tmp_path):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k")
+    (tmp_path / "old").mkdir()
+    (tmp_path / "old" / "x__board__1.txt").write_text("old run", encoding="utf-8")
+    with pytest.raises(SystemExit, match="not empty"):
+        _main(monkeypatch, tmp_path / "old")
+    assert fake_http.calls == []
+
+
+def test_default_outdir_is_timestamped(fake_http, monkeypatch, tmp_path):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k")
+    fake_http.reply({"choices": [{"message": {"content": GOOD}}]})
+    monkeypatch.setattr(
+        sys, "argv", ["bench", "--models", "a/b", "--drafts", "board", "--runs", "1"]
+    )
+    bench.main()
+    (run,) = (tmp_path / bench.DEFAULT_OUTDIR).iterdir()
+    assert re.fullmatch(r"\d{8}T\d{12}Z", run.name)
+    assert (run / "meta.json").exists()
+
+
+def test_git_state(monkeypatch):
+    sha, dirty = bench.git_state()
+    assert re.fullmatch(r"[0-9a-f]{40}", sha) or sha == "unknown"
+    assert isinstance(dirty, bool) or sha == "unknown"
+    monkeypatch.setattr(bench.shutil, "which", lambda _: None)
+    assert bench.git_state() == ("unknown", None)

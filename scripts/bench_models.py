@@ -10,6 +10,10 @@ manually; nothing in the package imports this.
     uv run python scripts/bench_models.py --models openai/gpt-4.1-nano --runs 1
     uv run python scripts/bench_models.py --models openai/gpt-6-luna@openai~low
 
+By default a run renders the same fictitious persona (`--persona example`), so two runners get
+the same system prompt whatever their own PROMPT_PERSONA. Every run writes meta.json (git SHA,
+prompt hashes, persona mode) next to its outputs in bench-out/<UTC timestamp>/.
+
 A spec is `model`, optionally `@provider-tag` to pin one endpoint and `~effort` to set
 OpenRouter's reasoning effort (none/minimal/low/medium/high).
 
@@ -22,17 +26,22 @@ implied. `edge` is not expected to pass in full; see CONTRIBUTING.md for its kno
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
+import shutil
 import statistics
+import subprocess
 import threading
 import time
 from collections.abc import Collection
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field, replace
+from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
 
+from prompt_workflow import prompt_builder
 from prompt_workflow.config import Settings, split_model_spec
 from prompt_workflow.factory import make_provider
 from prompt_workflow.prompt_builder import PROFILES, render
@@ -53,6 +62,13 @@ MODELS: list[str] = [
 # Room for a reasoning budget on top of the ~1k-token rewrite, so a thinking model is not
 # scored on an answer it never got to finish. Truncation is still reported as a failure.
 BENCH_MAX_TOKENS = 6000
+
+# A fictitious persona, so every runner scores the same system prompt and no private
+# PROMPT_PERSONA ends up in the saved outputs. `--persona env` renders the runner's own.
+EXAMPLE_PERSONA = "I am working as a Head of Data at Example Corp."
+PERSONA_MODES = ("example", "none", "env")
+
+DEFAULT_OUTDIR = "bench-out"  # each run gets its own <UTC timestamp> directory under it
 
 
 @dataclass(frozen=True)
@@ -484,6 +500,11 @@ PLACEHOLDER = re.compile(r"\[(?:domain|XXX|xxx)\]")
 TRANSIENT = ("timed out", "HTTP 429", "HTTP 500", "HTTP 502", "HTTP 503", "HTTP 504")
 
 
+def bench_persona(mode: str, cfg: Settings) -> str:
+    """The persona a run renders into the profile; only `env` reads the runner's settings."""
+    return {"example": EXAMPLE_PERSONA, "none": "", "env": cfg.persona}[mode]
+
+
 def suite_drafts(suite: str) -> list[str]:
     return [name for name, d in DRAFTS.items() if suite in ("all", d.suite)]
 
@@ -696,11 +717,12 @@ def run_one(
     outdir: Path,
     budget: Budget,
     sys_prompt: str | None = None,
+    persona: str = EXAMPLE_PERSONA,
 ) -> Result:
     model, pin, effort = split_spec(spec)
     draft = DRAFTS[draft_name]
     # A --system-prompt-file candidate gets the same token filling as a shipped profile.
-    sys_prompt = render(PROFILES["default"] if sys_prompt is None else sys_prompt, cfg.persona)
+    sys_prompt = render(PROFILES["default"] if sys_prompt is None else sys_prompt, persona)
 
     # Identity of this run, shared by every Result it can produce.
     result = partial(Result, model=model, draft=draft_name, run=run, pin=pin, effort=effort)
@@ -742,7 +764,7 @@ def run_one(
     # Truncation is reported once, from finish_reason; the pasted note is not scored.
     text = text.removesuffix(TRUNCATED_NOTE)
     failed = check(text, draft.plan, draft.independent, scaffold_tags(sys_prompt))
-    failed += check_draft(text, draft, cfg.persona)
+    failed += check_draft(text, draft, persona)
     if finish_reason == "length":
         failed.insert(0, "truncated")
 
@@ -767,7 +789,79 @@ def _p95(values: list[float]) -> float:
     return ordered[min(len(ordered) - 1, round(0.95 * (len(ordered) - 1)))]
 
 
-def report(results: list[Result], budget: Budget) -> None:
+def git_state() -> tuple[str, bool | None]:
+    """HEAD of the checkout the scored prompts are imported from, and whether its tracked
+    files have uncommitted changes; ("unknown", None) without git."""
+    git = shutil.which("git")
+    if git is None:
+        return "unknown", None
+    # The package, not this script: `python` may import prompt_workflow from another checkout.
+    package = Path(prompt_builder.__file__).resolve().parent
+
+    def output(*args: str) -> str:
+        return subprocess.run(  # noqa: S603 - fixed arguments, no user input
+            [git, "--no-optional-locks", *args],
+            cwd=package,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
+    try:
+        head = output("rev-parse", "HEAD")
+        # Untracked files (a candidate prompt, old bench outputs) do not change what is scored.
+        return head, bool(output("status", "--porcelain", "--untracked-files=no"))
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown", None
+
+
+def _sha256(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def provenance(meta: dict[str, object]) -> str:
+    """One line naming what was scored, for the header and the report."""
+    dirty = " (dirty)" if meta["git_dirty"] else ""
+    return (
+        f"prompt {meta['prompt']} sha256:{str(meta['prompt_sha256'])[:12]}, "
+        f"persona {meta['persona']}, git {str(meta['git_sha'])[:12]}{dirty}"
+    )
+
+
+def run_meta(
+    *,
+    prompt: str,
+    template: str,
+    persona_mode: str,
+    cfg: Settings,
+    models: list[str],
+    drafts: list[str],
+    runs: int,
+) -> dict[str, object]:
+    """What produced a run, for meta.json: the persona mode is recorded, never its text. The
+    rendered system prompt is hashed only for the shared personas: a hash of a short private
+    sentence could be brute-forced."""
+    sha, dirty = git_state()
+    rendered = render(template, bench_persona(persona_mode, cfg))
+    return {
+        "started_utc": datetime.now(UTC).isoformat(timespec="seconds"),
+        "git_sha": sha,
+        "git_dirty": dirty,
+        "prompt": prompt,
+        "prompt_sha256": _sha256(template),
+        "system_prompt_sha256": None if persona_mode == "env" else _sha256(rendered),
+        "persona": persona_mode,
+        "temperature": cfg.temperature,
+        "max_tokens": BENCH_MAX_TOKENS,
+        "models": models,
+        "drafts": drafts,
+        "runs": runs,
+    }
+
+
+def report(results: list[Result], budget: Budget, meta: dict[str, object] | None = None) -> None:
+    if meta:
+        print(f"\n{provenance(meta)}")
     by_model: dict[str, list[Result]] = {}
     for r in results:
         by_model.setdefault(r.label, []).append(r)
@@ -859,7 +953,16 @@ def main() -> None:
         default=1.0,
         help="stop starting calls once this much USD is spent (in-flight calls still finish)",
     )
-    parser.add_argument("--outdir", default="bench-out")
+    parser.add_argument(
+        "--persona",
+        choices=PERSONA_MODES,
+        default="example",
+        help="example: a fixed fictitious persona, the same for every runner; none: no persona; "
+        "env: your own PROMPT_PERSONA (its outputs are private, never commit them)",
+    )
+    parser.add_argument(
+        "--outdir", help=f"a new or empty directory (default: {DEFAULT_OUTDIR}/<UTC timestamp>)"
+    )
     # A/B a candidate template without adding a throwaway file to
     # src/prompt_workflow/prompts/, where _load_profiles() would pick it up as a profile.
     parser.add_argument(
@@ -875,25 +978,42 @@ def main() -> None:
     if unknown:
         raise SystemExit(f"unknown drafts: {', '.join(unknown)}")
 
-    outdir = Path(args.outdir)
+    stamp = f"{datetime.now(UTC):%Y%m%dT%H%M%S%fZ}"
+    outdir = Path(args.outdir or f"{DEFAULT_OUTDIR}/{stamp}")
+    # meta.json describes one run, so it must not sit next to another run's outputs.
+    if outdir.is_dir() and any(outdir.iterdir()):
+        raise SystemExit(f"{outdir} is not empty; pass a new --outdir")
     outdir.mkdir(parents=True, exist_ok=True)
     budget = Budget(args.budget)
-    sys_prompt = (
+    if args.system_prompt_file:
         # .strip() to match how _load_profiles() reads the shipped profiles.
-        Path(args.system_prompt_file).read_text(encoding="utf-8").strip()
-        if args.system_prompt_file
-        else None
+        template = Path(args.system_prompt_file).read_text(encoding="utf-8").strip()
+        prompt = Path(args.system_prompt_file).name  # never a local absolute path
+    else:
+        template, prompt = PROFILES["default"], "default"
+    persona = bench_persona(args.persona, cfg)
+    meta = run_meta(
+        prompt=prompt,
+        template=template,
+        persona_mode=args.persona,
+        cfg=cfg,
+        models=args.models,
+        drafts=drafts,
+        runs=args.runs,
     )
+    (outdir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
     jobs = [(m, d, run) for m in args.models for d in drafts for run in range(1, args.runs + 1)]
     print(
         f"{len(jobs)} calls, temperature {cfg.temperature}, "
         f"budget ${args.budget:.2f}, output in {outdir}/"
     )
+    print(provenance(meta))
 
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         futures = [
-            pool.submit(run_one, cfg, m, d, run, outdir, budget, sys_prompt) for m, d, run in jobs
+            pool.submit(run_one, cfg, m, d, run, outdir, budget, template, persona)
+            for m, d, run in jobs
         ]
         results = []
         for i, fut in enumerate(futures, 1):
@@ -905,7 +1025,7 @@ def main() -> None:
     (outdir / "results.json").write_text(
         json.dumps([asdict(r) for r in results], indent=2), encoding="utf-8"
     )
-    report(results, budget)
+    report(results, budget, meta)
 
 
 if __name__ == "__main__":

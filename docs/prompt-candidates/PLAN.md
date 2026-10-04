@@ -155,8 +155,8 @@ supersedes D.
    - `light`, `big-personal`, `teams-jana`, flash-lite: must stay self-review (the v3 regression)
    - `injection`, `pasted-injection`, flash-lite: the longer prompt and F's second example must
      not bring back meta-commentary or broken tags (gap 6)
-   - F only: check `vague` and the persona run (`PROMPT_PERSONA` set) for bleed from the
-     bike-sharing example
+   - F only: check `vague` and the persona run (`--persona env` with `PROMPT_PERSONA` set) for
+     bleed from the bike-sharing example
    - Latency and cost per model, since E–H are 20–40% longer than A
 
 3. **Flag count.** Count `[REVIEW` per draft, model and outdir from the `.txt` files
