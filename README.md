@@ -489,7 +489,13 @@ uv run python scripts/bench_models.py --system-prompt-file candidate.md   # A/B 
 | Trigger does not expand right after a letter, digit, `-` or `=`, or in a field you emptied with the keyboard | Triggers only fire at the start of a word, judged by what you last typed. Type a space first, or click into the field. |
 | Trigger does not expand | Run `espanso status`, check the match files are in `$(espanso path config)/match`, re-run the installer. |
 | `[prompt-workflow: OPENROUTER_API_KEY is not configured]` | The key is missing from `.env`, or `.env` is not in one of the [places the CLI looks](#configuration). |
-| `[prompt-workflow: OpenRouter returned HTTP 401]` | Wrong key. Replace it in `.env`. |
+| `[prompt-workflow: OpenRouter returned HTTP 401: check the API key…]` | Wrong key. Replace it in `.env`. |
+| `[prompt-workflow: OpenRouter returned HTTP 402: out of credits…]` | Add credits to your OpenRouter account. |
+| `[prompt-workflow: … returned HTTP 429: rate limited…]`, `… HTTP 5xx: provider unavailable…` or `… returned an error (code …)` | The provider is busy or down. Trigger again in a moment, or pick another endpoint in `-if-`. The text after the hint is the provider's own reason. |
+| `[prompt-workflow: … HTTP 400: bad request…]` or `… HTTP 404: not found…` | Check the model slug, the endpoint pin and the base URL; the provider's reason follows the hint. |
+| `[prompt-workflow: …_API_KEY contains a non-ASCII or invisible character…]` | The key was pasted with a smart quote or an invisible character. Paste it again as plain text. |
+| `[prompt-workflow: OPENROUTER_REASONING_EFFORT must be empty or one of …]` | Fix the value in `.env` (`OPENROUTER_PRO_REASONING_EFFORT` likewise). |
+| `… the model stopped early (content_filter)]` at the end, or `… declined the request (refusal)` | A content filter or the model's safety policy stopped the rewrite. Rephrase the draft or use another model. |
 | `[prompt-workflow: Ollama request failed: …]` | Start Ollama (`ollama serve`) and pull the model (`ollama pull qwen3:8b`). |
 | `[prompt-workflow: Blocked cloud call. …]` | The [gate](#privacy-and-data-protection) matched. Use a local trigger, or override if policy permits. |
 | `[prompt-workflow: Input is too long …]` | The clipboard holds more than 50,000 characters. Copy just the draft. |

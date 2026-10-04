@@ -151,6 +151,15 @@ _non_negative_float = _number(float, "a number of 0 or more", lambda v: v >= 0)
 TIERS = ("standard", "pro")
 # OpenRouter `reasoning.effort` values accepted by --effort.
 EFFORTS = ("none", "minimal", "low", "medium", "high")
+
+
+def _effort(raw: str) -> str:
+    # A typo would otherwise reach OpenRouter and come back as an opaque HTTP 400.
+    if raw.lower() not in ("", *EFFORTS):
+        raise ValueError(f"empty or one of {', '.join(EFFORTS)}")
+    return raw.lower()
+
+
 # Option value meaning "keep the configured setting"; the -if- popup's choice lists
 # cannot express "unset", so each one offers this word instead.
 KEEP = "default"
@@ -209,7 +218,7 @@ class Settings:
     # OpenRouter `reasoning.effort` (none/minimal/low/medium/high); empty omits the field
     # for models without a reasoning control. Gemini 3.x cannot switch thinking off, and
     # minimal keeps the inline rewrite at ~2 s.
-    openrouter_reasoning_effort: str = _env("OPENROUTER_REASONING_EFFORT", "minimal")
+    openrouter_reasoning_effort: str = _env("OPENROUTER_REASONING_EFFORT", "minimal", _effort)
     # Preference, not constraint: a pinned endpoint can be down, and in Espanso that
     # surfaces as an error marker pasted into the editor. Set false for a hard pin.
     openrouter_allow_fallbacks: bool = _env("OPENROUTER_ALLOW_FALLBACKS", "true", _bool)
@@ -217,7 +226,7 @@ class Settings:
     # swaps in these OpenRouter settings; everything else is shared with the default tier.
     openrouter_pro_model: str = _env("OPENROUTER_PRO_MODEL", "openai/gpt-6-luna")
     openrouter_pro_provider: str = _env("OPENROUTER_PRO_PROVIDER", "openai")
-    openrouter_pro_reasoning_effort: str = _env("OPENROUTER_PRO_REASONING_EFFORT", "low")
+    openrouter_pro_reasoning_effort: str = _env("OPENROUTER_PRO_REASONING_EFFORT", "low", _effort)
     pro_timeout: float = _env("PROMPT_PRO_TIMEOUT_SECONDS", "60", _positive_float)
     # Profile for the pro tier; empty (the default) uses PROMPT_PROFILE, so both tiers send
     # the same prompt. An escape hatch for a prompt tuned to OPENROUTER_PRO_MODEL.

@@ -155,6 +155,22 @@ def test_every_provider_name_builds(monkeypatch, fake_http, name, url, body):
     assert [call["url"] for call in fake_http.calls] == [url]
 
 
+# A key pasted from rich text (a smart quote, an accented letter, an invisible character)
+# is refused by name before anything is built or sent, and never repeated.
+@pytest.mark.parametrize(
+    ("name", "env_name"), [("openrouter", "OPENROUTER_API_KEY"), ("anthropic", "ANTHROPIC_API_KEY")]
+)
+@pytest.mark.parametrize("key", ["sk-t\u00ebst-key", "sk-test\u200bkey", "\u201csk-test-key\u201d"])
+def test_non_ascii_key_is_refused(monkeypatch, fake_http, name, env_name, key):
+    monkeypatch.setenv(env_name, key)
+    with pytest.raises(
+        ProviderError, match=f"^{env_name} contains a non-ASCII or invisible"
+    ) as caught:
+        make_provider(name, Settings())
+    assert "test" not in str(caught.value)
+    assert fake_http.requests == []
+
+
 # The table above covers every advertised name.
 def test_every_provider_name_is_listed():
     names = {"ollama", "lmstudio", "openrouter", "anthropic"}

@@ -57,5 +57,4 @@ class AnthropicProvider:
         except (KeyError, TypeError, AttributeError) as exc:
             raise ProviderError("Anthropic response was malformed") from exc
 
-        truncated = data.get("stop_reason") == "max_tokens"
-        return finalize_content(content, "Anthropic", truncated=truncated)
+        return finalize_content(content, "Anthropic", stop_reason=data.get("stop_reason"))

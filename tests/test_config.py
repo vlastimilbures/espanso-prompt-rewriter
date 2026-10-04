@@ -298,6 +298,29 @@ def test_bool_parsing_rejects_other_values(monkeypatch, raw):
         Settings()
 
 
+# Both reasoning-effort settings accept empty (omit the field) or a known effort, any case.
+@pytest.mark.parametrize(
+    "env_name", ["OPENROUTER_REASONING_EFFORT", "OPENROUTER_PRO_REASONING_EFFORT"]
+)
+@pytest.mark.parametrize(("raw", "expected"), [("", ""), ("low", "low"), ("HIGH", "high")])
+def test_effort_parsing(monkeypatch, env_name, raw, expected):
+    monkeypatch.setenv(env_name, raw)
+    assert getattr(Settings(), env_name.lower()) == expected
+
+
+# A typo is reported at load instead of reaching OpenRouter as an opaque HTTP 400.
+@pytest.mark.parametrize(
+    "env_name", ["OPENROUTER_REASONING_EFFORT", "OPENROUTER_PRO_REASONING_EFFORT"]
+)
+def test_effort_typo_is_rejected(monkeypatch, env_name):
+    monkeypatch.setenv(env_name, "hihg")
+    with pytest.raises(
+        ValueError,
+        match=f"^{env_name} must be empty or one of none, minimal, low, medium, high, got 'hihg'$",
+    ):
+        Settings()
+
+
 FAKE_KEY = "sk-or-v1-" + "cd" * 32
 
 
