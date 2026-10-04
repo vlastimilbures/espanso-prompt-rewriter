@@ -69,22 +69,21 @@ ALLOWED = {
 }
 
 
-# These check that a blocked write gives up, so they keep the real budget.
-_REAL_BUDGET_TESTS = {
-    "test_a_locked_database_drops_the_write_within_the_budget",
-    "test_a_write_blocked_everywhere_gives_up",
-    "test_a_stale_sidecar_lock_is_broken_and_a_held_one_times_out",
-}
+_REAL_BUDGET = (history._BUDGET, history._WRITE_BUDGET)
 
 
 @pytest.fixture(autouse=True)
-def _generous_budget(request, monkeypatch):
+def _generous_budget(monkeypatch):
     # The real ~0.25 s bound drops writes on a loaded CI runner (the first write also creates
     # the database), which made tests that only check what was stored flaky.
-    if request.node.originalname in _REAL_BUDGET_TESTS:
-        return
     monkeypatch.setattr(history, "_BUDGET", 2.25)
     monkeypatch.setattr(history, "_WRITE_BUDGET", 2.0)
+
+
+def _use_real_budget(monkeypatch):
+    """For a test that checks a blocked write gives up: call after its set-up writes."""
+    monkeypatch.setattr(history, "_BUDGET", _REAL_BUDGET[0])
+    monkeypatch.setattr(history, "_WRITE_BUDGET", _REAL_BUDGET[1])
 
 
 @pytest.fixture
@@ -417,10 +416,11 @@ def test_real_identifiers_are_kept(store):
 # -- fail-open writer ----------------------------------------------------------------------
 
 
-def test_a_locked_database_drops_the_write_within_the_budget(store):
+def test_a_locked_database_drops_the_write_within_the_budget(store, monkeypatch):
     assert store.record(_op())
     with contextlib.closing(sqlite3.connect(store.path, isolation_level=None)) as other:
         other.execute("BEGIN EXCLUSIVE")
+        _use_real_budget(monkeypatch)
         started = time.monotonic()
         assert store.record(_op()) is False
         # Generous bound: the budget is 0.25 s; this only catches a writer that blocks.
@@ -804,7 +804,7 @@ def test_a_broken_price_table_never_stops_a_write(store, tmp_path):
     assert _rows(store, "attempts")[0]["cost_state"] == "unknown"
 
 
-def test_a_stale_sidecar_lock_is_broken_and_a_held_one_times_out(store):
+def test_a_stale_sidecar_lock_is_broken_and_a_held_one_times_out(store, monkeypatch):
     store.path.parent.mkdir(parents=True)
     lock = store.lost_path.with_name(f"{history.LOST_NAME}.lock")
     lock.touch()
@@ -812,6 +812,7 @@ def test_a_stale_sidecar_lock_is_broken_and_a_held_one_times_out(store):
     os.utime(lock, (old, old))
     assert store._mark_lost() is True  # left by a killed process
     lock.touch()
+    _use_real_budget(monkeypatch)
     assert store._mark_lost() is False  # held: give up within the lock budget
     assert _lost(store) == 1
     lock.unlink()
@@ -917,12 +918,13 @@ def test_a_fresh_lock_is_never_broken_and_only_the_holder_removes_it(store):
     lock.unlink()
 
 
-def test_a_write_blocked_everywhere_gives_up(store):
+def test_a_write_blocked_everywhere_gives_up(store, monkeypatch):
     assert store.record(_op())
     lock = store.lost_path.with_name(f"{history.LOST_NAME}.lock")
     lock.write_text("held", "ascii")
     with contextlib.closing(sqlite3.connect(store.path, isolation_level=None)) as other:
         other.execute("BEGIN EXCLUSIVE")
+        _use_real_budget(monkeypatch)
         started = time.monotonic()
         assert store.record(_op()) is False
         # Generous bound; _BUDGET (0.25 s) is checked by reading the code, not the clock.
