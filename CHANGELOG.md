@@ -97,11 +97,11 @@ All notable changes to this project are documented here. The format follows
   dir (`~/.local/share/prompt-workflow`, `%LOCALAPPDATA%\prompt-workflow` on Windows) that
   holds metadata only, from a fixed column allowlist, and never prompt, clipboard, output,
   persona, key, form or raw-body text. Money is exact decimal text with its unit (`credits` or
-  `USD`). Writes are fail-open and bounded (0.25 s), keyed by (operation, attempt) so a retry
+  `USD`). Writes are fail-open and bounded (about 0.25 s), keyed by (operation, attempt) so a retry
   never duplicates, and a dropped write is counted in a `history.lost` marker. Services: stats
   by trigger, provider, model or day (reported, estimated and unknown costs kept apart),
   CSV/JSON export, prune, reset and health. New settings `PROMPT_HISTORY` (default `true`) and
-  `PROMPT_HISTORY_RETENTION_DAYS` (default `365`). Optional estimates come from a user
+  `PROMPT_HISTORY_RETENTION_DAYS` (default `365`, at most 36500). Optional estimates come from a user
   `prices.toml` in the config dir. Nothing records yet; the CLI starts recording in #89.
 
 ### Changed

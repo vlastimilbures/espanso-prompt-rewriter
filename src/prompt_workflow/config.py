@@ -185,6 +185,11 @@ def _number(
 _positive_int = _number(int, "a whole number above 0", lambda v: v > 0)
 _positive_float = _number(float, "a number above 0", lambda v: v > 0)
 _non_negative_float = _number(float, "a number of 0 or more", lambda v: v >= 0)
+# Longest usage-history retention, 100 years: a longer one overflows the date arithmetic.
+MAX_RETENTION_DAYS = 36500
+_retention_days = _number(
+    int, f"a whole number from 1 to {MAX_RETENTION_DAYS}", lambda v: 0 < v <= MAX_RETENTION_DAYS
+)
 
 
 def _builtin_profiles(raw: str) -> tuple[str, ...]:
@@ -302,7 +307,7 @@ class Settings:
     # persona or key text, kept in user_data_dir() on this device. false records nothing.
     history: bool = _env("PROMPT_HISTORY", "true", _bool)
     # Days a history record is kept; HistoryStore.prune() deletes older ones.
-    history_retention_days: int = _env("PROMPT_HISTORY_RETENTION_DAYS", "365", _positive_int)
+    history_retention_days: int = _env("PROMPT_HISTORY_RETENTION_DAYS", "365", _retention_days)
 
     @classmethod
     def load(cls) -> Settings:

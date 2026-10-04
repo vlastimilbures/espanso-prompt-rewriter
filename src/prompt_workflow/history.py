@@ -29,8 +29,8 @@ from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any, Literal
 
 from . import __version__
-from .config import _user_config_dir, user_data_dir
-from .redaction import scan
+from .config import MAX_RETENTION_DAYS, _user_config_dir, user_data_dir
+from .redaction import compile_extra, is_bare_token, scan
 
 if TYPE_CHECKING:
     import sqlite3
@@ -44,12 +44,21 @@ LOST_NAME = "history.lost"
 # The optional user price table for estimated costs, in the config dir (D-HIST-1).
 PRICES_NAME = "prices.toml"
 
-# Time budget of one write, connecting included. The trigger waits for it while the user
-# waits for the paste, so it stays well under what a person notices (~0.25 s) even under
-# contention; a write that would take longer is dropped and counted as lost.
-_WRITE_BUDGET = 0.2
-# Time budget for taking the sidecar's lock; with _WRITE_BUDGET at most 0.25 s in all.
-_LOCK_BUDGET = 0.05
+# Time budget of one record() call, from its start: validation, reading the price table,
+# importing sqlite3, connecting, waiting for a lock, writing and, for a dropped write, the
+# sidecar marker. The trigger waits for it while the user waits for the paste, so it stays at
+# what a person barely notices even under contention; a write that would take longer is
+# dropped and counted as lost. A file-system call the OS itself blocks (a stalled network
+# drive) cannot be interrupted, and neither can the interpreter's own pauses; those are the
+# only things outside it.
+_BUDGET = 0.25
+# The database's share of _BUDGET (its busy timeout), the rest is for the sidecar marker.
+# SQLite's own WAL lock retries overshoot the busy timeout by up to ~0.06 s (measured on a
+# write blocked by an exclusive lock), so the share leaves room for that: a write blocked on
+# both the database and the sidecar lock returned after 0.23-0.24 s.
+_WRITE_BUDGET = 0.15
+# Kept back from _BUDGET for writing the sidecar once its lock is taken.
+_MARGIN = 0.02
 # A sidecar lock older than this was left by a killed process (it is held for a few ms).
 _STALE_LOCK = 10.0
 # Busy timeout for management commands (stats, export, prune, reset), which nobody pastes.
@@ -160,16 +169,45 @@ _MIGRATIONS: tuple[tuple[str, ...], ...] = (
 )
 SCHEMA_VERSION = len(_MIGRATIONS)
 
-# A short identifier (model slug, provider, trigger, generation id): no spaces, so a sentence
-# of a prompt or a persona cannot be stored in one.
-_IDENT = re.compile(r"[A-Za-z0-9_.:/@+-]{1,200}")
+# Each identifier column has its own shape, as tight as its real values allow. None takes a
+# space, `@` or `\\`, so a sentence, an email, a `user:pass@host` or a Windows path never fits.
+# Trigger names (-i-, -ip-, -iok-).
+_TRIGGER = re.compile(r"-[a-z]{1,8}-")
+# Profile names, built-in or the user's own (lower case, like the prompts/*.md file names).
+_PROFILE = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
+# Provider names (factory.PROVIDER_NAMES) and the slug of the endpoint that served a call.
+_PROVIDER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+# Model ids need `/` (vendor/model, hf.co/user/repo) and `:` (qwen3:8b, a :free variant),
+# so only the two model columns allow them; never at the start, so an absolute path fails.
+_MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,199}")
+# Response ids of the shapes providers use: OpenRouter gen-…, Anthropic msg_…, OpenAI-style
+# chatcmpl-…. Anything else is not kept.
+_GENERATION_ID = re.compile(r"(?:gen|msg|chatcmpl)[-_][A-Za-z0-9_-]{1,120}")
+_VERSION = re.compile(r"[0-9A-Za-z][0-9A-Za-z.+_-]{0,39}")
 _OUTCOME = re.compile(r"[a-z][a-z0-9_]{0,39}")
 _OPERATION_ID = re.compile(r"[0-9a-f]{32}")
 _TIME_FORMAT = "%Y-%m-%dT%H:%M:%S.%fZ"
+# The error kinds providers/base.py records (see AttemptUsage); tests/test_history.py checks
+# that the two lists match.
+ERROR_KINDS = (
+    "timeout",
+    "non_2xx",
+    "invalid_json",
+    "body_error",
+    "refused",
+    "transport",
+    "invalid_url",
+    "invalid_header",
+    "unexpected",
+)
 
 
 class HistoryError(Exception):
     """A history service (stats, export, prune, reset) could not read or change the store."""
+
+
+class UnusableHistory(HistoryError):
+    """The database is corrupt or was written by a newer version: reset() may delete it."""
 
 
 class InvalidRecord(ValueError):
@@ -209,9 +247,26 @@ def _choice(value: object, allowed: Sequence[str], *, nullable: bool = False) ->
     raise InvalidRecord("not an allowed value")
 
 
-def _ident(value: object, *, required: bool = False) -> str | None:
-    """A short identifier, or None. One that looks like a secret is never stored."""
-    if isinstance(value, str) and _IDENT.fullmatch(value) and not scan(value):
+def _looks_secret(value: str, extra: tuple[re.Pattern[str], ...]) -> bool:
+    """Whether the gate would flag ``value`` (a key, a password assignment, a user pattern
+    from PROMPT_EXTRA_PATTERNS), or any part of it between `/ : . _ -` is a password- or
+    token-like word. Real model ids look token-like whole (Llama-3.3-70B-Instruct:free), so
+    the bare-token check runs on the parts."""
+    if scan(value, extra):
+        return True
+    return any(is_bare_token(part) for part in re.split(r"[/:._-]", value))
+
+
+def _ident(
+    value: object,
+    shape: re.Pattern[str],
+    extra: tuple[re.Pattern[str], ...] = (),
+    *,
+    required: bool = False,
+) -> str | None:
+    """``value`` when it has ``shape`` and does not look like a secret, else None (or
+    InvalidRecord for a ``required`` column, which drops the record)."""
+    if isinstance(value, str) and shape.fullmatch(value) and not _looks_secret(value, extra):
         return value
     if required:
         raise InvalidRecord("not an identifier")
@@ -231,8 +286,9 @@ def _float(value: object) -> float | None:
 
 
 def _money(value: object) -> str | None:
-    """Exact decimal text of a non-negative amount (a Decimal, an int, or a float as its
-    shortest repr, as JSON wrote it), never in exponent form; None for anything else."""
+    """Exact decimal text of a finite, non-negative amount (a Decimal or an int, or a float
+    or string as its decimal text), never in exponent form and never `-0`; None for anything
+    else, including a missing amount."""
     from decimal import Decimal, InvalidOperation
 
     if value is None or isinstance(value, bool):
@@ -240,20 +296,32 @@ def _money(value: object) -> str | None:
     try:
         amount = Decimal(str(value)) if isinstance(value, int | float | str) else value
     except InvalidOperation:
-        raise InvalidRecord("not an amount") from None
+        return None
     if not isinstance(amount, Decimal) or not amount.is_finite() or amount < 0:
-        raise InvalidRecord("not an amount")
-    return format(amount, "f")
+        return None
+    return format(amount.copy_abs(), "f")
 
 
 def _amount(record: Mapping[str, object], amount: str, unit: str) -> tuple[str | None, ...]:
-    value = _money(record.get(amount))
-    if value is None:
+    """(amount, unit), or (None, None) when either is missing or not valid: a bad amount
+    leaves the cost unknown, never 0, and keeps the rest of the record."""
+    value, unit_value = _money(record.get(amount)), record.get(unit)
+    if value is None or unit_value not in UNITS:
         return None, None
-    return value, _choice(record.get(unit), UNITS)
+    return value, str(unit_value)
 
 
-def _operation_row(op: Mapping[str, object]) -> tuple[str, tuple[object, ...]]:
+def _generation_id(value: object, extra: tuple[re.Pattern[str], ...]) -> str | None:
+    """A response id of a known shape, else None. Its part after the prefix is random, so
+    the bare-token check would drop every id; only the gate's patterns apply."""
+    if isinstance(value, str) and _GENERATION_ID.fullmatch(value) and not scan(value, extra):
+        return value
+    return None
+
+
+def _operation_row(
+    op: Mapping[str, object], extra: tuple[re.Pattern[str], ...]
+) -> tuple[str, tuple[object, ...]]:
     op_id = op.get("id")
     if not (isinstance(op_id, str) and _OPERATION_ID.fullmatch(op_id)):
         raise InvalidRecord("id must come from new_operation_id()")
@@ -264,22 +332,26 @@ def _operation_row(op: Mapping[str, object]) -> tuple[str, tuple[object, ...]]:
         op_id,
         _timestamp(op.get("occurred_at_utc")),
         _choice(op.get("origin"), ORIGINS),
-        _ident(op.get("trigger_id")),
+        _ident(op.get("trigger_id"), _TRIGGER, extra),
         _choice(op.get("kind"), KINDS),
-        _ident(op.get("profile_id")),
+        _ident(op.get("profile_id"), _PROFILE, extra),
         outcome,
         _float(op.get("latency_ms")),
-        _ident(op.get("app_version", __version__)) or "unknown",
+        _ident(op.get("app_version", __version__), _VERSION, extra) or "unknown",
     )
 
 
 def _attempt_row(
-    op_id: str, seq: int, at: Mapping[str, object], prices: PriceTable | None
+    op_id: str,
+    seq: int,
+    at: Mapping[str, object],
+    prices: PriceTable | None,
+    extra: tuple[re.Pattern[str], ...],
 ) -> tuple[object, ...]:
     charged, charged_unit = _amount(at, "charged_amount", "charged_unit")
     upstream, upstream_unit = _amount(at, "upstream_cost", "upstream_unit")
     tokens = {name: _int(at.get(name)) for name in TOKEN_FIELDS}
-    model = _ident(at.get("requested_model"), required=True)
+    model = _ident(at.get("requested_model"), _MODEL, extra, required=True)
     # `reported` exactly when there is a charge, `estimated` only from our own price table.
     cost_state = _choice(at.get("cost_state", "unknown"), COST_STATES)
     if charged is not None:
@@ -291,20 +363,21 @@ def _attempt_row(
         estimate = prices.estimate(model, tokens)
         if estimate is not None:
             cost_state = "estimated"
+    error_kind = at.get("error_kind")
     return (
         op_id,
         seq,
-        _ident(at.get("provider"), required=True),
+        _ident(at.get("provider"), _PROVIDER, extra, required=True),
         model,
         _choice(at.get("endpoint"), ENDPOINTS),
         _int(at.get("attempt")) or seq,
         _int(at.get("status")),
-        _ident(at.get("error_kind")),
+        error_kind if error_kind in ERROR_KINDS else None,
         _float(at.get("latency_ms")) or 0.0,
         cost_state,
-        _ident(at.get("returned_model")),
-        _ident(at.get("returned_provider")),
-        _ident(at.get("generation_id")),
+        _ident(at.get("returned_model"), _MODEL, extra),
+        _ident(at.get("returned_provider"), _PROVIDER, extra),
+        _generation_id(at.get("generation_id"), extra),
         *tokens.values(),
         charged,
         charged_unit,
@@ -364,7 +437,7 @@ def load_price_table(path: Path) -> PriceTable | None:
     except tomllib.TOMLDecodeError as exc:
         raise ValueError(f"{PRICES_NAME} is not valid TOML: {exc}") from None
     version, unit, models = data.get("version"), data.get("unit"), data.get("models")
-    if not (isinstance(version, str) and _IDENT.fullmatch(version)):
+    if not (isinstance(version, str) and _VERSION.fullmatch(version)):
         raise ValueError(f'{PRICES_NAME} needs a version such as "2026-10-01"')
     if unit not in UNITS:
         raise ValueError(f"{PRICES_NAME} unit must be one of {', '.join(UNITS)}")
@@ -395,8 +468,10 @@ class Health:
     attempts: int | None
     lost_writes: int
     last_lost_utc: str | None
-    # The sidecar marker exists but cannot be read: some writes may have been lost.
+    # Writes were lost, the sidecar marker cannot be read, or the files cannot be written.
     tracking_incomplete: bool
+    # Whether the files could be created or changed (see HistoryStore._writable).
+    writable: bool
     sqlite_version: str
     error: str | None = None
 
@@ -433,11 +508,15 @@ class HistoryStore:
         enabled: bool = True,
         retention_days: int = 365,
         prices_path: Path | None = None,
+        extra_patterns: str = "",
     ) -> None:
         self.path = path
         self.enabled = enabled
         self.retention_days = retention_days
         self.prices_path = prices_path
+        # PROMPT_EXTRA_PATTERNS: an identifier one of them matches is never stored. Compiled
+        # in record(), so an invalid one drops the write instead of raising.
+        self.extra_patterns = extra_patterns
         self.lost_path = path.with_name(LOST_NAME)
         self._prices: PriceTable | None = None
         self._prices_loaded = False
@@ -449,6 +528,7 @@ class HistoryStore:
             enabled=cfg.history,
             retention_days=cfg.history_retention_days,
             prices_path=price_table_path(environ),
+            extra_patterns=cfg.extra_patterns,
         )
 
     # -- writing ---------------------------------------------------------------------------
@@ -462,15 +542,17 @@ class HistoryStore:
         lost-write marker. Never raises."""
         if not self.enabled:
             return True
+        start = time.monotonic()
         try:
-            op_id, op = _operation_row(operation)
+            extra = compile_extra(self.extra_patterns)
+            op_id, op = _operation_row(operation, extra)
             rows = [
-                _attempt_row(op_id, seq, at, self._price_table())
+                _attempt_row(op_id, seq, at, self._price_table(), extra)
                 for seq, at in enumerate(attempts, start=1)
             ]
-            self._write(op, rows)
+            self._write(op, rows, start + _WRITE_BUDGET)
         except Exception:
-            self._mark_lost()
+            self._mark_lost(start + _BUDGET - _MARGIN)
             return False
         return True
 
@@ -483,9 +565,9 @@ class HistoryStore:
                     self._prices = load_price_table(self.prices_path)
         return self._prices
 
-    def _write(self, op: tuple[object, ...], rows: list[tuple[object, ...]]) -> None:
-        deadline = time.monotonic() + _WRITE_BUDGET
-
+    def _write(
+        self, op: tuple[object, ...], rows: list[tuple[object, ...]], deadline: float
+    ) -> None:
         def remaining_ms() -> int:
             left = deadline - time.monotonic()
             if left <= 0:
@@ -493,7 +575,7 @@ class HistoryStore:
             return max(1, int(left * 1000))
 
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self._connect(timeout=_WRITE_BUDGET) as conn:
+        with self._connect(timeout=remaining_ms() / 1000) as conn:
             # Abort a statement that runs past the budget (checked every 1000 VM steps).
             conn.set_progress_handler(lambda: int(time.monotonic() > deadline), 1000)
             conn.execute(f"PRAGMA busy_timeout = {remaining_ms()}")
@@ -537,13 +619,18 @@ class HistoryStore:
         finally:
             conn.close()
 
-    def _mark_lost(self) -> bool:
+    def _mark_lost(self, deadline: float | None = None) -> bool:
         """Count one dropped write in the sidecar marker: read, then replace it atomically
         (temp file + os.replace) under a short lock file, so concurrent writers never lose a
-        count or leave half a file. False when even that fails; never raises."""
+        count or leave half a file. A marker that is not valid is counted from 0 again. Gives
+        up when the lock is not free by ``deadline``; False when that or anything else fails.
+        Never raises."""
         try:
-            with self._sidecar_lock():
-                count = self._read_lost()[0]
+            with self._sidecar_lock(deadline or time.monotonic() + _BUDGET - _WRITE_BUDGET):
+                try:
+                    count = self._read_lost()[0]
+                except ValueError:
+                    count = 0
                 payload = json.dumps({"lost_writes": count + 1, "last_lost_utc": _now()})
                 temp = self.lost_path.with_name(f"{LOST_NAME}.{os.getpid()}.tmp")
                 temp.write_text(payload, encoding="utf-8")
@@ -553,64 +640,104 @@ class HistoryStore:
         return True
 
     @contextlib.contextmanager
-    def _sidecar_lock(self) -> Iterator[None]:
+    def _sidecar_lock(self, deadline: float) -> Iterator[None]:
+        """Hold the sidecar's lock file, which holds a random nonce: only the holder whose
+        nonce is in it removes it. One left by a killed process is broken after _STALE_LOCK.
+        Tries at least once, however little time is left."""
         lock = self.lost_path.with_name(f"{LOST_NAME}.lock")
         lock.parent.mkdir(parents=True, exist_ok=True)
-        deadline = time.monotonic() + _LOCK_BUDGET
+        nonce = uuid.uuid4().hex
         while True:
             try:
-                os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
-                break
+                fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             except FileExistsError:
-                with contextlib.suppress(OSError):
-                    if time.time() - lock.stat().st_mtime > _STALE_LOCK:
-                        lock.unlink(missing_ok=True)
-                        continue
-                if time.monotonic() > deadline:
+                if _break_stale(lock):
+                    continue
+                if time.monotonic() >= deadline:
                     raise TimeoutError("history sidecar is locked") from None
-                time.sleep(0.002)
+                time.sleep(min(0.002, max(0.0, deadline - time.monotonic())))
+                continue
+            with os.fdopen(fd, "w", encoding="ascii") as handle:
+                handle.write(nonce)
+            break
         try:
             yield
         finally:
-            lock.unlink(missing_ok=True)
+            with contextlib.suppress(OSError):
+                if lock.read_text(encoding="ascii") == nonce:
+                    lock.unlink()
 
     def _read_lost(self) -> tuple[int, str | None]:
-        """(dropped writes, time of the last one); OSError/ValueError when unreadable."""
+        """(dropped writes, time of the last one), (0, None) with no marker; OSError when
+        it cannot be read, ValueError when it is not a valid marker."""
         try:
             text = self.lost_path.read_text(encoding="utf-8")
         except FileNotFoundError:
             return 0, None
         data = json.loads(text)
+        if not isinstance(data, dict):
+            raise ValueError("bad lost-write marker")
         count, last = data.get("lost_writes"), data.get("last_lost_utc")
-        if not isinstance(count, int) or count < 0:
+        if not isinstance(count, int) or isinstance(count, bool) or count < 0:
             raise ValueError("bad lost-write marker")
         return count, last if isinstance(last, str) else None
+
+    def _writable(self) -> bool:
+        """Whether a write could create or change the files: the nearest existing directory
+        takes new files (the database, its WAL, the sidecar) and existing files are not
+        read-only. A probe, not a promise: a lock or a full disk still drops a write."""
+        try:
+            directory = self.path.parent
+            while not directory.exists():
+                if directory.parent == directory:
+                    return False
+                directory = directory.parent
+            if not directory.is_dir() or not os.access(directory, os.W_OK | os.X_OK):
+                return False
+            return all(
+                os.access(path, os.W_OK) for path in (self.path, self.lost_path) if path.exists()
+            )
+        except Exception:
+            return False
 
     # -- services --------------------------------------------------------------------------
 
     def health(self) -> Health:
-        """Path, schema version, row counts, the lost-write marker and the SQLite library
-        version (WAL had a rare reset bug before 3.51.3). Never raises; never creates the
-        database."""
-        import sqlite3
-
-        try:
-            lost, last = self._read_lost()
-            incomplete = lost > 0
-        except (OSError, ValueError):
-            lost, last, incomplete = 0, None, True
+        """Path, schema version, row counts, the lost-write marker, whether a write could
+        succeed and the SQLite library version (WAL had a rare reset bug before 3.51.3).
+        ``tracking_incomplete`` is set when writes were lost, the marker cannot be read or the
+        files cannot be written, so a store whose database and sidecar both fail still shows.
+        Never raises; never creates the database."""
         info: dict[str, Any] = {
             "path": str(self.path),
-            "exists": self.path.is_file(),
+            "exists": False,
             "schema_version": None,
             "operations": None,
             "attempts": None,
-            "lost_writes": lost,
-            "last_lost_utc": last,
-            "tracking_incomplete": incomplete,
-            "sqlite_version": sqlite3.sqlite_version,
+            "lost_writes": 0,
+            "last_lost_utc": None,
+            "tracking_incomplete": True,
+            "writable": False,
+            "sqlite_version": "unknown",
         }
-        if not info["exists"]:
+        try:
+            import sqlite3
+
+            info["sqlite_version"] = sqlite3.sqlite_version
+        except Exception:
+            info["error"] = "no sqlite3"
+        try:
+            info["lost_writes"], info["last_lost_utc"] = self._read_lost()
+            sidecar_ok = True
+        except Exception:
+            sidecar_ok = False
+        info["writable"] = self._writable()
+        info["tracking_incomplete"] = (
+            info["lost_writes"] > 0 or not sidecar_ok or not info["writable"]
+        )
+        with contextlib.suppress(Exception):
+            info["exists"] = self.path.is_file()
+        if not info["exists"] or "error" in info:
             return Health(**info)
         try:
             with self._connect(timeout=_SERVICE_TIMEOUT, readonly=True) as conn:
@@ -619,10 +746,8 @@ class HistoryStore:
                     for table in ("operations", "attempts"):
                         sql = f"SELECT COUNT(*) FROM {table}"  # noqa: S608
                         info[table] = conn.execute(sql).fetchone()[0]
-        except sqlite3.DatabaseError as exc:
+        except Exception as exc:
             info["error"] = _error_kind(exc)
-        except (OSError, ValueError):
-            info["error"] = "unreadable"
         return Health(**info)
 
     def stats(self, group_by: str = "trigger") -> list[StatsRow]:
@@ -729,6 +854,8 @@ class HistoryStore:
         age = older_than if older_than is not None else timedelta(days=self.retention_days)
         if age < timedelta(0):
             raise ValueError("older_than must not be negative")
+        # A longer age would overflow the date arithmetic; nothing is that old anyway.
+        age = min(age, timedelta(days=MAX_RETENTION_DAYS))
         if not self.path.is_file():
             return 0
         cutoff = (datetime.now(UTC) - age).strftime(_TIME_FORMAT)
@@ -753,15 +880,16 @@ class HistoryStore:
                     conn.execute("COMMIT")
                     conn.execute("VACUUM")
                     conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-            except HistoryError:
-                # Corrupt, or written by a newer version: start over with no file.
+            except UnusableHistory:
+                # Corrupt, or written by a newer version: start over with no file. A locked
+                # or read-only database raises instead: it may be fine and in use.
                 for suffix in ("", "-wal", "-shm"):
                     try:
                         Path(f"{self.path}{suffix}").unlink(missing_ok=True)
                     except OSError as exc:
                         raise HistoryError(f"cannot delete {self.path}{suffix}") from exc
         try:
-            with self._sidecar_lock():
+            with self._sidecar_lock(time.monotonic() + _SERVICE_TIMEOUT):
                 self.lost_path.unlink(missing_ok=True)
         except (OSError, TimeoutError) as exc:
             raise HistoryError(f"cannot clear {self.lost_path}") from exc
@@ -775,7 +903,7 @@ class HistoryStore:
             with self._connect(timeout=_SERVICE_TIMEOUT) as conn:
                 version = conn.execute("PRAGMA user_version").fetchone()[0]
                 if version > SCHEMA_VERSION:
-                    raise HistoryError(
+                    raise UnusableHistory(
                         f"history schema version {version} is newer than this version of "
                         f"prompt-workflow supports ({SCHEMA_VERSION})"
                     )
@@ -785,7 +913,9 @@ class HistoryStore:
                     conn.execute("COMMIT")
                 yield conn
         except sqlite3.DatabaseError as exc:
-            raise HistoryError(f"history database is {_error_kind(exc)}") from exc
+            kind = _error_kind(exc)
+            error = UnusableHistory if kind == "corrupt" else HistoryError
+            raise error(f"history database is {kind}") from exc
 
     def _read_all(self) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]]:
         """Every operation (by id, oldest first) and attempt, as dicts of allowlisted columns."""
@@ -803,6 +933,28 @@ class HistoryStore:
                 for row in conn.execute(sql + " ORDER BY operation_id, seq")
             ]
         return ops, attempts
+
+
+def _break_stale(lock: Path) -> bool:
+    """Remove ``lock`` if a killed process left it (older than _STALE_LOCK). It is first
+    renamed to a unique name, which only one process can do, and checked again there: a
+    fresh lock another process took in between is put back instead."""
+    try:
+        if time.time() - lock.stat().st_mtime <= _STALE_LOCK:
+            return False
+        grave = lock.with_name(f"{lock.name}.{uuid.uuid4().hex}.stale")
+        os.replace(lock, grave)
+    except OSError:
+        return False
+    try:
+        if time.time() - grave.stat().st_mtime <= _STALE_LOCK:
+            with contextlib.suppress(OSError):
+                os.link(grave, lock)
+            return False
+    finally:
+        with contextlib.suppress(OSError):
+            grave.unlink()
+    return True
 
 
 def _migrate(conn: sqlite3.Connection) -> None:

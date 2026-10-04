@@ -3,6 +3,7 @@ import csv
 import io
 import json
 import os
+import re
 import sqlite3
 import stat
 import subprocess
@@ -249,6 +250,12 @@ def test_an_invalid_record_is_dropped_and_counted(store, change):
     assert _lost(store) == 1
 
 
+@pytest.mark.parametrize("change", [{"endpoint": "cloud"}, {"provider": "open router"}])
+def test_an_invalid_attempt_drops_the_whole_record(store, change):
+    assert store.record(_op(), [_attempt(), _attempt(**change)]) is False
+    assert not store.path.exists() or _rows(store, "operations") == []
+
+
 @pytest.mark.parametrize(
     "change",
     [
@@ -256,58 +263,137 @@ def test_an_invalid_record_is_dropped_and_counted(store, change):
         {"charged_unit": "EUR"},
         {"charged_amount": Decimal(-1)},
         {"charged_amount": Decimal("NaN")},
-        {"endpoint": "cloud"},
-        {"provider": "open router"},
+        {"charged_amount": "lots"},
+        {"charged_amount": [1]},
     ],
 )
-def test_an_invalid_attempt_drops_the_whole_record(store, change):
-    assert store.record(_op(), [_attempt(), _attempt(**change)]) is False
-    assert not store.path.exists() or _rows(store, "operations") == []
+def test_a_bad_cost_is_unknown_and_the_record_is_kept(store, change):
+    assert store.record(_op(), [_attempt(**change)])
+    row = _rows(store, "attempts")[0]
+    assert (row["charged_amount"], row["charged_unit"], row["cost_state"]) == (
+        None,
+        None,
+        "unknown",
+    )
+    assert row["output"] == 300
+
+
+def test_a_negative_zero_is_stored_as_zero(store):
+    assert store.record(_op(), [_attempt(charged_amount=Decimal("-0.000"))])
+    row = _rows(store, "attempts")[0]
+    assert (row["charged_amount"], row["cost_state"]) == ("0.000", "reported")
+
+
+def test_error_kinds_match_what_post_json_records():
+    base = (SRC / "prompt_workflow" / "providers" / "base.py").read_text("utf-8")
+    recorded = set(re.findall(r'error_kind(?: or)? = .*?"([a-z_0-9]+)"', base))
+    assert recorded == set(history.ERROR_KINDS)
 
 
 # -- privacy -------------------------------------------------------------------------------
 
+KEY = "sk-or-v1-" + "0123456789abcdef" * 4
+# Values that must never be stored in any identifier column.
+HOSTILE = [
+    "SENTINEL draft about the merger",
+    "I am SENTINEL Head of Data",
+    "/Users/SENTINEL/secret.txt",
+    "C:\\Users\\SENTINEL\\secret.txt",
+    "SENTINEL:p4ss@host",
+    "SENTINEL@example.com",
+    "SENTINEL" + "aB3xY9" * 6,  # a bare token
+    "x/SENTINEL" + "Q7z!K2" * 4,  # one inside a model-like path
+    '{"choices": "SENTINEL body"}',
+    KEY,
+]
+OPERATION_IDENTS = ("trigger_id", "profile_id", "app_version")
+ATTEMPT_IDENTS = (
+    "provider",
+    "requested_model",
+    "returned_model",
+    "returned_provider",
+    "generation_id",
+    "error_kind",
+)
+REQUIRED = {"provider", "requested_model"}
 
-def test_sentinels_never_reach_the_database_exports_or_health(store):
-    key = "sk-or-v1-" + "0123456789abcdef" * 4
-    sentinels = {
-        "prompt": "SENTINEL draft about the merger",
-        "output": "SENTINEL rewritten prompt",
-        "persona": "I am SENTINEL Head of Data",
-        "form": "SENTINEL-form-pick",
-        "raw_body": '{"choices": "SENTINEL body"}',
-        "api_key": key,
-    }
-    op = _op(
-        **sentinels,
-        trigger_id=sentinels["persona"],
-        profile_id=sentinels["prompt"],
-        latency_ms=sentinels["output"],
-    )
-    attempt = _attempt(
-        **sentinels,
-        returned_model=key,
-        returned_provider=sentinels["raw_body"],
-        generation_id=sentinels["output"],
-        error_kind=sentinels["prompt"],
-    )
-    assert store.record(op, [attempt])
-    # A sentinel in a required column drops the record instead.
-    assert store.record(_op(), [_attempt(requested_model=sentinels["prompt"])]) is False
 
+def _assert_nothing_leaked(store, *needles):
     stored = b"".join(p.read_bytes() for p in store.path.parent.iterdir() if p.is_file())
     as_json, as_csv = io.StringIO(), io.StringIO()
     store.export(as_json, "json")
     store.export(as_csv, "csv")
     texts = [as_json.getvalue(), as_csv.getvalue(), repr(store.health())]
-    for text in sentinels.values():
-        assert text.encode() not in stored
-        for found in texts:
-            assert text not in found
-    assert "SENTINEL" not in "".join(texts)
-    assert b"SENTINEL" not in stored
-    row = _rows(store, "operations")[0]
-    assert (row["trigger_id"], row["profile_id"], row["latency_ms"]) == (None, None, None)
+    for needle in needles:
+        assert needle.encode() not in stored
+        assert all(needle not in text for text in texts)
+
+
+def test_sentinels_never_reach_any_column_exports_or_health(store):
+    unlisted = {
+        "prompt": "SENTINEL draft",
+        "output": "SENTINEL rewrite",
+        "persona": "SENTINEL persona",
+        "form": "SENTINEL-form-pick",
+        "raw_body": "SENTINEL body",
+        "api_key": KEY,
+    }
+    assert store.record(_op(**unlisted), [_attempt(**unlisted)])
+    for value in HOSTILE:
+        for column in OPERATION_IDENTS:
+            assert store.record(_op(**{column: value}), [_attempt()]), (column, value)
+        for column in ATTEMPT_IDENTS:
+            stored = store.record(_op(), [_attempt(**{column: value})])
+            assert stored is (column not in REQUIRED), (column, value)
+    assert store.record(_op(latency_ms="SENTINEL"), [_attempt(latency_ms="SENTINEL")])
+    _assert_nothing_leaked(store, "SENTINEL", KEY)
+    for row in _rows(store, "operations")[1:]:
+        assert {row["trigger_id"], row["profile_id"]} <= {"-i-", "default", None}
+
+
+def test_extra_patterns_keep_a_slug_shaped_sentinel_out(store):
+    # A slug is indistinguishable from a model or provider name by shape; the user's own
+    # PROMPT_EXTRA_PATTERNS catch it, and an invalid pattern drops the write instead.
+    store.extra_patterns = "sentinel"
+    for column in (*OPERATION_IDENTS, *ATTEMPT_IDENTS):
+        op = _op(**{column: "SENTINEL-form-pick"} if column in OPERATION_IDENTS else {})
+        attempt = _attempt(**{column: "SENTINEL-form-pick"} if column in ATTEMPT_IDENTS else {})
+        assert store.record(op, [attempt]) is (column not in REQUIRED)
+    _assert_nothing_leaked(store, "SENTINEL")
+    store.extra_patterns = "("
+    assert store.record(_op(), [_attempt()]) is False
+
+
+def test_real_identifiers_are_kept(store):
+    models = [
+        "google/gemini-3.5-flash-lite",
+        "meta-llama/Llama-3.3-70B-Instruct:free",
+        "hf.co/bartowski/Qwen2.5-7B-Instruct-GGUF:Q4_K_M",
+        "qwen3:8b",
+        "claude-sonnet-5",
+    ]
+    for model in models:
+        assert store.record(
+            _op(trigger_id="-iok-", profile_id="my-profile_2"),
+            [
+                _attempt(
+                    requested_model=model,
+                    returned_model=model,
+                    returned_provider="Google",
+                    generation_id="gen-1759-AbC123xyz",
+                    error_kind="timeout",
+                ),
+                _attempt(provider="anthropic", generation_id="msg_01ABCdefGHI"),
+            ],
+        )
+    rows = _rows(store, "attempts")
+    assert [r["requested_model"] for r in rows[::2]] == models
+    assert [r["returned_model"] for r in rows[::2]] == models
+    assert {r["generation_id"] for r in rows} == {"gen-1759-AbC123xyz", "msg_01ABCdefGHI"}
+    assert {r["error_kind"] for r in rows} == {"timeout", None}
+    assert {r["returned_provider"] for r in rows} == {"Google", None}
+    ops = _rows(store, "operations")
+    assert {(r["trigger_id"], r["profile_id"]) for r in ops} == {("-iok-", "my-profile_2")}
 
 
 # -- fail-open writer ----------------------------------------------------------------------
@@ -735,5 +821,94 @@ def test_database_errors_become_fixed_words(message, kind):
     assert history._error_kind(sqlite3.DatabaseError(message)) == kind
 
 
-def test_an_amount_that_is_not_a_number_drops_the_record(store):
-    assert store.record(_op(), [_attempt(charged_amount="lots")]) is False
+def test_reset_never_deletes_a_database_that_is_only_locked(store, monkeypatch):
+    monkeypatch.setattr(history, "_SERVICE_TIMEOUT", 0.05)
+    assert store.record(_op())
+    with contextlib.closing(sqlite3.connect(store.path, isolation_level=None)) as other:
+        other.execute("BEGIN IMMEDIATE")
+        with pytest.raises(HistoryError, match="locked") as caught:
+            store.reset()
+        assert not isinstance(caught.value, history.UnusableHistory)
+        other.execute("ROLLBACK")
+    assert store.path.exists()
+    assert store.health().operations == 1
+
+
+@pytest.mark.parametrize("text", ["[]", "5", '"x"', '{"lost_writes": true}', "\xff"])
+def test_a_malformed_sidecar_never_breaks_health_and_is_rewritten(store, text):
+    store.lost_path.parent.mkdir(parents=True)
+    store.lost_path.write_text(text, "latin-1")
+    assert store.health().tracking_incomplete is True
+    assert store._mark_lost() is True
+    assert _lost(store) == 1
+
+
+@pytest.mark.skipif(
+    os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+    reason="needs POSIX directory modes, which root ignores",
+)
+def test_health_shows_a_store_that_cannot_be_written(store):
+    assert store.record(_op())
+    assert store.health().writable is True
+    store.path.chmod(stat.S_IREAD)
+    store.path.parent.chmod(stat.S_IREAD | stat.S_IEXEC)
+    try:
+        assert store.record(_op()) is False  # and the sidecar cannot be written either
+        health = store.health()
+    finally:
+        store.path.parent.chmod(stat.S_IRWXU)
+        store.path.chmod(stat.S_IREAD | stat.S_IWRITE)
+    assert not store.lost_path.exists()
+    assert (health.writable, health.tracking_incomplete, health.lost_writes) == (False, True, 0)
+
+
+@pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0, reason="root ignores modes")
+def test_health_shows_a_read_only_database(store):
+    assert store.record(_op())
+    store.path.chmod(stat.S_IREAD)
+    try:
+        health = store.health()
+    finally:
+        store.path.chmod(stat.S_IREAD | stat.S_IWRITE)
+    assert (health.writable, health.tracking_incomplete) == (False, True)
+
+
+def test_retention_is_capped_and_prune_never_overflows(store, monkeypatch):
+    monkeypatch.setenv("PROMPT_HISTORY_RETENTION_DAYS", "36501")
+    with pytest.raises(ValueError, match="PROMPT_HISTORY_RETENTION_DAYS must be a whole number"):
+        Settings.load()
+    monkeypatch.setenv("PROMPT_HISTORY_RETENTION_DAYS", "36500")
+    assert Settings.load().history_retention_days == 36500
+    assert store.record(_op())
+    assert store.prune(older_than=timedelta(days=10**8)) == 0
+    store.retention_days = 10**8
+    assert store.prune() == 0
+
+
+def test_a_fresh_lock_is_never_broken_and_only_the_holder_removes_it(store):
+    store.path.parent.mkdir(parents=True)
+    lock = store.lost_path.with_name(f"{history.LOST_NAME}.lock")
+    lock.write_text("someone else", "ascii")
+    assert history._break_stale(lock) is False
+    assert lock.read_text("ascii") == "someone else"
+    lock.unlink()
+    with store._sidecar_lock(time.monotonic() + 1):
+        # Another process broke our lock as stale and took its own.
+        lock.write_text("someone else", "ascii")
+    assert lock.read_text("ascii") == "someone else"
+    lock.unlink()
+
+
+def test_a_write_blocked_everywhere_gives_up(store):
+    assert store.record(_op())
+    lock = store.lost_path.with_name(f"{history.LOST_NAME}.lock")
+    lock.write_text("held", "ascii")
+    with contextlib.closing(sqlite3.connect(store.path, isolation_level=None)) as other:
+        other.execute("BEGIN EXCLUSIVE")
+        started = time.monotonic()
+        assert store.record(_op()) is False
+        # Generous bound; _BUDGET (0.25 s) is checked by reading the code, not the clock.
+        assert time.monotonic() - started < 5
+        other.execute("ROLLBACK")
+    lock.unlink()
+    assert not store.lost_path.exists()
