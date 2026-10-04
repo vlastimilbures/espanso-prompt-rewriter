@@ -88,6 +88,9 @@ return through `_gate()`.
   `force_mode: clipboard`, so output is always pasted: Espanso's default backend would type output
   shorter than 100 characters key by key. `tests/test_yaml.py` enforces it.
 - `espanso/match/prompts-core.yml` holds static, non-LLM form-based snippets (no CLI call).
+- Every match (commented-out ones too) sets `left_word: true`, so a trigger fires only after a
+  word separator (space, punctuation, bracket, newline), never inside a word such as
+  `a[n-i-1]`; `tests/test_yaml.py` enforces it.
 - `-i-` (OpenRouter, `PROMPT_PROFILE`) is the live cloud trigger, and `-ip-` is
   the same rewrite with `--tier pro` (reasoning model, `PROMPT_PRO_PROFILE`). Only `-il-`,
   `-ilm-` and the commented `-ic-` pass `--profile general`; `tests/test_triggers.py` replays every trigger's real

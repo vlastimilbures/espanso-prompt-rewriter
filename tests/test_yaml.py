@@ -157,14 +157,27 @@ def test_triggers_use_dash_delimited_form():
             assert TRIGGER_SHAPE.match(trigger), f"{trigger!r} in {path.name} is not -name- shaped"
 
 
-# No enabled trigger is a strict prefix of another — Espanso expands on the shortest
-# matching trigger, so a prefix collision would make the longer trigger unreachable.
-def test_no_trigger_is_a_prefix_of_another():
+# No enabled trigger occurs inside another. With left_word only a prefix could shadow another
+# trigger; the stricter check also holds if a match ever loses left_word, when Espanso
+# matches a trigger wherever it appears in the typed text.
+def test_no_trigger_is_inside_another():
     triggers = [match["trigger"] for path in MATCH_FILES for match in _load(path)["matches"]]
     for a in triggers:
         for b in triggers:
             if a != b:
-                assert not b.startswith(a), f"{a!r} is a prefix of {b!r}, which is unreachable"
+                assert a not in b, f"{a!r} occurs inside {b!r}, which is unreachable"
+
+
+# Every trigger, including the commented-out ones, fires only at the start of a word. By
+# default Espanso expands a trigger anywhere, even inside a word, and code such as
+# `a[n-i-1]` or `only-if-cached` contains them. Espanso reads left_word first and falls back
+# to word, so `left_word: false` with `word: true` does not count.
+def test_triggers_fire_only_at_word_start():
+    matches = [m for path in MATCH_FILES for m in _load(path)["matches"]]
+    matches += [m for path in MATCH_FILES for m in _commented_matches(path)]
+    assert "-ic-" in {m["trigger"] for m in matches}
+    for match in matches:
+        assert match.get("left_word", match.get("word")) is True, match["trigger"]
 
 
 def _form_vars(path: Path):

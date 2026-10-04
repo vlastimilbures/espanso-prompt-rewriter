@@ -31,6 +31,11 @@ All notable changes to this project are documented here. The format follows
   `default-pro` is tuned for the pro model. Re-run the installer to redeploy the match files.
 - `--model default` keeps the configured model, as the `-if-` popup's `default` does for the other
   fields. It used to request a model literally named `default`.
+- Every trigger now sets `left_word: true`, so it expands only at the start of a word. Text such
+  as `a[n-i-1]`, `len(a)-n-i-1` or `only-if-cached` no longer fires `-i-` or `-if-` (and no
+  longer sends the clipboard). A trigger right after a space or bracket still expands, as in
+  `s[-i-1]`. Type a space before a trigger that follows a letter, digit or `-`. Re-run the
+  installer to redeploy the match files.
 
 ## 0.12.0
 

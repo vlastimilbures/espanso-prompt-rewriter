@@ -121,6 +121,7 @@ instead of typing short replies key by key.
 
 ```yaml
 - trigger: "-ireg-"
+  left_word: true  # fire only at the start of a word, never inside one such as n-i-1
   replace: "{{output}}"
   force_mode: clipboard
   vars:

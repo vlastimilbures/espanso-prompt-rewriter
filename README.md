@@ -199,6 +199,11 @@ The Profile column shows the defaults. `-i-` uses `PROMPT_PROFILE`; `-ip-` and `
 `PROMPT_PROFILE`, since `default-pro` is tuned for the pro model. The local triggers always use
 `general`.
 
+Triggers expand only at the start of a word: after a space, tab, newline, punctuation
+(`. , ? ! : ; ' "`) or a bracket, or as the first thing typed after clicking into a field. Text
+such as `a[n-i-1]` or `only-if-cached` does not fire them, but `s[-i-1]` or `x = -i-1` still
+does. If a trigger follows anything else (a letter, digit, `-`, `=`, `/` …), type a space first.
+
 The improve triggers (`-i-`, `-ip-`, `-if-`, `-il-`, `-ilm-`) read your current clipboard. Cloud
 triggers pass through the [data-protection gate](#privacy-and-data-protection) first. To enable `-ic-`,
 uncomment it in [`espanso/match/prompts-llm.yml`](espanso/match/prompts-llm.yml) and re-run the
@@ -448,6 +453,7 @@ uv run python scripts/bench_models.py --system-prompt-file candidate.md   # A/B 
 
 | Symptom | Fix |
 |---------|-----|
+| Trigger does not expand right after a letter, digit, `-` or `=`, or in a field you emptied with the keyboard | Triggers only fire at the start of a word, judged by what you last typed. Type a space first, or click into the field. |
 | Trigger does not expand | Run `espanso status`, check the match files are in `$(espanso path config)/match`, re-run the installer. |
 | `[prompt-workflow: OPENROUTER_API_KEY is not configured]` | The key is missing from `.env`, or `.env` is not in one of the [places the CLI looks](#configuration). |
 | `[prompt-workflow: OpenRouter returned HTTP 401]` | Wrong key. Replace it in `.env`. |

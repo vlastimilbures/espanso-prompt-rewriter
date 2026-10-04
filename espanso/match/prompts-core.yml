@@ -1,5 +1,6 @@
 matches:
   - trigger: "-prompt-"
+    left_word: true
     form: |
       Act as {{role}}.
 
@@ -29,6 +30,7 @@ matches:
         multiline: true
 
   - trigger: "-risk-"
+    left_word: true
     replace: |
       Analyze the following issue from an enterprise risk perspective: $|$
 
