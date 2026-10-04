@@ -131,7 +131,10 @@ instead of typing short replies key by key.
 ```
 
 `tests/test_yaml.py` checks the placeholder, quoting and `force_mode`, and that the profile and
-provider exist.
+provider exist. Add the trigger's expected provider, profile and tier to `EXPECTED` in
+`tests/test_triggers.py`, which replays every trigger's command line through the CLI. Pass
+`--profile` only when the trigger needs a fixed profile: it overrides `PROMPT_PROFILE` and the
+pro tier's profile.
 
 ### Add a setting
 

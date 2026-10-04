@@ -30,7 +30,7 @@ Espanso does not inherit shell PATH):
   `--timeout` are applied by `Settings.with_overrides()` (`--model` sets every provider's model),
   so `make_provider()` always sees the effective settings. `Settings.for_call()` chains the two
   and drops back to `PROMPT_PROFILE` when a pro call runs a model other than
-  `OPENROUTER_PRO_MODEL`. An explicit `--profile` beats both, so the cloud triggers pass none.
+  `OPENROUTER_PRO_MODEL`. An explicit `--profile` beats both, so the OpenRouter triggers pass none.
 - `factory.py` — `make_provider(name, cfg)` builds a provider from `Settings`; `PROVIDER_NAMES`
   lists the valid names. `cli.py` and `scripts/bench_models.py` both build through it. For
   OpenRouter it adds the endpoint pin (`OPENROUTER_PROVIDER`) and
@@ -89,8 +89,8 @@ return through `_gate()`.
   shorter than 100 characters key by key. `tests/test_yaml.py` enforces it.
 - `espanso/match/prompts-core.yml` holds static, non-LLM form-based snippets (no CLI call).
 - `-i-` (OpenRouter, `PROMPT_PROFILE`) is the live cloud trigger, and `-ip-` is
-  the same rewrite with `--tier pro` (reasoning model, `PROMPT_PRO_PROFILE`). Only the local
-  triggers pass `--profile general`; `tests/test_triggers.py` replays every trigger's real
+  the same rewrite with `--tier pro` (reasoning model, `PROMPT_PRO_PROFILE`). Only `-il-`,
+  `-ilm-` and the commented `-ic-` pass `--profile general`; `tests/test_triggers.py` replays every trigger's real
   command and checks its provider, profile and tier. `-if-` puts an Espanso form
   (choice dropdowns) in front of the pro tier and passes the picks as `--model model@endpoint
   --effort --max-tokens --timeout` via `{{form1.*}}`, which `Settings.with_overrides()` applies.

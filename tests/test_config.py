@@ -71,6 +71,7 @@ def test_for_call(monkeypatch):
     monkeypatch.setenv("PROMPT_PROFILE", "general")
     settings = Settings()
     assert settings.for_call("standard") == settings
+    assert settings.for_call("pro", model="default") == settings.for_tier("pro")
     assert settings.for_call("standard", model="x/m").profile == "general"
     assert settings.for_call("pro") == settings.for_tier("pro")
     assert settings.for_call("pro", model=f"{settings.openrouter_pro_model}@auto").profile == (

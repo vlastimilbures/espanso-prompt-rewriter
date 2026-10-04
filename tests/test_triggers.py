@@ -12,7 +12,7 @@ from typer.testing import CliRunner
 
 from prompt_workflow.cli import app
 from prompt_workflow.config import Settings
-from prompt_workflow.prompt_builder import system_prompt
+from prompt_workflow.prompt_builder import PROFILES, system_prompt
 
 MATCH_DIR = Path(__file__).parents[1] / "espanso" / "match"
 runner = CliRunner()
@@ -73,9 +73,9 @@ def _replay(stub, trigger: str, **picks: str) -> tuple[str, Settings, str]:
 
 
 def _profile(prompt: str) -> str:
-    return next(
-        name for name in ("default", "default-pro", "general") if prompt == system_prompt(name)
-    )
+    names = [name for name in PROFILES if prompt == system_prompt(name)]
+    assert len(names) == 1, "the system prompt matches no single profile"
+    return names[0]
 
 
 # Every trigger that runs improve has an expected row, so a new one cannot skip this test.
@@ -165,5 +165,5 @@ def test_profile_settings_reach_triggers(monkeypatch, stub_provider, env, trigge
 # An explicit --profile beats the tier's profile, so no pro-tier trigger may pass one.
 def test_pro_triggers_pass_no_profile():
     for trigger, (cmd, _) in COMMANDS.items():
-        if "--tier pro" in cmd:
+        if re.search(r"--tier[ =]pro\b", cmd):
             assert "--profile" not in cmd, trigger

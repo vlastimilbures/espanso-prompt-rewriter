@@ -290,7 +290,7 @@ class Settings:
         the CLI prints inline."""
         if effort not in (None, KEEP, *EFFORTS):
             raise ValueError(f"--effort must be one of {', '.join((KEEP, *EFFORTS))}")
-        slug, endpoint = split_model_spec(model)
+        slug, endpoint = split_model_spec(None if model == KEEP else model)
         tokens = _override(max_tokens, "--max-tokens", _positive_int)
         seconds = _override(timeout, "--timeout", _positive_float)
         changes: dict[str, Any] = {}

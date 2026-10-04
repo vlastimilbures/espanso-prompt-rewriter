@@ -231,7 +231,7 @@ prompt-workflow persona          # prints PROMPT_PERSONA (used by -p-)
 | Option       | Default                     | Meaning                                         |
 |--------------|-----------------------------|-------------------------------------------------|
 | `--provider` | `PROMPT_PROVIDER`           | `ollama`, `lmstudio`, `openrouter`, `anthropic` |
-| `--profile`  | `PROMPT_PROFILE` (`PROMPT_PRO_PROFILE` with `--tier pro`) | `default`, `default-pro`, `general`, or any file in `prompts/` |
+| `--profile`  | `PROMPT_PROFILE` (`PROMPT_PRO_PROFILE` with `--tier pro` on `OPENROUTER_PRO_MODEL`) | `default`, `default-pro`, `general`, or any file in `prompts/` |
 | `--model`    | provider's configured model | Override the model of whichever provider runs; `model@endpoint` also pins the OpenRouter endpoint (`@auto` unpins) |
 | `--tier`     | `standard`                  | `pro` uses the `OPENROUTER_PRO_*` settings      |
 | `--effort`   | tier's setting              | `none`, `minimal`, `low`, `medium`, `high`      |
@@ -277,7 +277,7 @@ short and does not look like a key.
 | Variable                     | Default                        | Purpose                                                   |
 |------------------------------|--------------------------------|-----------------------------------------------------------|
 | `PROMPT_PROVIDER`            | `openrouter`                   | Provider when `--provider` is not given                   |
-| `PROMPT_PROFILE`             | `default`                      | Profile when `--profile` is not given (`-i-`)             |
+| `PROMPT_PROFILE`             | `default`                      | Profile when `--profile` is not given (`-i-`, and `-if-` on a non-pro model) |
 | `PROMPT_PERSONA`             | *(empty)*                      | Your first-person role, see [persona](#profiles-and-persona) |
 | `PROMPT_TIMEOUT_SECONDS`     | `30`                           | Request timeout                                           |
 | `PROMPT_TEMPERATURE`         | `0.2`                          | Kept low so fixed template wording survives               |
@@ -327,7 +327,8 @@ A profile is a system prompt in [`src/prompt_workflow/prompts/`](src/prompt_work
   `<example>`…), which keeps its own scaffolding visibly apart from the uppercase sections the
   model must write.
 - **`default-pro`** is `default` without one clause of the review rule, which the pro model
-  over-applies. The pro tier (`-ip-`, `-if-`) uses it.
+  over-applies. The pro tier (`-ip-`, `-if-`) uses it on `OPENROUTER_PRO_MODEL`. If you change
+  that model, check whether `PROMPT_PRO_PROFILE` still fits it.
 - **`general`** is a lighter "make this prompt precise" rewrite, used by the local triggers.
 
 Drop another `*.md` file into that folder and it becomes a profile. See
