@@ -72,7 +72,11 @@ class AttemptUsage:
 
 class UsageObserver(Protocol):
     """Receives one AttemptUsage per HTTP attempt. An exception it raises is swallowed: it
-    never changes the output and never causes a retry."""
+    never changes the output and never causes a retry.
+
+    It runs synchronously inside the call, while Espanso waits, so it must be quick and never
+    do blocking I/O: collect the records and write them after generate() returns. Its time is
+    not charged to the call's time limit, so a slow observer cannot cost the retry."""
 
     def __call__(self, usage: AttemptUsage, /) -> None: ...
 
@@ -104,26 +108,28 @@ class Meter:
         latency: float,
     ) -> None:
         """Build the attempt's record and pass it to the observer; nothing raised here,
-        by a parser or by the observer, reaches the caller."""
+        by a parser or by the observer, reaches the caller. A body the parser cannot read
+        still leaves the transport facts on record, with no tokens and an unknown cost."""
+        base = AttemptUsage(
+            provider=self.provider,
+            requested_model=self.model,
+            endpoint="loopback" if loopback else "remote",
+            attempt=attempt,
+            status=status,
+            error_kind=error_kind,
+            latency_ms=round(latency * 1000, 1),
+            cost_state="not_applicable" if self.local else "unknown",
+        )
+        usage = base
+        if isinstance(body, Mapping):
+            try:
+                usage = self.parse(body, base)
+            except Exception:
+                usage = base
+        if usage.charged_amount is not None:
+            usage = dataclasses.replace(usage, cost_state="reported")
         with contextlib.suppress(Exception):
-            usage = AttemptUsage(
-                provider=self.provider,
-                requested_model=self.model,
-                endpoint="loopback" if loopback else "remote",
-                attempt=attempt,
-                status=status,
-                error_kind=error_kind,
-                latency_ms=round(latency * 1000, 1),
-            )
-            if isinstance(body, Mapping):
-                usage = self.parse(body, usage)
-            if usage.charged_amount is not None:
-                state: CostState = "reported"
-            elif self.local:
-                state = "not_applicable"
-            else:
-                state = "unknown"
-            self.observer(dataclasses.replace(usage, cost_state=state))
+            self.observer(usage)
 
 
 def _count(value: object) -> int | None:
@@ -144,7 +150,11 @@ def _money(value: object) -> Decimal | None:
     """A finite, non-negative amount as a Decimal (exact for the JSON text), or None."""
     if isinstance(value, bool) or not isinstance(value, int | float):
         return None
-    if not math.isfinite(value) or value < 0:
+    # A huge JSON integer (10**400) overflows the float conversion inside isfinite.
+    try:
+        if not math.isfinite(value) or value < 0:
+            return None
+    except OverflowError:
         return None
     from decimal import Decimal
 

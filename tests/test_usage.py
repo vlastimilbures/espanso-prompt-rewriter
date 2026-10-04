@@ -1,5 +1,6 @@
 import dataclasses
 from decimal import Decimal
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -7,6 +8,7 @@ import pytest
 from prompt_workflow.config import Settings
 from prompt_workflow.factory import make_provider
 from prompt_workflow.prompt_builder import PERSONA_TOKEN, render
+from prompt_workflow.providers import base
 from prompt_workflow.providers.anthropic import AnthropicProvider
 from prompt_workflow.providers.base import ProviderError
 from prompt_workflow.providers.ollama import OllamaProvider
@@ -362,15 +364,46 @@ def test_failing_observer_is_swallowed(fake_http):
     assert len(fake_http.requests) == 3
 
 
-# A parser that fails on an unexpected body is swallowed the same way.
-def test_failing_parser_is_swallowed():
+# A parser that fails on an unexpected body still leaves the transport facts on record,
+# with no tokens and an unknown cost.
+def test_failing_parser_keeps_the_transport_record():
     def parse(body, usage):
         raise ValueError("bad body")
 
     records: list[AttemptUsage] = []
     meter = Meter(records.append, "p", "m", parse)
-    meter.record(loopback=False, attempt=1, status=200, error_kind=None, body={}, latency=0.1)
-    assert records == []
+    meter.record(loopback=False, attempt=2, status=503, error_kind="non_2xx", body={}, latency=0.1)
+    assert records == [AttemptUsage("p", "m", "remote", 2, 503, "non_2xx", 100.0)]
+
+
+# A cost too large for a float is invalid, not a crash: the attempt keeps its tokens.
+def test_huge_cost_is_dropped(fake_http, monkeypatch):
+    records: list[AttemptUsage] = []
+    fake_http.reply(
+        _openai_body(usage={"prompt_tokens": 5, "completion_tokens": 7, "cost": 10**400})
+    )
+    assert _openrouter(monkeypatch, records).generate("draft", "sys") == "ok"
+    (record,) = records
+    assert (record.input_uncached, record.output) == (5, 7)
+    assert (record.charged_amount, record.cost_state) == (None, "unknown")
+
+
+# The observer's time is not charged to the time limit: a slow one (seen through a fake
+# clock) does not cost the call its retry.
+def test_slow_observer_keeps_the_retry(fake_http, monkeypatch):
+    clock = [1000.0]
+    monkeypatch.setattr(base, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    records: list[AttemptUsage] = []
+
+    def slow(usage):
+        records.append(usage)
+        clock[0] += 100  # far longer than the whole 30 s time limit
+
+    fake_http.queue({"status_code": 503}, {"json_data": _OLLAMA_BODY})
+    assert OllamaProvider("http://x", "m", timeout=30, observer=slow).generate("d", "s") == "ok"
+    assert len(fake_http.requests) == 2
+    assert [r.attempt for r in records] == [1, 2]
+    assert fake_http.client_kwargs[1]["timeout"].read == 29
 
 
 # With no observer, the request and the result are the same as with one.
