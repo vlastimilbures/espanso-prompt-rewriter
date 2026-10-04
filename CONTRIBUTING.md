@@ -77,6 +77,7 @@ espanso-prompt-rewriter/
 │   ├── config.py                 Settings from the environment and .env
 │   ├── factory.py                make_provider(): builds providers, decides which are gated
 │   ├── gate.py                   GatedProvider: scans every draft that can leave the machine
+│   ├── clipboard_guard.py        refuses password-manager (concealed) clipboard items
 │   ├── redaction.py              the gate's sensitive-content patterns
 │   ├── prompt_builder.py         loads profiles, fills in the persona rule
 │   ├── prompts/

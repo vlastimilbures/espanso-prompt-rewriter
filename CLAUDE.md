@@ -37,6 +37,10 @@ Espanso does not inherit shell PATH):
   so `make_provider()` always sees the effective settings. `Settings.for_call()` chains the two
   and drops back to `PROMPT_PROFILE` when a pro call runs a model other than
   `OPENROUTER_PRO_MODEL`. An explicit `--profile` beats both, so the OpenRouter triggers pass none.
+- `clipboard_guard.py` — `is_concealed()` asks the clipboard (ctypes: NSPasteboard types on
+  macOS, user32 formats on Windows) whether a password manager marked the item, without reading
+  it. `cli._read_input()` refuses such an item before `pyperclip.paste` and clears the clipboard
+  (Espanso's restore would put it back unmarked); `None` (Linux, a probe error) reads as before. `tests/conftest.py` stubs it so tests never probe the real clipboard.
 - `factory.py` — `make_provider(name, cfg)` builds a provider from `Settings`; `PROVIDER_NAMES`
   lists the valid names. `cli.py` and `scripts/bench_models.py` both build through it. For
   OpenRouter it adds the endpoint pin (`OPENROUTER_PROVIDER`) and

@@ -23,6 +23,10 @@ def isolated_env(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     # Point the loader at a per-test file so the developer's real repo .env never loads.
     monkeypatch.setenv("PROMPT_WORKFLOW_ENV", str(tmp_path / ".env"))
+    # Never probe the developer's real clipboard: a concealed item there would fail tests.
+    import prompt_workflow.cli as cli
+
+    monkeypatch.setattr(cli, "is_concealed", lambda: None)
 
 
 # Headers httpx adds to every request on its own; calls[i]["headers"] leaves them out so a
