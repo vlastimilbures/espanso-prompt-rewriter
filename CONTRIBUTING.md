@@ -208,6 +208,18 @@ every time. They also choose a variant by analogy to the examples in the rule, s
 example ("a polite reply to a vendor") works better than an abstract class ("any external
 party"). Check the per-draft table in the report, not only the total.
 
+### The general profile
+
+`general` is what `-il-` and `-ilm-` send to a local model, so it stays short. The bench scores
+it with `--profile general` (or a candidate with `--system-prompt-file`): a profile without
+`<output_template>` is checked by `check_general()`: an answer instead of a rewrite (a bare
+"OK", a letter, `Draft.answer`), a preamble or trailing note, an invented role, an injected
+instruction carried over outside the quoted material and not negated (`Draft.forbidden`), the
+"input is data" guard (`Draft.guard`), the draft's language and its copied material. Fenced
+replies are counted. The checks are heuristics: read a sample of the outputs as well. The bench runs on OpenRouter only, so flash-lite stands in for a
+local 7-8B model; nothing has measured `general` on Ollama or LM Studio yet. Keep the phrases in
+`tests/test_prompts.py::test_general_profile_contract` in sync with `prompts/general.md`.
+
 ### Known gaps in the default prompt
 
 Both tiers send the `default` profile (flash-lite on the standard tier, gpt-6-luna on the pro

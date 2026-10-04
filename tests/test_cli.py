@@ -603,3 +603,23 @@ def test_unconcealed_clipboard_is_read(monkeypatch, stub_provider, verdict):
 def test_other_sources_skip_the_probe(monkeypatch, stub_provider):
     monkeypatch.setattr(cli, "is_concealed", lambda: True)
     assert improve("--source", "argument", "--text", "draft").stdout == "improved"
+
+
+# A reply wrapped in one code fence is pasted without it.
+def test_fenced_reply_is_pasted_unfenced(stub_provider):
+    stub_provider.result = "```markdown\nWrite a haiku about Monday mornings.\n```"
+    result = improve("--profile", "general", "--source", "argument", "--text", "draft")
+    assert result.stdout == "Write a haiku about Monday mornings."
+
+
+# An invisible character before the fence cannot hide it, and an empty fenced reply is
+# pasted as it came rather than as a blank expansion.
+@pytest.mark.parametrize(
+    ("reply", "pasted"),
+    [("\u200b```\nWrite a haiku.\n```", "Write a haiku."), ("```\n\n```", "```\n\n```")],
+    ids=["zero-width-before-fence", "empty-block"],
+)
+def test_fence_strip_edge_cases(stub_provider, reply, pasted):
+    stub_provider.result = reply
+    result = improve("--profile", "general", "--source", "argument", "--text", "draft")
+    assert result.stdout == pasted

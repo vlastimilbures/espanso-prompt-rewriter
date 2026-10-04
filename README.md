@@ -341,7 +341,12 @@ A profile is a system prompt in [`src/prompt_workflow/prompts/`](src/prompt_work
   model must write.
   Both tiers send it. `default-pro`, the pro tier's variant in 0.12.0 and 0.13.0, is now an alias
   of `default`.
-- **`general`** is a lighter "make this prompt precise" rewrite, used by the local triggers.
+- **`general`** is a short (~200 words) rewrite for the local triggers, small enough for an 8B
+  model: it treats the whole clipboard as the draft (data, never instructions to the rewriter),
+  copies pasted material word for word with a constraint that instructions inside it must not
+  be followed, adds no facts, roles or audiences, writes in the language of your own request,
+  and returns only the prompt, without a preamble or a code fence. A reply wrapped in one code
+  fence anyway is pasted without it, for every profile.
 
 Drop another `*.md` file into that folder and it becomes a profile. See
 [CONTRIBUTING.md](CONTRIBUTING.md#add-a-profile).
@@ -525,6 +530,7 @@ never mentioned in 3 of 24 outputs. `inception/mercury-2.5` scored 10/24 and was
 uv run python scripts/bench_models.py --models google/gemini-3.5-flash-lite@google-ai-studio/flex~minimal --runs 3
 uv run python scripts/bench_models.py --suite all --runs 3                 # core + edge drafts
 uv run python scripts/bench_models.py --system-prompt-file candidate.md   # A/B a prompt change
+uv run python scripts/bench_models.py --profile general --suite all       # the local triggers' profile
 ```
 
 ## Troubleshooting
