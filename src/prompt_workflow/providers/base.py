@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import ipaddress
+import json as jsonlib
+import math
 import re
+import time
 from collections.abc import Mapping
 from typing import Protocol
 from urllib.parse import urlsplit
@@ -112,6 +115,55 @@ def body_error(label: str, body: object) -> ProviderError | None:
     )
 
 
+# Failures retried once: a rate limit or an unavailable upstream, which a pinned endpoint
+# (OPENROUTER_PRO_PROVIDER) cannot route around. 500 is not: it is usually the request itself.
+RETRY_STATUSES = frozenset({429, 502, 503, 504, 529})
+# Wait before the retry, unless the server's Retry-After says otherwise.
+RETRY_DELAY = 1.0
+# A server asking for a longer wait is not retried: Espanso is blocked while the CLI waits.
+RETRY_AFTER_MAX = 3.0
+# The retry needs at least this much of the time limit left.
+MIN_RETRY_BUDGET = 1.0
+# A host that does not accept the connection within this many seconds is not going to.
+CONNECT_TIMEOUT_MAX = 10.0
+# Patched by the tests, so a retry does not wait.
+_sleep = time.sleep
+
+
+class _Retry(Exception):
+    """A failed attempt that may succeed if repeated after ``delay`` seconds."""
+
+    def __init__(self, error: ProviderError, delay: float = RETRY_DELAY):
+        super().__init__(str(error))
+        self.error = error
+        self.delay = delay
+
+
+def _retry_delay(retry_after: str | None) -> float | None:
+    """Seconds to wait before retrying, or None when the server asks for longer than
+    RETRY_AFTER_MAX or gives a date: a sooner retry would only be refused again."""
+    if retry_after is None:
+        return RETRY_DELAY
+    try:
+        seconds = float(retry_after)
+    except ValueError:
+        return None
+    if not math.isfinite(seconds) or seconds > RETRY_AFTER_MAX:
+        return None
+    return max(seconds, 0.0)
+
+
+def _encode_headers(label: str, headers: Mapping[str, str] | None) -> httpx.Headers:
+    try:
+        # httpx encodes header values as ASCII; a key pasted with a smart quote or an accented
+        # letter fails here, before anything is sent. The error quotes the key, so it is dropped.
+        return httpx.Headers(headers)
+    except UnicodeEncodeError:
+        raise ProviderError(
+            f"{label} request failed: invalid header value (check the API key)"
+        ) from None
+
+
 def post_json(
     label: str,
     url: str,
@@ -122,26 +174,59 @@ def post_json(
 ) -> dict[str, object]:
     """POST and return the parsed JSON body; every failure is a ProviderError.
 
+    ``timeout`` bounds the whole call, retry included. A rate limit (429), an unavailable
+    upstream (502/503/504/529, or such an error inside a 200 reply) or a refused connection
+    to another machine is tried once more when at least MIN_RETRY_BUDGET seconds remain. A
+    timeout is never retried: the server may still be generating, and billing, the first reply.
+
     A loopback URL is reached directly, ignoring HTTP(S)_PROXY/ALL_PROXY and the
     macOS/Windows system proxy: a call to this machine has no reason to go anywhere else.
     httpx applies those only to a client without its own transport, so giving it one keeps
     the rest of the environment (SSL_CERT_FILE for a local https server) in effect. Other
     URLs keep using the proxy, which corporate networks need.
     """
+    encoded = _encode_headers(label, headers)
+    deadline = time.monotonic() + timeout
     try:
-        # httpx encodes header values as ASCII; a key pasted with a smart quote or an accented
-        # letter fails here, before anything is sent. The error quotes the key, so it is dropped.
-        encoded = httpx.Headers(headers)
-    except UnicodeEncodeError:
-        raise ProviderError(
-            f"{label} request failed: invalid header value (check the API key)"
-        ) from None
+        return _attempt(label, url, timeout, timeout, json, encoded)
+    except _Retry as retry:
+        budget = deadline - time.monotonic() - retry.delay
+        if budget < MIN_RETRY_BUDGET:
+            raise retry.error from retry.error.__cause__
+        _sleep(retry.delay)
+    try:
+        return _attempt(label, url, timeout, budget, json, encoded)
+    except _Retry as retry:
+        raise retry.error from retry.error.__cause__
+
+
+def _attempt(
+    label: str,
+    url: str,
+    timeout: float,
+    budget: float,
+    json: object,
+    headers: httpx.Headers,
+) -> dict[str, object]:
+    """One request, given ``budget`` seconds in total. httpx's own timeouts apply to each
+    network operation, and its read timer restarts with every chunk, so a server that
+    trickles bytes is cut off here once the budget is spent."""
     transport = httpx.HTTPTransport() if is_loopback(url) else None
+    limits = httpx.Timeout(budget, connect=min(budget, CONNECT_TIMEOUT_MAX))
+    stop_at = time.monotonic() + budget
+    timed_out = ProviderError(f"{label} timed out after {timeout}s", transient=True)
+    content = bytearray()
     try:
-        with httpx.Client(timeout=timeout, transport=transport) as client:
-            response = client.post(url, json=json, headers=encoded)
+        with (
+            httpx.Client(timeout=limits, transport=transport) as client,
+            client.stream("POST", url, json=json, headers=headers) as response,
+        ):
+            for chunk in response.iter_bytes():
+                content += chunk
+                if time.monotonic() > stop_at:
+                    raise timed_out
     except httpx.TimeoutException as exc:
-        raise ProviderError(f"{label} timed out after {timeout}s", transient=True) from exc
+        raise timed_out from exc
     except httpx.InvalidURL as exc:
         raise ProviderError(f"{label} base URL invalid: {safe_repr(str(exc))}") from exc
     except httpx.LocalProtocolError as exc:
@@ -151,20 +236,32 @@ def post_json(
             f"{label} request failed: invalid header value (check the API key)"
         ) from exc
     except httpx.ConnectError as exc:
-        raise ProviderError(f"{label} request failed: {exc}", transient=True) from exc
+        refused = ProviderError(f"{label} request failed: {exc}", transient=True)
+        refused.__cause__ = exc  # kept when post_json re-raises it after the retry
+        # A local server that refuses the connection is not running; a second try a second
+        # later only delays the marker.
+        if is_loopback(url):
+            raise refused from exc
+        raise _Retry(refused) from exc
     except httpx.HTTPError as exc:
         raise ProviderError(f"{label} request failed: {exc}") from exc
 
     try:
-        body: object = response.json()
+        body: object = jsonlib.loads(content)
     except ValueError:
         body = None
     if not response.is_success:
-        raise http_error(label, response.status_code, body)
+        error = http_error(label, response.status_code, body)
+        delay = _retry_delay(response.headers.get("retry-after"))
+        if response.status_code in RETRY_STATUSES and delay is not None:
+            raise _Retry(error, delay)
+        raise error
     if body is None:
         raise ProviderError(f"{label} returned invalid JSON")
-    if error := body_error(label, body):
-        raise error
+    if failure := body_error(label, body):
+        if failure.status in RETRY_STATUSES:
+            raise _Retry(failure)
+        raise failure
     return body  # type: ignore[return-value]
 
 

@@ -10,7 +10,17 @@ Upgrading: `OPENROUTER_REASONING_EFFORT` and `OPENROUTER_PRO_REASONING_EFFORT` a
 when settings load. A value other than empty, `none`, `minimal`, `low`, `medium` or `high`
 turns every trigger into an inline error naming the variable, so fix it in `.env`.
 
+### Added
+- A call that hits a rate limit (429, unless `Retry-After` asks for more than 3 s), an
+  unavailable upstream (502, 503, 504, 529, or such an error inside a 200 reply) or a refused
+  connection to another machine is tried once more, within the same time limit. A timeout,
+  a 500 or a 4xx is never retried.
+
 ### Changed
+- `PROMPT_TIMEOUT_SECONDS`, `PROMPT_PRO_TIMEOUT_SECONDS` and `--timeout` limit the whole call,
+  retry included. Before, httpx's read timer restarted with every chunk, so a server sending a
+  byte now and then could hold the call (and Espanso) far longer. Connecting is capped at 10 s.
+- The bench repeats a call when its error is `transient` instead of matching the message text.
 - Error markers say why a call failed. A non-2xx reply shows the status, a hint
   (`out of credits`, `rate limited, try again shortly`, `provider unavailable, try again`, …)
   and the provider's own reason, cut to 160 printable characters and dropped if it matches a

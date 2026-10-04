@@ -53,7 +53,7 @@ from prompt_workflow.prompt_builder import (
     render,
     repair_template_tags,
 )
-from prompt_workflow.providers.base import TRUNCATED_NOTE
+from prompt_workflow.providers.base import TRUNCATED_NOTE, ProviderError
 
 MODELS: list[str] = [
     # Standard tier (-i-). The first is the shipped default.
@@ -668,8 +668,6 @@ DEFAULT_OUTPUTS = "structured .md, well formatted with clear headings/subheading
 LANGUAGE_LETTERS = {"Czech": "ěščřžůťďňĚŠČŘŽŮŤĎŇ", "German": "äöüßÄÖÜ", "Spanish": "ñáéíóú¿¡"}
 PLACEHOLDER = re.compile(r"\[(?:domain|XXX|xxx)\]")
 
-TRANSIENT = ("timed out", "HTTP 429", "HTTP 500", "HTTP 502", "HTTP 503", "HTTP 504")
-
 
 def bench_persona(mode: str, cfg: Settings) -> str:
     """The persona a run renders into the profile; only `env` reads the runner's settings."""
@@ -940,7 +938,10 @@ def run_one(
             break
         except Exception as exc:
             message = str(exc)
-            if attempt == 1 and any(t in message for t in TRANSIENT):
+            # post_json already retried a rate limit or an unavailable upstream once; this
+            # retry also covers what it never repeats for an interactive call (a timeout, a
+            # 500), since a batch run can afford the wait.
+            if attempt == 1 and isinstance(exc, ProviderError) and exc.transient:
                 retried = True
                 time.sleep(3)
                 continue

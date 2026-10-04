@@ -4,6 +4,7 @@ import re
 import sys
 from pathlib import Path
 
+import httpx
 import pytest
 from bench_module import GOOD, bench
 
@@ -305,7 +306,9 @@ def test_call_request_shape(fake_http, monkeypatch):
     assert text == "ok"
     assert body["usage"] == {"cost": 0.01}
     call = fake_http.calls[0]
-    assert fake_http.client_kwargs == [{"timeout": 120, "transport": None}]
+    assert fake_http.client_kwargs == [
+        {"timeout": httpx.Timeout(120, connect=10), "transport": None}
+    ]
     assert call["headers"]["X-Title"] == "espanso-prompt-rewriter-bench"
     assert call["json"]["model"] == "a/b"
     assert call["json"]["usage"] == {"include": True}
@@ -503,3 +506,33 @@ def test_cap_thread_size():
     draft = bench.DRAFTS["cap-thread"]
     assert 50 <= len(draft.text.split("---\n", 1)[1].splitlines()) <= 60
     assert draft.text.index(draft.material[-1]) > 0.8 * len(draft.text)
+
+
+def _run_one_with(fake_http, monkeypatch, outdir, *replies):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k")
+    monkeypatch.setattr(bench.time, "sleep", lambda seconds: None)
+    fake_http.queue(*replies)
+    return bench.run_one(Settings(), "a/b@c/d", "board", 1, outdir, bench.Budget(1.0))
+
+
+# The bench repeats a call whose error is transient (a 500 here, which post_json does not
+# retry for an interactive call), keyed on the error, not on its message text.
+def test_run_one_retries_a_transient_error(fake_http, monkeypatch, tmp_path):
+    result = _run_one_with(
+        fake_http,
+        monkeypatch,
+        tmp_path,
+        {"status_code": 500},
+        {"json_data": {"choices": [{"message": {"content": GOOD}}], "usage": {"cost": 0.0}}},
+    )
+    assert result.retried is True
+    assert result.error is None
+    assert len(fake_http.requests) == 2
+
+
+# A permanent error is reported at once.
+def test_run_one_does_not_retry_a_permanent_error(fake_http, monkeypatch, tmp_path):
+    result = _run_one_with(fake_http, monkeypatch, tmp_path, {"status_code": 401})
+    assert result.retried is False
+    assert result.error.startswith("OpenRouter returned HTTP 401")
+    assert len(fake_http.requests) == 1
