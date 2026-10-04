@@ -9,7 +9,7 @@ from .providers.anthropic import AnthropicProvider
 from .providers.base import Provider, ProviderError, is_loopback
 from .providers.ollama import OllamaProvider
 from .providers.openai_compatible import OpenAICompatibleProvider
-from .redaction import compile_extra
+from .redaction import compile_extra, safe_repr
 
 PROVIDER_NAMES = ("ollama", "lmstudio", "openrouter", "anthropic")
 # Sent as OpenRouter's X-Title so calls are attributed to this app in its dashboard.
@@ -132,4 +132,4 @@ def make_provider(
             ),
             cfg,
         )
-    raise ProviderError(f"Unknown provider '{name}'. Use {', '.join(PROVIDER_NAMES)}.")
+    raise ProviderError(f"Unknown provider {safe_repr(name)}. Use {', '.join(PROVIDER_NAMES)}.")

@@ -8,7 +8,7 @@ from prompt_workflow.prompt_builder import PROFILES, system_prompt
 
 # Unknown profile names raise ValueError instead of KeyError.
 def test_unknown_profile():
-    with pytest.raises(ValueError, match="Unknown profile: missing"):
+    with pytest.raises(ValueError, match="Unknown profile: 'missing'"):
         system_prompt("missing")
 
 

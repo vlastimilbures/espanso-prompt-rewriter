@@ -266,7 +266,8 @@ machine (`localhost`, `127.0.0.0/8`, `::1`) is always reached directly, never th
 Values may be quoted, and an unquoted
 value may be followed by a ` # comment`. Quote a value that itself contains ` #`. Booleans are
 `true` or `false`, timeouts and token caps are numbers above 0 (temperature may be 0); anything
-else is reported inline rather than silently ignored.
+else is reported inline rather than silently ignored. An error repeats the bad value only when it is
+short and does not look like a key.
 
 | Variable                     | Default                        | Purpose                                                   |
 |------------------------------|--------------------------------|-----------------------------------------------------------|
@@ -449,7 +450,9 @@ uv run python scripts/bench_models.py --system-prompt-file candidate.md   # A/B 
 | A `base.yml.bak-…` file appeared in Espanso's `match` folder | Versions before 0.9 deployed `-p-` as `match/base.yml`, the file Espanso creates for your own snippets. The installer backed up that copy and replaced it with `prompts-template.yml`. Older installers overwrote `base.yml` without a backup, so snippets you kept there before first installing this project can only come from your own backups. |
 | Expansion is slow | Use a faster model or endpoint (see [benchmark](#model-benchmark)); Espanso waits for the CLI. |
 | `[prompt-workflow: … must be an https:// URL]` | A cloud `*_BASE_URL` uses `http`. Switch it to `https`. |
-| `[prompt-workflow: OLLAMA_THINK must be true or false, got …]` (or `must be a number above 0`) | Fix that value in `.env`. |
+| `[prompt-workflow: OLLAMA_THINK must be true or false, got …]` (or `must be a number above 0`) | Fix that value in `.env`. A long value, or one that looks like a key, is shown as `<redacted, N chars>`. |
+| `[prompt-workflow: … in .env runs into the next line; add the missing newline]` | Two lines of `.env` were saved as one. Split them. |
+| `[prompt-workflow: … request failed: invalid header value (check the API key)]` | The API key in `.env` contains a line break or another character a key never has. Paste it again. |
 | `-il-` or `-ilm-` says `Blocked cloud call` | `OLLAMA_BASE_URL` / `LMSTUDIO_BASE_URL` points at another machine, or the Ollama model is a cloud model, so the gate applies. Use a model on `localhost` for sensitive drafts. |
 | Reasoning text appears in the output | Set `OLLAMA_THINK=false`. `<think>` blocks are stripped; extend `strip_thinking` in `providers/base.py` for other tag formats. |
 

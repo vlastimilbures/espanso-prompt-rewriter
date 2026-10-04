@@ -8,6 +8,8 @@ from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 from typing import Any
 
+from .redaction import safe_repr
+
 
 def _parse_value(raw: str) -> str:
     """A .env value: the text inside a leading quote pair, else the text before an inline
@@ -74,10 +76,25 @@ def _load_dotenv() -> None:
     for candidate in _env_file_candidates():
         pairs = read_env_file(candidate)
         if pairs is not None:
+            _reject_merged_lines(pairs)
             for key, value in pairs.items():
                 if key in known:
                     os.environ.setdefault(key, value)
             return
+
+
+def _reject_merged_lines(pairs: dict[str, str]) -> None:
+    """Refuse a value that holds another assignment (a setting name in any case, or any
+    `UPPER_CASE` name, then `=`): a .env saved without the newline between two lines, whose
+    rest would otherwise become part of this setting's value. PROMPT_EXTRA_PATTERNS is
+    exempt, since a user regex may well match such text."""
+    names = env_names()
+    known = "|".join(re.escape(name) for name in names)
+    assignment = re.compile(rf"(?:(?i:{known})|[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)\s*=")
+    for key, value in pairs.items():
+        if key != "PROMPT_EXTRA_PATTERNS" and assignment.search(value):
+            shown = key if key in names else safe_repr(key)
+            raise ValueError(f"{shown} in .env runs into the next line; add the missing newline")
 
 
 def _env(
@@ -91,7 +108,7 @@ def _env(
         try:
             return parse(raw)
         except ValueError as exc:
-            raise ValueError(f"{name} must be {exc}, got {raw!r}") from None
+            raise ValueError(f"{name} must be {exc}, got {safe_repr(raw)}") from None
 
     return field(default_factory=read, repr=not secret, metadata={"env": name})
 
@@ -151,7 +168,7 @@ def split_model_spec(spec: str | None) -> tuple[str | None, str | None]:
         return spec, None
     model, _, endpoint = spec.partition("@")
     if not model or not endpoint:
-        raise ValueError(f"--model must be slug or slug@endpoint, got {spec!r}")
+        raise ValueError(f"--model must be slug or slug@endpoint, got {safe_repr(spec)}")
     return model, "" if endpoint == AUTO_ENDPOINT else endpoint
 
 
@@ -162,7 +179,7 @@ def _override[T](raw: str | None, option: str, parse: Callable[[str], T]) -> T |
     try:
         return parse(raw)
     except ValueError as exc:
-        raise ValueError(f"{option} must be {exc} or {KEEP}, got {raw!r}") from None
+        raise ValueError(f"{option} must be {exc} or {KEEP}, got {safe_repr(raw)}") from None
 
 
 @dataclass(frozen=True)
@@ -182,7 +199,8 @@ class Settings:
     ollama_think: bool = _env("OLLAMA_THINK", "false", _bool)
     openrouter_base_url: str = _env("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
     openrouter_model: str = _env("OPENROUTER_MODEL", "google/gemini-3.5-flash-lite")
-    openrouter_api_key: str = _env("OPENROUTER_API_KEY", "", secret=True)
+    # Stripped: a space pasted along with a key is never part of it.
+    openrouter_api_key: str = _env("OPENROUTER_API_KEY", "", str.strip, secret=True)
     openrouter_max_tokens: int = _env("OPENROUTER_MAX_TOKENS", "2400", _positive_int)
     # OpenRouter routes one model slug across many hosts, and the host drives latency,
     # cost and template fidelity (see the benchmark section in README.md). Pin one
@@ -209,7 +227,7 @@ class Settings:
     lmstudio_model: str = _env("LMSTUDIO_MODEL", "local-model")
     anthropic_base_url: str = _env("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
     anthropic_model: str = _env("ANTHROPIC_MODEL", "claude-sonnet-5")
-    anthropic_api_key: str = _env("ANTHROPIC_API_KEY", "", secret=True)
+    anthropic_api_key: str = _env("ANTHROPIC_API_KEY", "", str.strip, secret=True)
     anthropic_max_tokens: int = _env("ANTHROPIC_MAX_TOKENS", "2400", _positive_int)
     allow_cloud_override: bool = _env("ALLOW_CLOUD_OVERRIDE", "false", _bool)
     # Extra `;`-separated regexes the data-protection gate blocks on, e.g. internal project

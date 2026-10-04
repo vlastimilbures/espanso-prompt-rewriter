@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from importlib.resources import files
 
+from .redaction import safe_repr
+
 _PROMPT_DIR = files(__package__) / "prompts"
 
 
@@ -41,5 +43,5 @@ def system_prompt(profile: str, persona: str = "") -> str:
         template = PROFILES[profile]
     except KeyError as exc:
         known = ", ".join(PROFILES)
-        raise ValueError(f"Unknown profile: {profile}. Choose from: {known}") from exc
+        raise ValueError(f"Unknown profile: {safe_repr(profile)}. Choose from: {known}") from exc
     return render(template, persona)

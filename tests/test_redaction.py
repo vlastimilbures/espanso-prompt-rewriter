@@ -2,7 +2,7 @@ import time
 
 import pytest
 
-from prompt_workflow.redaction import compile_extra, scan
+from prompt_workflow.redaction import compile_extra, safe_repr, scan
 
 
 # scan() flags a Luhn-valid payment card number.
@@ -270,3 +270,20 @@ def test_scan_is_fast_on_adversarial_input(text):
     started = time.perf_counter()
     scan(text)
     assert time.perf_counter() - started < 2
+
+
+# Error messages repeat a short, harmless value; anything that could be a secret is described.
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("abc", "'abc'"),
+        ("", "''"),
+        ("x" * 40, repr("x" * 40)),
+        ("x" * 41, "<redacted, 41 chars>"),
+        ("jane.doe@example.com", "<redacted, 20 chars>"),
+        ("4111 1111 1111 1111", "<redacted, 19 chars>"),
+        ("a=b", "<redacted, 3 chars; two .env lines may have run together>"),
+    ],
+)
+def test_safe_repr(raw, expected):
+    assert safe_repr(raw) == expected

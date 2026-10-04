@@ -14,6 +14,14 @@ All notable changes to this project are documented here. The format follows
   `PROMPT_WORKFLOW_ENV`, which only the real environment can set). Any other variable there, such
   as `HTTPS_PROXY` or `SSL_CERT_FILE`, is ignored; set it for GUI apps instead (see README).
 
+### Fixed
+- Settings errors repeat a rejected value only when it is short and does not look like a key;
+  otherwise they show `<redacted, N chars>`. The same applies to an unknown provider or profile.
+- A `.env` value that contains another `NAME=` assignment (two lines saved without the newline
+  between them) is reported by setting name instead of being read as one long value.
+- Spaces around an API key are dropped, and a key with a character HTTP forbids in a header is
+  reported as `invalid header value (check the API key)`.
+
 ## 0.12.0
 
 ### Changed
