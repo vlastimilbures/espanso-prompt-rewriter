@@ -94,12 +94,15 @@ class MockHttp:
 
 @pytest.fixture
 def mock_transport(monkeypatch):
-    """Patch httpx.Client so every client uses a MockTransport; no test may reach the network."""
+    """Patch httpx.Client so every client uses a MockTransport, so a test using this fixture
+    cannot reach the network. A proxy or mount would take precedence over the transport, so
+    the patched client refuses them."""
     mock = MockHttp()
     real_client = httpx.Client
 
-    def client(**kwargs):
-        return real_client(**{**kwargs, "transport": httpx.MockTransport(mock.handler)})
+    def client(*args, **kwargs):
+        assert not {"proxy", "mounts"} & kwargs.keys(), "mock_transport cannot honour a proxy"
+        return real_client(*args, **{**kwargs, "transport": httpx.MockTransport(mock.handler)})
 
     monkeypatch.setattr(httpx, "Client", client)
     return mock

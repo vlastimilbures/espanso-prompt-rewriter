@@ -22,7 +22,7 @@ that nothing reaches a cloud provider without passing the data-protection gate.
 Report privately:
 
 - any way to send a draft off the machine **without** the gate running (a gate bypass), through
-  a cloud provider or a local one
+  a cloud provider or a local one, or at all while `PROMPT_LOCAL_ONLY=true`
 - anything that exposes API keys, for example in output, logs or error messages
 - command injection through the install scripts or the Espanso match files
 - control or escape characters from a model response reaching the pasted output

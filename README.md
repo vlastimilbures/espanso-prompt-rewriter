@@ -351,9 +351,11 @@ Left empty, the rewrite uses only a role the draft itself states and never guess
 > Cloud triggers send your clipboard to a third-party API. Use them only where your organisation's
 > policy allows. For sensitive work, use `-il-` or `-ilm-` with a model that runs on your machine,
 > and nothing leaves it. Each trigger names its own provider, so `PROMPT_PROVIDER` does not make
-> `-i-` local. To rule out cloud calls entirely, set `PROMPT_LOCAL_ONLY=true`: every trigger or
-> command that would send the draft off your machine then pastes
+> `-i-` local. To rule out cloud calls, set `PROMPT_LOCAL_ONLY=true`: every trigger or command
+> that would send the draft off your machine then pastes
 > `[prompt-workflow: PROMPT_LOCAL_ONLY=true: … would send the draft off this machine]` instead.
+> It judges by the base URL and the Ollama model tag, so a relay on `localhost` that forwards to
+> a cloud API (LiteLLM, an SSH tunnel) still counts as local.
 
 Every call that can send the draft off your machine first runs through a regex gate
 ([`redaction.py`](src/prompt_workflow/redaction.py)): OpenRouter and Anthropic always, and

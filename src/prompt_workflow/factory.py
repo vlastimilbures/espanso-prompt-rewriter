@@ -77,7 +77,7 @@ def _gate(inner: Provider, cfg: Settings) -> GatedProvider:
     # provider added later that returns through _gate().
     if cfg.local_only:
         raise ProviderError(
-            "PROMPT_LOCAL_ONLY=true: refusing a provider that can leave this machine"
+            "PROMPT_LOCAL_ONLY=true: this provider would send the draft off this machine"
         )
     return GatedProvider(
         inner,

@@ -282,10 +282,12 @@ def test_bool_parsing(monkeypatch, raw, expected):
     monkeypatch.setenv("ALLOW_CLOUD_OVERRIDE", raw)
     monkeypatch.setenv("OLLAMA_THINK", raw)
     monkeypatch.setenv("OPENROUTER_ALLOW_FALLBACKS", raw)
+    monkeypatch.setenv("PROMPT_LOCAL_ONLY", raw)
     settings = Settings()
     assert settings.allow_cloud_override is expected
     assert settings.ollama_think is expected
     assert settings.openrouter_allow_fallbacks is expected
+    assert settings.local_only is expected
 
 
 # Anything else is an error, not a silent false: OLLAMA_THINK=1 must not mean "off".

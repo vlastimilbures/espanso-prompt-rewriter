@@ -143,7 +143,13 @@ def test_merged_env_line_is_reported_not_pasted(tmp_path):
             "--tier",
             "pro",
             "--model",
-            "google/gemini-3.5-flash-lite@auto",
+            "google/gemini-3.5-flash-lite@google-ai-studio/flex",
+            "--effort",
+            "default",
+            "--max-tokens",
+            "default",
+            "--timeout",
+            "default",
         ],
         ["--provider", "anthropic", "--profile", "general"],
     ],
@@ -156,6 +162,15 @@ def test_local_only_blocks_cloud_triggers(monkeypatch, mock_transport, args):
     result = improve(*args, "--source", "argument", "--text", "draft")
     assert result.exit_code == 0
     assert result.stdout.startswith("[prompt-workflow: PROMPT_LOCAL_ONLY=true: ")
+    assert mock_transport.requests == []
+
+
+# A mistyped PROMPT_LOCAL_ONLY fails closed: an inline error, no request.
+def test_local_only_bad_value_fails_closed(monkeypatch, mock_transport):
+    monkeypatch.setenv("PROMPT_LOCAL_ONLY", "yes")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    result = improve("--provider", "openrouter", "--source", "argument", "--text", "d")
+    assert result.stdout.startswith("[prompt-workflow: PROMPT_LOCAL_ONLY must be true or false")
     assert mock_transport.requests == []
 
 
