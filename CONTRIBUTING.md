@@ -79,7 +79,8 @@ espanso-prompt-rewriter/
 │   ├── redaction.py              the gate's sensitive-content patterns
 │   ├── prompt_builder.py         loads profiles, fills in the persona rule
 │   ├── prompts/
-│   │   ├── default.md            golden-template rewrite (-i-, -ip-, -if-)
+│   │   ├── default.md            golden-template rewrite (-i-)
+│   │   ├── default-pro.md        default minus one review clause (-ip-, -if-)
 │   │   └── general.md            lighter "make this precise" rewrite (local triggers)
 │   └── providers/
 │       ├── base.py               HTTP call, error mapping, <think> stripping

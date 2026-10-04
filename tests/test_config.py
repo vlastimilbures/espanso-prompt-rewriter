@@ -66,6 +66,21 @@ def test_for_tier(monkeypatch):
         settings.for_tier("ultra")
 
 
+# for_call: the tier, then the overrides; a pro call on another model loses the pro profile.
+def test_for_call(monkeypatch):
+    monkeypatch.setenv("PROMPT_PROFILE", "general")
+    settings = Settings()
+    assert settings.for_call("standard") == settings
+    assert settings.for_call("standard", model="x/m").profile == "general"
+    assert settings.for_call("pro") == settings.for_tier("pro")
+    assert settings.for_call("pro", model=f"{settings.openrouter_pro_model}@auto").profile == (
+        "default-pro"
+    )
+    other = settings.for_call("pro", model="x/m@y", effort="high")
+    assert (other.openrouter_model, other.openrouter_provider) == ("x/m", "y")
+    assert (other.profile, other.timeout) == ("general", settings.pro_timeout)
+
+
 # split_model_spec: a bare slug has no pin, slug@endpoint pins it, @auto unpins.
 def test_split_model_spec():
     assert split_model_spec(None) == (None, None)

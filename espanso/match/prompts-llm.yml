@@ -16,7 +16,7 @@ matches:
       - name: output
         type: shell
         params:
-          cmd: "\"__PROMPT_WORKFLOW__\" improve --provider openrouter --profile default --source clipboard"
+          cmd: "\"__PROMPT_WORKFLOW__\" improve --provider openrouter --source clipboard"
 
   # Same rewrite on the pro tier: a reasoning model (OPENROUTER_PRO_MODEL) for hard,
   # multi-part drafts. Slower (~5-8 s) but more rigorous. Same cloud caveats as above.
@@ -27,7 +27,7 @@ matches:
       - name: output
         type: shell
         params:
-          cmd: "\"__PROMPT_WORKFLOW__\" improve --provider openrouter --profile default --tier pro --source clipboard"
+          cmd: "\"__PROMPT_WORKFLOW__\" improve --provider openrouter --tier pro --source clipboard"
 
   # Same rewrite, but a popup picks the model and its settings for this one call.
   # Built on the pro tier, so "default" in each list means the OPENROUTER_PRO_* setting.
@@ -72,7 +72,7 @@ matches:
       - name: output
         type: shell
         params:
-          cmd: "\"__PROMPT_WORKFLOW__\" improve --provider openrouter --profile default --tier pro --source clipboard --model {{form1.model}} --effort {{form1.effort}} --max-tokens {{form1.maxtokens}} --timeout {{form1.timeout}}"
+          cmd: "\"__PROMPT_WORKFLOW__\" improve --provider openrouter --tier pro --source clipboard --model {{form1.model}} --effort {{form1.effort}} --max-tokens {{form1.maxtokens}} --timeout {{form1.timeout}}"
 
   - trigger: "-il-"
     replace: "{{output}}"

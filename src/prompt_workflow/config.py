@@ -257,6 +257,25 @@ class Settings:
             )
         raise ValueError(f"Unknown tier: {tier}. Choose from: {', '.join(TIERS)}")
 
+    def for_call(
+        self,
+        tier: str,
+        *,
+        model: str | None = None,
+        effort: str | None = None,
+        max_tokens: str | None = None,
+        timeout: str | None = None,
+    ) -> Settings:
+        """Settings for one CLI call: for_tier(), then the per-call overrides. The pro
+        profile is tuned for OPENROUTER_PRO_MODEL, so a pro call that runs another model
+        (one picked in the -if- popup) uses PROMPT_PROFILE instead."""
+        cfg = self.for_tier(tier).with_overrides(
+            model=model, effort=effort, max_tokens=max_tokens, timeout=timeout
+        )
+        if tier == "pro" and cfg.openrouter_model != self.openrouter_pro_model:
+            return replace(cfg, profile=self.profile)
+        return cfg
+
     def with_overrides(
         self,
         *,

@@ -8,6 +8,7 @@ from typer.testing import CliRunner
 
 import prompt_workflow.cli as cli
 from prompt_workflow.cli import _read_input, app
+from prompt_workflow.prompt_builder import system_prompt
 from prompt_workflow.providers.base import ProviderError
 
 runner = CliRunner()
@@ -167,12 +168,13 @@ def test_improve_passes_persona(monkeypatch, stub_provider):
     assert 'open with "I am a tester."' in stub_provider.calls[0]["system_prompt"]
 
 
-# --tier pro hands make_provider the OPENROUTER_PRO_* settings.
+# --tier pro hands make_provider the OPENROUTER_PRO_* settings and sends PROMPT_PRO_PROFILE.
 def test_improve_pro_tier(stub_provider):
     assert improve("--tier", "pro", "--source", "argument", "--text", "d").stdout == "improved"
     _, cfg = stub_provider.built[0]
     assert cfg.openrouter_model == cfg.openrouter_pro_model
     assert cfg.openrouter_reasoning_effort == cfg.openrouter_pro_reasoning_effort
+    assert stub_provider.calls[0]["system_prompt"] == system_prompt("default-pro")
 
 
 # The -if- popup's options reach make_provider as settings: the model slug without its
