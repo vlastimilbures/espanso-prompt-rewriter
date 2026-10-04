@@ -18,14 +18,15 @@ All notable changes to this project are documented here. The format follows
   finalised, so a reply that then fails still has its tokens on record. Records never hold the
   prompt, the response, a raw body or a key. No trigger output changes: nothing passes an
   observer yet.
-- A release workflow (#94). Run by hand (or, with the repository variable `RELEASE_ON_PUSH` set
-  to `true`, on a push to `main`) for a version with no tag yet, it builds the sdist and wheel,
+- A release workflow (#94). Run by hand with *dry-run* unticked (or, with the repository
+  variable `RELEASE_ON_PUSH` set to `true`, on a push to `main`) for the head of `main` whose
+  version has no published Release yet, it builds the sdist and wheel,
   installs the wheel in a clean venv on macOS, Windows and Linux and checks its match files,
   profiles and `persona`, attests build provenance, and creates the annotated tag and a GitHub
   Release with the version's CHANGELOG notes. Each Release also carries `constraints.txt`, the
   runtime pins from `uv.lock`, so `uv tool install <wheel-url> -c <constraints-url>` installs
-  exactly the locked dependencies. CHANGELOG headings now carry their release date
-  (`## 0.15.0 - 2026-10-04`); a test checks that the newest one is the `pyproject.toml` version.
+  exactly the locked dependencies. Release builds pin the build backend (hatchling 1.32.4).
+  CHANGELOG headings now carry their release date (`## 0.15.0 - 2026-10-04`); a test checks that the newest one is the `pyproject.toml` version.
 
 ### Security
 - A clipboard item that a password manager marked as concealed is refused before it is read,

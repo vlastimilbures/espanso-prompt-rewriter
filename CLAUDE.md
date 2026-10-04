@@ -182,9 +182,12 @@ overrides any `--provider` a trigger passes; `PROMPT_PROVIDER` only sets the bar
 ### Releases
 
 `.github/workflows/release.yml` is the only way a version is tagged and released (steps in
-CONTRIBUTING's "Releasing"). It runs on a manual dispatch, or on a push to `main` only while the
-repository variable `RELEASE_ON_PUSH` is `true`, and does nothing for a version that already has
-a tag. Only its `release` job can write. `scripts/release_notes.py` gives the workflow the
+CONTRIBUTING's "Releasing"; the one exception is the documented v0.10.0 backfill). It runs on a
+manual dispatch with *dry-run* unticked, or on a push to `main` only while the repository
+variable `RELEASE_ON_PUSH` is `true`; it releases only the current head of `main` and does
+nothing for a version whose Release is already published. A half-failed run can be re-run (it
+reuses an annotated tag on the same commit and a draft Release). Only its `release` job can
+write. `scripts/release_notes.py` gives the workflow the
 version and its notes and refuses a CHANGELOG whose newest `## X.Y.Z - YYYY-MM-DD` heading is not
 the `pyproject.toml` version (`## Unreleased` may come first); `tests/test_release.py` runs the
 same check. Each Release carries `constraints.txt` (uv.lock's runtime pins), and the artifact

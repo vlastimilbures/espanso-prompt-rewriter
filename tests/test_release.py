@@ -125,6 +125,14 @@ def test_main_prints_version_and_notes(tmp_path, capsys):
     assert capsys.readouterr().out == "Upgrading: read this.\n\n### Fixed\n- A bug.\n"
 
 
+def test_main_prints_an_older_release(tmp_path, capsys):
+    args = _project(tmp_path, "9.9.9")  # --release does not look at the pyproject version
+    notes.main(["notes", "--release", "1.0.0", *args])
+    assert capsys.readouterr().out == "First release.\n"
+    with pytest.raises(SystemExit, match=r"release_notes: CHANGELOG has no 0\.9\.0 section"):
+        notes.main(["notes", "--release", "0.9.0", *args])
+
+
 def test_main_fails_on_a_mismatch(tmp_path):
     with pytest.raises(SystemExit, match="release_notes: the newest CHANGELOG version"):
         notes.main(["version", *_project(tmp_path, "2.0.0")])

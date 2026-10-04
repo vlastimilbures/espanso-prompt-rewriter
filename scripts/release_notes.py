@@ -2,6 +2,7 @@
 
     python scripts/release_notes.py version   # the pyproject version, once CHANGELOG agrees
     python scripts/release_notes.py notes     # that version's CHANGELOG section
+    python scripts/release_notes.py notes --release 0.10.0   # an older section (a backfill)
 
 CHANGELOG.md may open with `## Unreleased`; every other `## ` heading must read
 `## X.Y.Z - YYYY-MM-DD`, newest first, and the first of them must be the pyproject version.
@@ -87,9 +88,17 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("what", choices=["version", "notes"])
     parser.add_argument("--changelog", type=Path, default=REPO / "CHANGELOG.md")
     parser.add_argument("--pyproject", type=Path, default=REPO / "pyproject.toml")
+    parser.add_argument("--release", help="this CHANGELOG version instead of the pyproject one")
     args = parser.parse_args(argv)
     try:
-        release = current(args.changelog.read_text("utf-8"), pyproject_version(args.pyproject))
+        changelog = args.changelog.read_text("utf-8")
+        if args.release:
+            found = {r.version: r for r in releases(changelog)}
+            if args.release not in found:
+                raise ValueError(f"CHANGELOG has no {args.release} section")
+            release = found[args.release]
+        else:
+            release = current(changelog, pyproject_version(args.pyproject))
     except (OSError, ValueError, KeyError) as exc:
         sys.exit(f"release_notes: {exc}")
     sys.stdout.write(release.version if args.what == "version" else release.notes + "\n")
