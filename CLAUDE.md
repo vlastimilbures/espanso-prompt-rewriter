@@ -58,7 +58,8 @@ Espanso does not inherit shell PATH):
   `env_names()` keys are taken, so a `.env` cannot set `HTTPS_PROXY`, `SSL_CERT_FILE` or any
   other variable, and a value holding another setting's `NAME=` (a merged line) is refused.
   `resolve(strict=False)` (repair mode) returns those errors as `Finding`s and falls back to the
-  next lower layer instead of raising. It deliberately never reads the
+  next lower layer (recorded in `Entry.rejected`) instead of raising; it also notes an unreadable
+  `.env` and lines without `=`, which strict mode skips silently. It deliberately never reads the
   cwd, so a planted `.env` cannot redirect the base URL or enable the override. This matters
   because Espanso runs the CLI as a GUI-spawned subprocess without an inherited login-shell
   environment. `tests/conftest.py` points `PROMPT_WORKFLOW_ENV` at a temp file per test.

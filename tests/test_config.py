@@ -556,8 +556,10 @@ def test_repair_mode_falls_back_to_next_layer(tmp_path, monkeypatch):
     monkeypatch.setenv("PROMPT_TIMEOUT_SECONDS", "soon")
     layers = ConfigLayers.resolve(strict=False)
     assert layers.settings().timeout == 12.0
-    assert layers.entries["PROMPT_TIMEOUT_SECONDS"].source == f"file:{env_file}"
+    entry = layers.entries["PROMPT_TIMEOUT_SECONDS"]
+    assert (entry.source, entry.shadows, entry.rejected) == (f"file:{env_file}", (), ("env",))
     assert [finding.source for finding in layers.findings] == ["env"]
+    assert layers.entries["OLLAMA_MODEL"].rejected == ()
 
 
 # resolve() takes the environment as a mapping, so a caller can resolve another one.
@@ -567,3 +569,40 @@ def test_resolve_takes_an_environment_mapping(tmp_path):
     environ = {"PROMPT_WORKFLOW_ENV": str(env_file), "PROMPT_PROVIDER": "ollama"}
     settings = ConfigLayers.resolve(environ).settings()
     assert (settings.provider, settings.ollama_model) == ("ollama", "from-file")
+
+
+# Repair mode reports a line without '=' by number (never its text); strict mode skips it.
+def test_repair_mode_reports_lines_without_equals(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text(f"# note\n\nOLLAMA_MODEL=m\n{FAKE_KEY}\nexport\n")
+    assert Settings.load().ollama_model == "m"
+    layers = ConfigLayers.resolve(strict=False)
+    file = f"file:{env_file}"
+    assert layers.findings == (
+        Finding(file, "line 4 of .env has no '=' and was ignored"),
+        Finding(file, "line 5 of .env has no '=' and was ignored"),
+    )
+    assert "cdcd" not in repr(layers.findings)
+    assert layers.settings().ollama_model == "m"
+
+
+# A .env candidate that exists but is not UTF-8 is skipped for the next one, silently in
+# strict mode and as a finding in repair mode; a missing candidate is no finding.
+def test_repair_mode_reports_undecodable_env_file(tmp_path, monkeypatch):
+    project, user = tmp_path / "repo", tmp_path / "cfg"
+    project.mkdir()
+    user.mkdir()
+    (project / "pyproject.toml").write_text("")
+    (project / ".env").write_bytes(b"OLLAMA_MODEL=\xff\xfe\n")
+    (user / ".env").write_text("OLLAMA_MODEL=from-user\n")
+    _no_explicit_env(tmp_path, monkeypatch, project, user)
+
+    assert Settings.load().ollama_model == "from-user"
+    layers = ConfigLayers.resolve(strict=False)
+    assert layers.findings == (
+        Finding(f"file:{project / '.env'}", ".env is not UTF-8 text; it was skipped"),
+    )
+    assert layers.entries["OLLAMA_MODEL"].source == f"file:{user / '.env'}"
+
+    (user / ".env").unlink()
+    assert ConfigLayers.resolve(strict=False).findings == layers.findings

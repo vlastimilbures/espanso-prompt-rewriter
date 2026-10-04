@@ -49,28 +49,52 @@ def _env_file_candidates(environ: Mapping[str, str] = os.environ) -> list[Path]:
     return candidates
 
 
+def _parse_env_text(text: str) -> tuple[dict[str, str], list[int]]:
+    """KEY=VALUE pairs of .env text, and the numbers of the lines skipped for lacking `=`."""
+    pairs = {}
+    skipped = []
+    for number, raw in enumerate(text.splitlines(), start=1):
+        line = raw.strip().removeprefix("export ")
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            skipped.append(number)
+            continue
+        key, _, value = line.partition("=")
+        pairs[key.strip()] = _parse_value(value)
+    return pairs, skipped
+
+
 def read_env_file(path: Path) -> dict[str, str] | None:
     """KEY=VALUE pairs of a .env file, or None when it is missing or unreadable."""
     try:
         raw_text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return None
-    pairs = {}
-    for raw in raw_text.splitlines():
-        line = raw.strip().removeprefix("export ")
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        pairs[key.strip()] = _parse_value(value)
-    return pairs
+    return _parse_env_text(raw_text)[0]
 
 
-def _find_env_file(environ: Mapping[str, str]) -> tuple[Path, dict[str, str]] | None:
-    """The first readable .env candidate and its pairs, or None when there is none."""
+def _find_env_file(
+    environ: Mapping[str, str], note: Callable[[str, str], None]
+) -> tuple[Path, dict[str, str]] | None:
+    """The first readable .env candidate and its pairs, or None when there is none. A
+    candidate that exists but cannot be read is skipped, as is a line without `=`; each is
+    passed to ``note`` (by line number, never content)."""
     for candidate in _env_file_candidates(environ):
-        pairs = read_env_file(candidate)
-        if pairs is not None:
-            return candidate, pairs
+        source = f"file:{candidate}"
+        try:
+            raw_text = candidate.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            note(source, ".env is not UTF-8 text; it was skipped")
+            continue
+        except OSError:
+            if candidate.exists():
+                note(source, ".env cannot be read; it was skipped")
+            continue
+        pairs, skipped = _parse_env_text(raw_text)
+        for number in skipped:
+            note(source, f"line {number} of .env has no '=' and was ignored")
+        return candidate, pairs
     return None
 
 
@@ -341,11 +365,13 @@ class Layer:
 class Entry:
     """A setting's effective value and the layer it came from. ``shadows`` lists the other
     layers (not the default) that also set it and lost, e.g. a .env value overridden by a
-    real environment variable."""
+    real environment variable. ``rejected`` lists the higher layers whose value repair mode
+    refused (see ConfigLayers.findings), so the value fell back to this one."""
 
     value: str = field(repr=False)  # may be an API key
     source: str
     shadows: tuple[str, ...] = ()
+    rejected: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -380,10 +406,17 @@ class ConfigLayers:
         SSL_CERT_FILE, ...) would change how httpx connects, which is not what a settings
         file is for. Strict mode (``improve``, ``persona``) raises the first problem as a
         ValueError. Repair mode records each as a Finding instead and falls back to the next
-        lower layer, so management commands still run on a broken config.
+        lower layer, so management commands still run on a broken config. Repair mode also
+        notes what strict mode skips silently: a .env that exists but cannot be read, and a
+        line without `=` (by number, never its text).
         """
         environ = os.environ if environ is None else environ
         findings: list[Finding] = []
+
+        def note(source: str, message: str) -> None:
+            # Repair mode only: strict mode has always skipped these silently.
+            if not strict:
+                findings.append(Finding(source, message))
 
         def fail(source: str, message: str) -> None:
             if strict:
@@ -393,7 +426,7 @@ class ConfigLayers:
         known = env_names()
         defaults = {f.metadata["env"]: f.metadata["default"] for f in fields(Settings)}
         layers = [Layer(DEFAULT_SOURCE, defaults)]
-        found = _find_env_file(environ)
+        found = _find_env_file(environ, note)
         if found is not None:
             path, pairs = found
             source = f"file:{path}"
@@ -408,16 +441,18 @@ class ConfigLayers:
         for f in fields(Settings):
             name = f.metadata["env"]
             setters = [layer for layer in reversed(layers) if name in layer.values]
+            rejected: list[str] = []
             for index, layer in enumerate(setters):
                 raw = layer.values[name]
                 try:
                     _parse_setting(name, f.metadata["parse"], raw)
                 except ValueError as exc:
                     fail(layer.source, str(exc))
+                    rejected.append(layer.source)
                     continue
                 lost = setters[index + 1 :]
                 shadows = tuple(s.source for s in lost if s.source != DEFAULT_SOURCE)
-                entries[name] = Entry(raw, layer.source, shadows)
+                entries[name] = Entry(raw, layer.source, shadows, tuple(rejected))
                 break
         return cls(tuple(layers), entries, tuple(findings))
 
