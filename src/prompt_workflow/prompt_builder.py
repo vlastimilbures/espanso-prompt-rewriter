@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Collection
+from dataclasses import dataclass
 from importlib.resources import files
+from pathlib import Path
 
+from .config import _user_config_dir
 from .redaction import safe_repr
 
 _PROMPT_DIR = files(__package__) / "prompts"
@@ -16,6 +20,7 @@ def _load_profiles() -> dict[str, str]:
     }
 
 
+# The built-in profiles shipped in the package. A user's own live in user_profiles_dir().
 PROFILES: dict[str, str] = _load_profiles()
 
 # Retired profile names that still resolve, so an existing .env or --profile keeps working.
@@ -24,6 +29,34 @@ ALIASES = {"default-pro": "default"}
 
 # Replaced in a profile by the rule for how CONTEXT opens (see PROMPT_PERSONA).
 PERSONA_TOKEN = "{{PERSONA_RULE}}"  # noqa: S105 - a template placeholder, not a secret
+
+# A user profile's name is its file name without `.md`: no dots, separators or spaces, so a
+# --profile value cannot reach outside the profile directory.
+PROFILE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
+
+
+def user_profiles_dir() -> Path:
+    """The user's own profiles, `<name>.md` in the config dir that also holds .env. An
+    upgrade never touches it, unlike the package's prompts/."""
+    return _user_config_dir() / "profiles"
+
+
+def _read_user_profile(name: str) -> str | None:
+    """A user profile's text, or None when there is no such file. Only looked up for a name
+    that is not built in or is listed in PROMPT_PROFILE_OVERRIDES, so the usual trigger
+    touches no file."""
+    if not PROFILE_NAME.fullmatch(name):
+        return None
+    try:
+        text = (user_profiles_dir() / f"{name}.md").read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return None
+    except (OSError, UnicodeDecodeError) as exc:
+        # Named, not the path: the marker is pasted into the focused app.
+        raise ValueError(f"Cannot read user profile {name}.md ({type(exc).__name__})") from None
+    if not text:
+        raise ValueError(f"User profile {name}.md is empty")
+    return text
 
 
 def persona_rule(persona: str) -> str:
@@ -43,13 +76,61 @@ def render(template: str, persona: str = "") -> str:
     return template.replace(PERSONA_TOKEN, persona_rule(persona))
 
 
-def system_prompt(profile: str, persona: str = "") -> str:
-    try:
-        template = PROFILES[profile if profile in PROFILES else ALIASES.get(profile, profile)]
-    except KeyError as exc:
-        known = ", ".join(PROFILES)
-        raise ValueError(f"Unknown profile: {safe_repr(profile)}. Choose from: {known}") from exc
+def system_prompt(profile: str, persona: str = "", overrides: Collection[str] = ()) -> str:
+    """The rendered profile: a built-in, or `<name>.md` in user_profiles_dir() for a name
+    that is not built in. A user file named like a built-in replaces it only when the name is
+    in ``overrides`` (PROMPT_PROFILE_OVERRIDES)."""
+    name = profile if profile in PROFILES else ALIASES.get(profile, profile)
+    template = None
+    if name not in PROFILES or name in overrides:
+        template = _read_user_profile(name)
+    if template is None:
+        template = PROFILES.get(name)
+    if template is None:
+        own = [p.name for p in user_profiles(overrides) if p.status == ADDED]
+        known = ", ".join([*PROFILES, *own])
+        raise ValueError(f"Unknown profile: {safe_repr(profile)}. Choose from: {known}")
     return render(template, persona)
+
+
+# user_profiles() statuses: a new profile, a built-in replaced by explicit opt-in, a file
+# ignored because it is named like a built-in (or an alias) without the opt-in, a file whose
+# name no --profile can select, and an opted-in built-in that has no file.
+ADDED = "added"
+OVERRIDES = "overrides"
+SHADOWED = "shadowed"
+INVALID_NAME = "invalid name"
+MISSING = "missing"
+
+
+@dataclass(frozen=True)
+class UserProfile:
+    name: str
+    path: Path
+    status: str
+
+
+def user_profiles(overrides: Collection[str] = ()) -> list[UserProfile]:
+    """What user_profiles_dir() holds and how system_prompt() treats each file, for a
+    doctor or `profiles` command to report. Overrides without a file come last as MISSING."""
+    folder = user_profiles_dir()
+    try:
+        paths = sorted(p for p in folder.iterdir() if p.suffix == ".md" and p.is_file())
+    except OSError:
+        paths = []
+    found = []
+    for path in paths:
+        name = path.stem
+        if not PROFILE_NAME.fullmatch(name):
+            status = INVALID_NAME
+        elif name in PROFILES:
+            status = OVERRIDES if name in overrides else SHADOWED
+        else:
+            status = SHADOWED if name in ALIASES else ADDED
+        found.append(UserProfile(name, path, status))
+    listed = {p.name for p in found}
+    missing = [n for n in overrides if n not in listed]
+    return found + [UserProfile(n, folder / f"{n}.md", MISSING) for n in missing]
 
 
 # Present in every profile that emits the golden template (CONTEXT ... OUTPUTS).

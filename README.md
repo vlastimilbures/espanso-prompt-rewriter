@@ -240,7 +240,7 @@ prompt-workflow persona          # prints PROMPT_PERSONA (used by -p-)
 | Option       | Default                     | Meaning                                         |
 |--------------|-----------------------------|-------------------------------------------------|
 | `--provider` | `PROMPT_PROVIDER`           | `ollama`, `lmstudio`, `openrouter`, `anthropic` |
-| `--profile`  | `PROMPT_PROFILE` (`PROMPT_PRO_PROFILE`, if set, with `--tier pro` on `OPENROUTER_PRO_MODEL`) | `default`, `general`, or any file in `prompts/` |
+| `--profile`  | `PROMPT_PROFILE` (`PROMPT_PRO_PROFILE`, if set, with `--tier pro` on `OPENROUTER_PRO_MODEL`) | `default`, `general`, or one of [your own profiles](#profiles-and-persona) |
 | `--model`    | provider's configured model | Override the model of whichever provider runs; `model@endpoint` also pins the OpenRouter endpoint (`@auto` unpins) |
 | `--tier`     | `standard`                  | `pro` uses the `OPENROUTER_PRO_*` settings      |
 | `--effort`   | tier's setting              | `none`, `minimal`, `low`, `medium`, `high`      |
@@ -302,6 +302,7 @@ short and does not look like a key.
 | `OPENROUTER_PRO_REASONING_EFFORT` | `low`                     | Reasoning effort for the pro tier                         |
 | `PROMPT_PRO_TIMEOUT_SECONDS` | `60`                           | Time limit for one pro-tier call, retry included          |
 | `PROMPT_PRO_PROFILE`         | (empty)                        | Profile for the pro tier (`-ip-`, `-if-`) when it runs `OPENROUTER_PRO_MODEL`; empty = `PROMPT_PROFILE` |
+| `PROMPT_PROFILE_OVERRIDES`   | *(empty)*                      | Comma-separated built-in profiles (`default`, `general`) your own same-named file replaces, see [profiles](#profiles-and-persona) |
 | `ANTHROPIC_API_KEY`          | —                              | Required for Anthropic                                    |
 | `ANTHROPIC_MODEL`            | `claude-sonnet-5`              |                                                           |
 | `ANTHROPIC_MAX_TOKENS`       | `2400`                         |                                                           |
@@ -348,8 +349,19 @@ A profile is a system prompt in [`src/prompt_workflow/prompts/`](src/prompt_work
   and returns only the prompt, without a preamble or a code fence. A reply wrapped in one code
   fence anyway is pasted without it, for every profile.
 
-Drop another `*.md` file into that folder and it becomes a profile. See
-[CONTRIBUTING.md](CONTRIBUTING.md#add-a-profile).
+**Your own profiles** live outside the package, so an upgrade never replaces them:
+`~/.config/prompt-workflow/profiles/<name>.md` (`%APPDATA%\prompt-workflow\profiles\<name>.md`
+on Windows; `$XDG_CONFIG_HOME/prompt-workflow/profiles/` when that is set), next to the user
+`.env`. The file holds the system prompt as plain text, may use `{{PERSONA_RULE}}` like the
+built-ins, and is selected by its name: `--profile <name>`, `PROMPT_PROFILE` or
+`PROMPT_PRO_PROFILE`. A name is letters, digits, `-` and `_` (no dots or spaces).
+
+A file named like a built-in (`default.md`, `general.md`) is ignored, so a stray copy cannot
+silently change what every trigger sends. To replace a built-in on purpose, list it in
+`PROMPT_PROFILE_OVERRIDES`, for example `PROMPT_PROFILE_OVERRIDES=default`; delete the line to
+go back. The package's own files are never changed. A profile you added under
+`src/prompt_workflow/prompts/` in a checkout keeps working there, but belongs in this folder.
+To add a built-in profile to the project, see [CONTRIBUTING.md](CONTRIBUTING.md#add-a-profile).
 
 **Persona.** Set `PROMPT_PERSONA` to a first-person sentence, for example
 `PROMPT_PERSONA="I am working as a Head of Data at Example Corp."`. The `default` rewrite then

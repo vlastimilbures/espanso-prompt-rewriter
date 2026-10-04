@@ -37,6 +37,11 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/prompt_workflow"]
 
+# The Espanso match files ship in the wheel (read by prompt_workflow.assets); espanso/ in the
+# repo stays their source. espanso/config/ is deliberately not shipped.
+[tool.hatch.build.targets.wheel.force-include]
+"espanso/match" = "prompt_workflow/espanso/match"
+
 [tool.ruff]
 line-length = 100
 

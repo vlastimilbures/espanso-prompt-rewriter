@@ -55,3 +55,39 @@ jobs:
       # Coverage settings, including the fail_under floor, live in pyproject.toml.
       - name: Test
         run: uv run pytest --cov
+
+  # What the built wheel really contains: pyproject.toml declaring package data proves nothing.
+  # The wheel (built from the sdist) goes into a clean venv outside the checkout, so neither
+  # src/ nor espanso/ in the repo can stand in for a missing file.
+  wheel:
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Build sdist and wheel
+        run: uv build --out-dir dist
+      - name: Install the wheel into a clean venv and check it
+        working-directory: ${{ runner.temp }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $wheel = (Get-ChildItem "$env:GITHUB_WORKSPACE/dist/*.whl" | Select-Object -First 1).FullName
+          $venv = Join-Path $env:RUNNER_TEMP "wheel-venv"
+          uv venv $venv
+          uv pip install --python $venv $wheel
+          $python = if ($IsWindows) { "$venv/Scripts/python.exe" } else { "$venv/bin/python" }
+          & $python "$env:GITHUB_WORKSPACE/scripts/check_wheel.py" --repo $env:GITHUB_WORKSPACE --wheel $wheel

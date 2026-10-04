@@ -67,6 +67,21 @@ All notable changes to this project are documented here. The format follows
   finding, and `scheme://:password@host` (no user name) counts as `url_credentials` (#21).
 
 ### Added
+- Your own profiles live in `~/.config/prompt-workflow/profiles/<name>.md`
+  (`%APPDATA%\prompt-workflow\profiles\` on Windows), next to the user `.env`, where an
+  upgrade cannot replace them (#85). A new name works with `--profile <name>`, `PROMPT_PROFILE`
+  or `PROMPT_PRO_PROFILE`. A file named like a built-in (`default.md`) is ignored unless the new
+  setting `PROMPT_PROFILE_OVERRIDES` lists that built-in (comma-separated, built-in names only),
+  so a stray copy cannot silently change what every trigger sends. The package's own profiles
+  are never written. Service functions for the coming `doctor`/`profiles` commands report each
+  user file (added, overrides, shadowed, invalid name, missing) and copy profiles a checkout
+  added or edited under `src/prompt_workflow/prompts/` into the new folder, without deleting or
+  overwriting anything.
+- The wheel ships the Espanso match files at `prompt_workflow/espanso/match/`, read through the
+  new `prompt_workflow.assets` module, so an installed (non-editable) package can deploy its
+  triggers (#85). `espanso/config/` is not shipped. A new CI job builds the sdist and wheel,
+  installs the wheel into a clean venv outside the checkout on Linux, macOS and Windows, and
+  checks that every match file and profile resolves and that `prompt-workflow persona` runs.
 - `-iok-` (`--allow-flagged`) sends one draft that the gate blocked only for soft findings: a
   confidentiality label, a Vietnamese ID number, an email address or an IBAN (#21). The paste
   starts with `[prompt-workflow: sent despite: …]`, and the next draft is checked as usual. Keys,

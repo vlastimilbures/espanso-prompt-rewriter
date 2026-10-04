@@ -175,6 +175,18 @@ _positive_float = _number(float, "a number above 0", lambda v: v > 0)
 _non_negative_float = _number(float, "a number of 0 or more", lambda v: v >= 0)
 
 
+def _builtin_profiles(raw: str) -> tuple[str, ...]:
+    """A comma-separated list of built-in profile names, duplicates dropped."""
+    names = tuple(dict.fromkeys(name.strip() for name in raw.split(",") if name.strip()))
+    if not names:
+        return ()
+    from .prompt_builder import PROFILES  # deferred: prompt_builder imports this module
+
+    if any(name not in PROFILES for name in names):
+        raise ValueError(f"empty or a comma-separated list of {', '.join(PROFILES)}")
+    return names
+
+
 TIERS = ("standard", "pro")
 # OpenRouter `reasoning.effort` values accepted by --effort.
 EFFORTS = ("none", "minimal", "low", "medium", "high")
@@ -258,6 +270,9 @@ class Settings:
     # Profile for the pro tier; empty (the default) uses PROMPT_PROFILE, so both tiers send
     # the same prompt. An escape hatch for a prompt tuned to OPENROUTER_PRO_MODEL.
     pro_profile: str = _env("PROMPT_PRO_PROFILE", "")
+    # Built-in profiles that a same-named file in the user profile directory replaces
+    # (prompt_builder.user_profiles_dir()). Empty: such a file is ignored, never a silent swap.
+    profile_overrides: tuple[str, ...] = _env("PROMPT_PROFILE_OVERRIDES", "", _builtin_profiles)
     lmstudio_base_url: str = _env("LMSTUDIO_BASE_URL", "http://localhost:1234/v1")
     lmstudio_model: str = _env("LMSTUDIO_MODEL", "local-model")
     anthropic_base_url: str = _env("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
