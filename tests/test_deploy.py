@@ -2,8 +2,11 @@
 the real Espanso folder, and the real espanso, uv and brew are never run (conftest refuses
 deploy.run_command; a test passes or patches in a fake runner)."""
 
+import hashlib
+import importlib.util
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -16,6 +19,7 @@ from typer.testing import CliRunner
 from prompt_workflow import assets, deploy
 from prompt_workflow.cli import app
 from prompt_workflow.config import user_data_dir
+from prompt_workflow.match_history import KNOWN_SOURCES
 
 runner = CliRunner()
 REPO = Path(__file__).resolve().parents[1]
@@ -325,7 +329,7 @@ def test_non_utf8_file_is_foreign(espanso):
 def test_detach_keep_static(espanso):
     deploy.apply(_plan(espanso))
     template = _edit(espanso, "prompts-template.yml")
-    outcome = deploy.detach(deploy.Manifest.load())
+    outcome = deploy.detach(deploy.Manifest.load(), espanso)
     match = espanso / "match"
     assert sorted(p.name for p in match.iterdir()) == sorted([STATIC, "prompts-template.yml"])
     assert "# my tweak" in template.read_text("utf-8")
@@ -339,11 +343,11 @@ def test_detach_keep_static(espanso):
 def test_detach_remove_all(espanso):
     deploy.apply(_plan(espanso))
     edited = _edit(espanso, STATIC)
-    deploy.detach(deploy.Manifest.load(), remove_all=True)
+    deploy.detach(deploy.Manifest.load(), espanso, remove_all=True)
     assert [p.name for p in (espanso / "match").iterdir()] == [STATIC]
     assert "# my tweak" in edited.read_text("utf-8")
     edited.unlink()
-    outcome = deploy.detach(deploy.Manifest.load(), remove_all=True)
+    outcome = deploy.detach(deploy.Manifest.load(), espanso, remove_all=True)
     assert any("already gone" in line for line in outcome.lines)
     assert not (user_data_dir() / deploy.MANIFEST_NAME).exists()
 
@@ -352,7 +356,7 @@ def test_detach_leaves_unowned_files(espanso):
     other = espanso / "match" / "mine.yml"
     other.write_text("matches: []\n", "utf-8")
     deploy.apply(_plan(espanso))
-    deploy.detach(deploy.Manifest.load(), remove_all=True)
+    deploy.detach(deploy.Manifest.load(), espanso, remove_all=True)
     assert [p.name for p in (espanso / "match").iterdir()] == ["mine.yml"]
 
 
@@ -721,13 +725,14 @@ def test_cli_status_bad_manifest(espanso, fake_run):
 
 
 def test_cli_detach(espanso, fake_run):
-    assert "Nothing to do" in _cli("detach", "--yes").stdout
+    where = ["--espanso-dir", str(espanso)]
+    assert "Nothing to do" in _cli("detach", "--yes", *where).stdout
     _cli("deploy", "--yes", *_where(espanso))
-    assert _cli("detach", input="n\n").exit_code == 1
-    result = _cli("detach", "--yes")
+    assert _cli("detach", *where, input="n\n").exit_code == 1
+    result = _cli("detach", "--yes", *where)
     assert result.exit_code == 0, result.output
     assert [p.name for p in (espanso / "match").iterdir()] == [STATIC]
-    result = _cli("detach", "--remove-all", "--yes", "--no-restart")
+    result = _cli("detach", "--remove-all", "--yes", "--no-restart", *where)
     assert not list((espanso / "match").iterdir())
 
 
@@ -769,3 +774,254 @@ def test_cli_deploy_retires_legacy(espanso, fake_run):
     assert "legacy    base.yml will be retired" in result.stdout
     assert "retired legacy" in result.stdout
     assert not (espanso / "match" / "base.yml").exists()
+
+
+# --- Hardening (#104 review) ----------------------------------------------------------------
+
+_hist_spec = importlib.util.spec_from_file_location(
+    "update_match_history", REPO / "scripts" / "update_match_history.py"
+)
+assert _hist_spec
+assert _hist_spec.loader
+history_script = importlib.util.module_from_spec(_hist_spec)
+_hist_spec.loader.exec_module(history_script)
+
+
+def _git_tags() -> bool:
+    git = shutil.which("git")
+    if git is None:
+        return False
+    tags = subprocess.run(
+        [git, "tag", "--list", "v*"], cwd=REPO, capture_output=True, text=True, timeout=30
+    )
+    return tags.returncode == 0 and bool(tags.stdout.split())
+
+
+# Every current source is listed, so an editable install's own deploy is recognised too.
+def test_match_history_has_the_current_sources():
+    for name, digests in history_script.current_digests().items():
+        assert digests <= KNOWN_SOURCES[name], (
+            f"{name} changed: run `uv run python scripts/update_match_history.py`"
+        )
+
+
+@pytest.mark.skipif(not _git_tags(), reason="needs a git checkout with the release tags")
+def test_match_history_has_every_release():
+    for name, digests in history_script.tagged_digests().items():
+        assert digests <= KNOWN_SOURCES.get(name, frozenset()), name
+
+
+@pytest.mark.skipif(not _git_tags(), reason="needs a git checkout with the release tags")
+@pytest.mark.parametrize("windows", [False, True], ids=["macos", "windows"])
+def test_file_an_old_script_wrote_is_stale(espanso, windows):
+    git = shutil.which("git")
+    old = subprocess.run(
+        [git, "show", "v0.14.0:espanso/match/prompts-llm.yml"],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=30,
+        check=True,
+    ).stdout
+    cli = (
+        r"C:\Users\me\.local\bin\prompt-workflow.exe"
+        if windows
+        else "/Users/me/bin/prompt-workflow"
+    )
+    render = _script_render_windows if windows else _script_render_macos
+    (espanso / "match" / "prompts-llm.yml").write_text(render(old, cli), "utf-8")
+    assert _states(espanso)["prompts-llm.yml"] == deploy.STALE
+
+
+def _old_release(monkeypatch, name="prompts-llm.yml"):
+    """An 'older release' of a match file, registered in the history like a real one."""
+    old = 'matches:\n  - trigger: "-old-"\n    cmd: "\\"__PROMPT_WORKFLOW__\\" improve"\n'
+    digest = hashlib.sha256(old.encode()).hexdigest()
+    monkeypatch.setitem(deploy.KNOWN_SOURCES, name, KNOWN_SOURCES[name] | {digest})
+    return old
+
+
+@pytest.mark.parametrize(
+    "launcher", ["/Users/me/old/prompt-workflow", "C:/Users/me/old/prompt-workflow.exe"]
+)
+def test_older_release_with_another_launcher_is_stale(monkeypatch, espanso, launcher):
+    old = _old_release(monkeypatch)
+    target = espanso / "match" / "prompts-llm.yml"
+    target.write_text(old.replace("__PROMPT_WORKFLOW__", launcher), "utf-8")
+    assert _states(espanso)["prompts-llm.yml"] == deploy.STALE
+    # ...also behind a stamp an earlier deploy wrote.
+    stamped = "# prompt-workflow 0.1.0 (managed; edit at your own risk)\n" + target.read_text(
+        "utf-8"
+    )
+    target.write_text(stamped, "utf-8")
+    assert _states(espanso)["prompts-llm.yml"] == deploy.STALE
+    outcome = deploy.apply(_plan(espanso))
+    assert not outcome.kept
+    assert target.read_text("utf-8") == _plan(espanso).steps[1].rendered
+
+
+def test_edited_older_release_is_foreign(monkeypatch, espanso):
+    old = _old_release(monkeypatch)
+    edited = old.replace("__PROMPT_WORKFLOW__", "/x/prompt-workflow") + "# mine\n"
+    (espanso / "match" / "prompts-llm.yml").write_text(edited, "utf-8")
+    assert _states(espanso)["prompts-llm.yml"] == deploy.FOREIGN
+
+
+def test_cli_warns_about_kept_files(espanso, fake_run):
+    (espanso / "match" / STATIC).write_text("matches: []\n", "utf-8")
+    result = _cli("deploy", "--yes", *_where(espanso))
+    assert result.exit_code == 0
+    assert "WARNING: 1 match file(s) kept as you have them and NOT updated: " in result.stderr
+    assert STATIC in result.stderr
+    assert "up to date" not in result.stdout
+    result = _cli("deploy", "--yes", "--on-conflict", "ours", *_where(espanso))
+    assert "WARNING" not in result.stderr
+    assert result.stdout.endswith("The match files are up to date.\n")
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "error"),
+    [
+        ("backups", "abc", "backups is not a list"),
+        ("backups", [1], "backups is not a list of paths"),
+        ("target", 5, "target is not a str"),
+        ("calls_cli", "yes", "calls_cli is not a bool"),
+        ("extra", 1, "has the fields"),
+    ],
+)
+def test_manifest_field_types(espanso, field, value, error):
+    deploy.apply(_plan(espanso))
+    path = user_data_dir() / deploy.MANIFEST_NAME
+    data = json.loads(path.read_text("utf-8"))
+    data["files"][0][field] = value
+    path.write_text(json.dumps(data), "utf-8")
+    with pytest.raises(deploy.DeployError, match=error):
+        deploy.Manifest.load()
+    result = _cli("status", *_where(espanso))
+    assert result.exit_code == 1
+    assert "is damaged" in result.stderr
+
+
+@pytest.mark.parametrize("files", ['"x"', '["x"]'])
+def test_manifest_files_shape(files):
+    path = user_data_dir() / deploy.MANIFEST_NAME
+    path.parent.mkdir(parents=True)
+    path.write_text(f'{{"format": 1, "files": {files}}}', "utf-8")
+    with pytest.raises(deploy.DeployError, match="is damaged"):
+        deploy.Manifest.load()
+
+
+# A listed backup that is not one of ours (elsewhere, or not named like one) is never deleted.
+def test_prune_deletes_only_our_backups(tmp_path, espanso):
+    target = espanso / "match" / "prompts-llm.yml"
+    elsewhere = tmp_path / "prompts-llm.yml.bak-20260101000000"
+    misnamed = espanso / "match" / "prompts-core.yml.bak-20260101000000"
+    ours = [espanso / "match" / f"prompts-llm.yml.bak-2026010100000{n}" for n in range(1, 5)]
+    for path in [elsewhere, misnamed, *ours]:
+        path.write_text("x", "utf-8")
+    kept = deploy._prune([str(elsewhere), str(misnamed), *map(str, ours)], target)
+    assert kept == [str(p) for p in ours[-2:]]
+    assert elsewhere.exists()
+    assert misnamed.exists()
+    assert [p.exists() for p in ours] == [False, False, True, True]
+
+
+def test_detach_only_touches_our_files_in_the_match_folder(tmp_path, espanso):
+    deploy.apply(_plan(espanso))
+    manifest = deploy.Manifest.load()
+    outside = tmp_path / "important.txt"
+    outside.write_text("keep me", "utf-8")
+    elsewhere = tmp_path / "other" / "match" / "prompts-llm.yml"
+    elsewhere.parent.mkdir(parents=True)
+    elsewhere.write_text("keep me too", "utf-8")
+    for path in (outside, elsewhere):
+        manifest.entries[str(path)] = deploy.Entry(
+            str(path), VERSION, deploy._digest(path.read_text("utf-8")), LAUNCHER, True
+        )
+    outcome = deploy.detach(manifest, espanso, remove_all=True)
+    assert outside.read_text("utf-8") == "keep me"
+    assert elsewhere.read_text("utf-8") == "keep me too"
+    assert sum("left" in line and "alone" in line for line in outcome.lines) == 2
+    assert not list((espanso / "match").iterdir())
+
+
+def test_relative_espanso_dir_is_stored_absolute(tmp_path, fake_run):
+    (tmp_path / "rel" / "match").mkdir(parents=True)  # conftest chdirs into tmp_path
+    result = _cli("deploy", "--yes", "--espanso-dir", "rel", "--launcher", LAUNCHER)
+    assert result.exit_code == 0, result.output
+    targets = list(deploy.Manifest.load().entries)
+    assert targets
+    assert all(Path(t).is_absolute() for t in targets)
+    assert all(Path(t).parent == (tmp_path / "rel" / "match").resolve() for t in targets)
+
+
+def _symlink(link: Path, to: Path) -> None:
+    try:
+        link.symlink_to(to)
+    except OSError:  # Windows without the symlink privilege
+        pytest.skip("symlinks are not available")
+
+
+def test_symlinked_target_is_foreign_and_kept(tmp_path, espanso):
+    real = tmp_path / "dotfiles" / "prompts-llm.yml"
+    real.parent.mkdir()
+    real.write_text("mine", "utf-8")
+    link = espanso / "match" / "prompts-llm.yml"
+    _symlink(link, real)
+    assert _states(espanso)["prompts-llm.yml"] == deploy.FOREIGN
+    deploy.apply(_plan(espanso))
+    assert link.is_symlink()
+    assert real.read_text("utf-8") == "mine"
+
+
+def test_writes_never_follow_a_planted_link(tmp_path, espanso):
+    victim = tmp_path / "victim.txt"
+    victim.write_text("safe", "utf-8")
+    match = espanso / "match"
+    _symlink(match / "prompts-llm.yml.tmp", victim)  # the old fixed temp name
+    deploy.apply(_plan(espanso))
+    assert victim.read_text("utf-8") == "safe"
+    assert not [p for p in match.iterdir() if p.name.startswith(".")]  # no temp left over
+
+
+def test_backup_skips_a_planted_link(tmp_path, espanso):
+    victim = tmp_path / "victim.txt"
+    target = espanso / "match" / "prompts-llm.yml"
+    target.write_text("mine", "utf-8")
+    _symlink(target.with_name("prompts-llm.yml.bak-20260101000000"), victim)  # dangling
+    backup = deploy._backup(target, "20260101000000")
+    assert backup.name == "prompts-llm.yml.bak-20260101000000-1"
+    assert backup.read_text("utf-8") == "mine"
+    assert not victim.exists()
+
+
+def test_backup_names_run_out(monkeypatch, espanso):
+    target = espanso / "match" / "a.yml"
+    target.write_text("x", "utf-8")
+    monkeypatch.setattr(Path, "is_symlink", lambda self: True)
+    with pytest.raises(deploy.DeployError, match="free backup name"):
+        deploy._backup(target, "20260101000000")
+
+
+def test_write_cleans_up_on_failure(monkeypatch, espanso):
+    def boom(src, dst):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(os, "replace", boom)
+    with pytest.raises(OSError, match="disk full"):
+        deploy._write(espanso / "match" / "a.yml", "x")
+    assert not list((espanso / "match").iterdir())
+
+
+def test_detach_leaves_a_link_alone(tmp_path, espanso):
+    deploy.apply(_plan(espanso))
+    link = espanso / "match" / "prompts-llm.yml"
+    real = tmp_path / "real.yml"
+    real.write_bytes(link.read_bytes())  # same digest as ours
+    link.unlink()
+    _symlink(link, real)
+    outcome = deploy.detach(deploy.Manifest.load(), espanso)
+    assert link.is_symlink()
+    assert real.exists()
+    assert any("it is a link" in line for line in outcome.lines)

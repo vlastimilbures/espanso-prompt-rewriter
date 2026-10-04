@@ -245,6 +245,14 @@ def _fail(exc: Exception) -> typer.Exit:
     return typer.Exit(1)
 
 
+def _espanso_root(espanso_dir: str | None) -> Path:
+    """Espanso's config folder, absolute, so the manifest records one spelling of each path."""
+    from . import deploy
+
+    found = deploy.espanso_dir() if espanso_dir is None else Path(espanso_dir).expanduser()
+    return found.resolve()
+
+
 def _make_plan(espanso_dir: str | None, launcher: str | None) -> Plan:
     from . import deploy
 
@@ -253,7 +261,7 @@ def _make_plan(espanso_dir: str | None, launcher: str | None) -> Plan:
         path, channel = str(found.path), found.channel
     else:
         path, channel = launcher, "given"
-    target = deploy.espanso_dir() if espanso_dir is None else Path(espanso_dir)
+    target = _espanso_root(espanso_dir)
     the_plan = deploy.plan(target, deploy.launcher_text(path), deploy.Manifest.load())
     typer.echo(f"Espanso match folder: {target / 'match'}")
     typer.echo(f"Launcher ({channel}): {path}")
@@ -351,6 +359,18 @@ def espanso_deploy(
         typer.echo(line)
     if outcome.changed:
         _restart(no_restart)
+    # A kept file is a safe outcome, not a failure (exit 0), but it is not up to date: say so
+    # last and loudly, so an install script's run cannot read as a full success.
+    if outcome.kept:
+        names = ", ".join(p.name for p in outcome.kept)
+        typer.echo(
+            f"WARNING: {len(outcome.kept)} match file(s) kept as you have them and NOT updated: "
+            f"{names}. Run `prompt-workflow espanso deploy` to choose for each, or add "
+            "`--on-conflict ours` to replace them (yours are backed up).",
+            err=True,
+        )
+    else:
+        typer.echo("The match files are up to date.")
 
 
 @espanso_app.command("detach")
@@ -360,6 +380,7 @@ def espanso_detach(
         "--keep-static/--remove-all",
         help="Remove only the matches that call the CLI (default), or every file we deployed",
     ),
+    espanso_dir: str | None = _ESPANSO_DIR,
     yes: bool = _YES,
     no_restart: bool = _NO_RESTART,
 ) -> None:
@@ -377,7 +398,7 @@ def espanso_detach(
             typer.echo(f"  {target}")
         if not yes:
             typer.confirm("Detach?", abort=True)
-        outcome = deploy.detach(manifest, remove_all=not keep_static)
+        outcome = deploy.detach(manifest, _espanso_root(espanso_dir), remove_all=not keep_static)
     except (deploy.DeployError, OSError) as exc:
         raise _fail(exc) from None
     for line in outcome.lines:

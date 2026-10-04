@@ -16,7 +16,9 @@ All notable changes to this project are documented here. The format follows
   risk)`; the rest is byte-identical to what the install scripts wrote. A file you edited is never
   overwritten silently: keep yours (the default with `--yes`), take ours with a
   `.bak-<timestamp>` backup (only our last 2 backups are kept), or write ours side by side
-  (`--on-conflict keep|ours|side`). `detach` keeps `-prompt-`/`-risk-` by default
+  (`--on-conflict keep|ours|side`); a deploy that kept a file ends with a `WARNING` naming it.
+  A file any earlier release's installer wrote, unedited, is recognised as ours and updated
+  (by digest of its source, `match_history.py`). `detach` keeps `-prompt-`/`-risk-` by default
   (`--keep-static`) or removes every deployed file (`--remove-all`), and changes only files
   still as we wrote them. The launcher is the install channel's stable entry point (uv's tool
   bin, Homebrew's `bin/`, Scoop's shim), never a versioned path an upgrade removes.

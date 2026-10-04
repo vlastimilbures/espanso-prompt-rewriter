@@ -56,10 +56,11 @@ if (-not (Test-Path $Cli) -or -not (Test-Path $ToolPython)) {
 & $ToolPython scripts\check_tool_lock.py --python $ToolPython
 Assert-Exit "lock check"
 
-# Shows the plan, keeps any match file you edited (see `prompt-workflow espanso status`),
-# writes the rest with this launcher (forward slashes, path guards), and restarts Espanso.
+Write-Host "Settings are read from $RepoDir\.env (copy .env.example), or from the file"
+Write-Host "named by PROMPT_WORKFLOW_ENV. Then test -p- and -i- in any text field."
+# Last, so its result is the final thing printed: it shows the plan, writes the match files
+# with this launcher (forward slashes, path guards) and restarts Espanso. A match file you
+# edited is kept, never overwritten, and it ends with a WARNING naming each one (exit 0:
+# keeping it is safe).
 & $Cli espanso deploy --yes --launcher $Cli
 Assert-Exit "prompt-workflow espanso deploy"
-Write-Host "Installed. Test -p- and -i- in any text field."
-Write-Host "Settings are read from $RepoDir\.env (copy .env.example), or from the file"
-Write-Host "named by PROMPT_WORKFLOW_ENV."

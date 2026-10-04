@@ -64,6 +64,8 @@ uv run pytest -m live
   `fix:`, `docs:`, `refactor:`, `test:`, `chore:`, `ci:`.
 - **Changelog.** Add a line under *Unreleased* in [CHANGELOG.md](CHANGELOG.md) for anything a user
   would notice.
+- **Releases.** After tagging `vX.Y.Z`, run `uv run python scripts/update_match_history.py` and
+  commit any change, so deploy keeps recognising every released match file.
 
 ## Releasing
 
@@ -169,6 +171,7 @@ espanso-prompt-rewriter/
 │   ├── profiles.py               migrate a checkout's own profiles to the user directory
 │   ├── assets.py                 the packaged Espanso match files (importlib.resources)
 │   ├── deploy.py                 espanso deploy/status/detach: manifest, states, stable launcher
+│   ├── match_history.py          generated: digests of every released match file source
 │   ├── prompts/
 │   │   ├── default.md            golden-template rewrite (-i-, -ip-, -if-)
 │   │   └── general.md            lighter "make this precise" rewrite (local triggers)
@@ -182,6 +185,7 @@ espanso-prompt-rewriter/
 │   ├── install_macos.sh          contributor install pinned to uv.lock, then espanso deploy
 │   ├── install_windows.ps1       the same for Windows
 │   ├── check_tool_lock.py        the tool venv's packages match uv.lock (#34)
+│   ├── update_match_history.py   regenerate match_history.py from the release tags
 │   ├── bench_models.py           score models on template fidelity, latency, cost
 │   ├── check_wheel.py            CI: what an installed wheel really contains
 │   └── release_notes.py          release: the version and its CHANGELOG notes
@@ -236,6 +240,12 @@ instead of typing short replies key by key.
       params:
         cmd: "\"__PROMPT_WORKFLOW__\" improve --provider ollama --profile regulation --source clipboard"
 ```
+
+Any change to a file in `espanso/match/` needs
+`uv run python scripts/update_match_history.py` (also run it at every release, after tagging):
+it records the source's digest in `src/prompt_workflow/match_history.py`, so `espanso deploy`
+later recognises a file this version wrote as its own (stale) rather than foreign, and
+`tests/test_deploy.py` fails until it is run.
 
 `tests/test_yaml.py` checks the placeholder, quoting and `force_mode`, and that the profile and
 provider exist. Add the trigger's expected provider, profile and tier to `EXPECTED` in

@@ -18,6 +18,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -25,6 +26,7 @@ from pathlib import Path
 
 from . import __version__, assets
 from .config import user_data_dir
+from .match_history import KNOWN_SOURCES
 
 PLACEHOLDER = "__PROMPT_WORKFLOW__"
 STAMP = "# prompt-workflow {version} (managed; edit at your own risk)\n"
@@ -47,6 +49,8 @@ CHOICES = (KEEP, OURS, SIDE)
 # install scripts had). On Windows the path is checked after its backslashes become slashes.
 _UNSAFE_POSIX = re.compile(r'["$`\\]')
 _UNSAFE_WINDOWS = re.compile(r'["%^&|<>]')
+# The quoted launcher in a cmd line as every release wrote it: `cmd: "\"<path>\" improve`.
+_QUOTED_LAUNCHER = re.compile(r'\\"([^"\\]+)\\"')
 # A path component that names a release (0.15.0, 0.15.0_1): gone after the next upgrade.
 _VERSIONED = re.compile(r"\d+(\.\d+)+([._-].*)?")
 
@@ -199,6 +203,31 @@ class Entry:
     backups: list[str] = field(default_factory=list)
 
 
+_ENTRY_TYPES = {
+    "target": str,
+    "asset_version": str,
+    "digest": str,
+    "launcher": str,
+    "calls_cli": bool,
+    "backups": list,
+}
+
+
+def _entry_problem(item: object) -> str | None:
+    """Why a manifest entry is not one we wrote, or None. Checked field by field, since a
+    path in it is later written, read or deleted."""
+    if not isinstance(item, dict):
+        return "an entry is not an object"
+    if set(item) != set(_ENTRY_TYPES):
+        return f"an entry has the fields {sorted(item)}"
+    for key, kind in _ENTRY_TYPES.items():
+        if not isinstance(item[key], kind):
+            return f"{key} is not a {kind.__name__}"
+    if not all(isinstance(b, str) for b in item["backups"]):
+        return "backups is not a list of paths"
+    return None
+
+
 @dataclass
 class Manifest:
     path: Path
@@ -215,10 +244,15 @@ class Manifest:
             raise DeployError(f"The deploy manifest {path} cannot be read: {exc}") from None
         if not isinstance(raw, dict) or raw.get("format") != MANIFEST_FORMAT:
             raise DeployError(f"The deploy manifest {path} has an unknown format")
-        try:
-            entries = {e["target"]: Entry(**e) for e in raw.get("files", [])}
-        except (TypeError, KeyError) as exc:
-            raise DeployError(f"The deploy manifest {path} is damaged: {exc}") from None
+        files = raw.get("files", [])
+        if not isinstance(files, list):
+            raise DeployError(f"The deploy manifest {path} is damaged: files is not a list")
+        entries = {}
+        for item in files:
+            problem = _entry_problem(item)
+            if problem:
+                raise DeployError(f"The deploy manifest {path} is damaged: {problem}")
+            entries[item["target"]] = Entry(**item)
         return cls(path, entries)
 
     def save(self) -> None:
@@ -231,11 +265,18 @@ class Manifest:
 
 
 def _write(path: Path, text: str) -> None:
-    """Write UTF-8 with the text's own newlines, through a temp file and an atomic rename."""
+    """Write UTF-8 with the text's own newlines, through a new temp file in the same folder
+    and an atomic rename. mkstemp creates the temp file exclusively, so a planted link there
+    is never followed, and the rename replaces a link at ``path`` instead of writing through it."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_bytes(text.encode("utf-8"))
-    os.replace(tmp, path)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as out:
+            out.write(text.encode("utf-8"))
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
 
 
 def _read(path: Path) -> str | None:
@@ -297,19 +338,37 @@ class Plan:
         return [s for s in self.steps if s.state in (MODIFIED, FOREIGN)]
 
 
-def _state(current: str | None, rendered: str, entry: Entry | None) -> str:
+def _released_rendering(name: str, current: str, launchers: Sequence[str]) -> bool:
+    """True when ``current`` is exactly what an install script or an earlier deploy wrote from
+    a source some release shipped (match_history): its stamp, if any, dropped and the
+    launcher it holds put back as the placeholder. Any edit changes the digest."""
+    known = KNOWN_SOURCES.get(name, frozenset())
+    body = _STAMP_LINE.sub("", current, count=1)
+    # Every release quoted the launcher the same way; Windows paths have forward slashes.
+    candidates = {*_QUOTED_LAUNCHER.findall(body), *launchers}
+    for launcher in [None, *sorted(candidates)]:
+        source = body if launcher is None else body.replace(launcher, PLACEHOLDER)
+        if hashlib.sha256(source.encode("utf-8")).hexdigest() in known:
+            return True
+    return False
+
+
+def _state(
+    name: str, target: Path, current: str | None, rendered: str, entry: Entry | None, launcher: str
+) -> str:
     if current is None:
         return MISSING
+    if target.is_symlink():
+        return FOREIGN  # the user's own link (a dotfiles repo): never replaced unasked
     if current == rendered:
         return IN_SYNC
-    if entry is not None:
-        return STALE if _digest(current) == entry.digest else MODIFIED
-    # No manifest entry: a file the install scripts wrote (no stamp), or one we stamped
-    # before the manifest was lost, whose body is exactly today's rendering, is ours.
-    body = rendered.split("\n", 1)[1]
-    if _STAMP_LINE.sub("", current, count=1) == body:
+    if entry is not None and _digest(current) == entry.digest:
         return STALE
-    return FOREIGN
+    # No entry, or one that no longer matches: still ours if it is a released rendering
+    # (an older install script wrote it, or the manifest was lost).
+    if _released_rendering(name, current, [launcher]):
+        return STALE
+    return MODIFIED if entry is not None else FOREIGN
 
 
 def _legacy_base(match_dir: Path) -> Path | None:
@@ -335,7 +394,7 @@ def plan(espanso: Path, launcher: str, manifest: Manifest) -> Plan:
             FileStep(
                 name,
                 target,
-                _state(current, rendered, entry),
+                _state(name, target, current, rendered, entry, launcher),
                 current,
                 rendered,
                 PLACEHOLDER in source,
@@ -354,6 +413,8 @@ class Outcome:
 
     lines: list[str] = field(default_factory=list)
     changed: bool = False
+    # Files left as the user has them, so not up to date: the command warns about each.
+    kept: list[Path] = field(default_factory=list)
 
     def add(self, line: str, *, changed: bool = True) -> None:
         self.lines.append(line)
@@ -365,20 +426,39 @@ def _stamp() -> str:
 
 
 def _backup(path: Path, stamp: str) -> Path:
-    backup = path.with_name(f"{path.name}.bak-{stamp}")
-    n = 1
-    while backup.exists():  # two deploys within one second
-        backup = path.with_name(f"{path.name}.bak-{stamp}-{n}")
-        n += 1
-    backup.write_bytes(path.read_bytes())
-    return backup
+    """Copy ``path`` to a new `<name>.bak-<stamp>[-n]` next to it, never through a link."""
+    data = path.read_bytes()
+    for n in range(1000):
+        backup = path.with_name(f"{path.name}.bak-{stamp}" + (f"-{n}" if n else ""))
+        # Windows follows a dangling link on exclusive create, writing outside the folder.
+        if backup.is_symlink():
+            continue
+        try:
+            with backup.open("xb") as out:  # exclusive: an existing file is never replaced
+                out.write(data)
+        except FileExistsError:
+            continue  # two deploys within one second
+        return backup
+    raise DeployError(f"Could not find a free backup name for {path}")
 
 
-def _prune(backups: list[str]) -> list[str]:
-    """Delete all but the newest KEEP_BACKUPS of our own backups (listed oldest first)."""
-    for old in backups[:-KEEP_BACKUPS]:
+def _is_our_backup(path: Path, target: Path) -> bool:
+    """A backup _backup() made of ``target``: in its folder and named exactly like one."""
+    pattern = re.escape(target.name) + r"\.bak-\d{14}(-\d+)?"
+    try:
+        same_dir = path.parent.resolve() == target.parent.resolve()
+    except OSError:
+        return False
+    return same_dir and bool(re.fullmatch(pattern, path.name)) and not path.is_symlink()
+
+
+def _prune(backups: list[str], target: Path) -> list[str]:
+    """Delete all but the newest KEEP_BACKUPS of our own backups of ``target`` (listed oldest
+    first). A listed path that is not one is dropped from the list, never deleted."""
+    ours = [b for b in backups if _is_our_backup(Path(b), target)]
+    for old in ours[:-KEEP_BACKUPS]:
         Path(old).unlink(missing_ok=True)
-    return backups[-KEEP_BACKUPS:]
+    return ours[-KEEP_BACKUPS:]
 
 
 def apply(the_plan: Plan, choices: Mapping[str, str] | None = None) -> Outcome:
@@ -406,11 +486,13 @@ def apply(the_plan: Plan, choices: Mapping[str, str] | None = None) -> Outcome:
                 raise DeployError(f"Unknown choice {choice!r} for {step.name}")
             if choice == KEEP:
                 outcome.add(f"kept your {step.state} {step.target}", changed=False)
+                outcome.kept.append(step.target)
                 continue
             if choice == SIDE:
                 side = step.target.with_name(step.target.name + SIDE_SUFFIX)
                 _write(side, step.rendered)
                 outcome.add(f"wrote ours next to your {step.target.name}: {side}", changed=False)
+                outcome.kept.append(step.target)
                 continue
             backups.append(str(_backup(step.target, stamp)))
             outcome.add(f"replaced {step.target} (yours backed up to {Path(backups[-1]).name})")
@@ -429,7 +511,7 @@ def apply(the_plan: Plan, choices: Mapping[str, str] | None = None) -> Outcome:
             digest=_digest(step.rendered),
             launcher=the_plan.launcher,
             calls_cli=step.calls_cli,
-            backups=_prune(backups),
+            backups=_prune(backups, step.target),
         )
     manifest.save()
     return outcome
@@ -438,14 +520,23 @@ def apply(the_plan: Plan, choices: Mapping[str, str] | None = None) -> Outcome:
 # --- Detach -------------------------------------------------------------------------------
 
 
-def detach(manifest: Manifest, *, remove_all: bool = False) -> Outcome:
+def detach(manifest: Manifest, espanso: Path, *, remove_all: bool = False) -> Outcome:
     """Remove the files we own. --keep-static (the default, D-UNI-1) removes only the files
     that call the CLI, so -prompt-/-risk- stay as plain static snippets; --remove-all removes
     every owned file. A file the user edited since our last deploy is kept and reported, and
-    our backups (the user's earlier versions) are never deleted here."""
+    our backups (the user's earlier versions) are never deleted here. Only entries for one of
+    our match files in ``espanso``'s match/ folder are acted on; any other is reported."""
     outcome = Outcome()
+    match_dir = (espanso / "match").resolve()
+    names = set(assets.match_names())
     for key, entry in sorted(manifest.entries.items()):
         target = Path(entry.target)
+        if target.name not in names or target.parent.resolve() != match_dir:
+            outcome.add(f"left {target} alone: not one of ours in {match_dir}", changed=False)
+            continue
+        if target.is_symlink():
+            outcome.add(f"left {target} alone: it is a link", changed=False)
+            continue
         current = _read(target)
         if current is None:
             del manifest.entries[key]

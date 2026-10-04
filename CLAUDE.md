@@ -163,12 +163,22 @@ prompt-workflow espanso status  # missing / in sync / stale / modified / foreign
   `__PROMPT_WORKFLOW__`, byte-identical to the old scripts otherwise, see `tests/test_deploy.py`)
   and compares it with disk and the manifest (`user_data_dir()/espanso-manifest.json`: target,
   asset version, digest, launcher, backups) into `missing`/`in sync`/`stale`/`modified`/`foreign`.
-  A file matching the old scripts' rendering without a stamp counts as ours (`stale`).
+  A file that is exactly what any release wrote counts as ours (`stale`): stamp dropped, the
+  quoted launcher (`\"<path>\"`, so Windows forward slashes too) put back as the placeholder,
+  and its SHA-256 found in `match_history.KNOWN_SOURCES` (generated from the `v*` tags plus the
+  current sources by `scripts/update_match_history.py`; rerun after editing `espanso/match/`
+  and at each release, `tests/test_deploy.py` checks it). A symlinked target is `foreign`.
+  `Manifest.load()` type-checks every field (`DeployError` otherwise), writes go through
+  `mkstemp` in the same folder + `os.replace`, and backups use `"xb"` after an `is_symlink()`
+  check.
   `apply()` writes only into `<espanso>/match/` (never `config/`, #37), keeps a modified/foreign
-  file unless the caller chose `ours` (timestamped backup, our backups pruned to 2) or `side`
-  (`<name>.prompt-workflow-new`), and retires the pre-0.9 `match/base.yml` with a backup.
+  file unless the caller chose `ours` (timestamped backup; pruning to 2 deletes only paths in the
+  target's folder named exactly `<name>.bak-<14 digits>[-n]`) or `side`
+  (`<name>.prompt-workflow-new`), and retires the pre-0.9 `match/base.yml` with a backup. The
+  CLI ends a deploy that kept a file with a stderr `WARNING:` naming it (exit 0).
   `detach()` (default `--keep-static`, D-UNI-1) removes only owned files whose digest still
-  matches. `resolve_launcher()` picks the channel's stable entry point (uv tool bin, Homebrew
+  matches, and only entries naming one of `assets.match_names()` in the current (resolved)
+  Espanso match folder; `--espanso-dir` is resolved to an absolute path first. `resolve_launcher()` picks the channel's stable entry point (uv tool bin, Homebrew
   `<prefix>/bin` or `opt`, Scoop shim, else a running console script outside any versioned,
   `Cellar` or `.venv` dir); `launcher_text()` keeps the old path guards (POSIX refuses
   a quote, `$`, backtick or backslash; Windows converts to `/` and refuses `" % ^ & | < >`). Every external command

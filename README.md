@@ -219,7 +219,8 @@ risk)`.
 A file you edited is never overwritten silently: `deploy` asks whether to keep yours, take ours
 (yours is saved as `<file>.bak-<timestamp>`; only the last 2 of these backups are kept) or write
 ours side by side as `<file>.prompt-workflow-new`, which Espanso does not load. With `--yes` it
-keeps yours unless you pass `--on-conflict ours|side`. `detach` likewise removes only files whose
+keeps yours unless you pass `--on-conflict ours|side`, and ends with a `WARNING` naming each file
+it kept. A file an older release's installer wrote, unedited, is recognised as ours and updated. `detach` likewise removes only files whose
 content is still what we wrote, and reports any you edited. The launcher written into the
 matches is the install channel's stable entry point (uv's tool bin, Homebrew's `bin/`, Scoop's
 shim), never a versioned path an upgrade would remove; `--launcher PATH` overrides it.
