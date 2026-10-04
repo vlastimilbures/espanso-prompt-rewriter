@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import ipaddress
 import re
 from collections.abc import Mapping
 from typing import Protocol
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -23,6 +25,17 @@ def chat_messages(system_prompt: str, prompt: str) -> list[dict[str, str]]:
     ]
 
 
+def is_loopback(url: str) -> bool:
+    """Whether the URL's host is this machine: localhost, 127.0.0.0/8 or ::1."""
+    host = urlsplit(url).hostname or ""
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
 def post_json(
     label: str,
     url: str,
@@ -31,9 +44,14 @@ def post_json(
     json: object = None,
     headers: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
-    """POST and return the parsed JSON body, wrapping httpx errors as ProviderError."""
+    """POST and return the parsed JSON body, wrapping httpx errors as ProviderError.
+
+    A loopback URL is reached directly, ignoring HTTP(S)_PROXY/ALL_PROXY and the
+    macOS/Windows system proxy: a call to this machine has no reason to go anywhere else.
+    Other URLs keep using the proxy, which corporate networks need.
+    """
     try:
-        with httpx.Client(timeout=timeout) as client:
+        with httpx.Client(timeout=timeout, trust_env=not is_loopback(url)) as client:
             response = client.post(url, json=json, headers=headers)
             response.raise_for_status()
             return response.json()  # type: ignore[no-any-return]

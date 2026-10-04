@@ -1,10 +1,24 @@
+import json
+import threading
+import urllib.request
+from collections.abc import Iterator
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
 import httpx
 import pytest
 
 from prompt_workflow.config import Settings
 from prompt_workflow.factory import make_provider
+from prompt_workflow.gate import GatedProvider
 from prompt_workflow.providers.anthropic import ANTHROPIC_VERSION, AnthropicProvider
-from prompt_workflow.providers.base import TRUNCATED_NOTE, Provider, ProviderError
+from prompt_workflow.providers.base import (
+    TRUNCATED_NOTE,
+    Provider,
+    ProviderError,
+    is_loopback,
+    post_json,
+)
 from prompt_workflow.providers.ollama import OllamaProvider
 from prompt_workflow.providers.openai_compatible import OpenAICompatibleProvider
 
@@ -53,7 +67,7 @@ def test_ollama_request_shape(fake_http):
     OllamaProvider("http://x/", "m", timeout=7, think=True, temperature=0.2).generate(
         "draft", "sys"
     )
-    assert fake_http.client_kwargs == [{"timeout": 7}]
+    assert fake_http.client_kwargs == [{"timeout": 7, "trust_env": True}]
     assert fake_http.calls == [
         {
             "url": "http://x/api/chat",
@@ -307,3 +321,104 @@ def test_truncated_without_text_asks_for_more_tokens(fake_http, name, text):
 def test_provider_repr_hides_api_key():
     assert "sekret" not in repr(OpenAICompatibleProvider("http://x", "m", api_key="sekret"))
     assert "sekret" not in repr(AnthropicProvider("http://x", "m", "sekret"))
+
+
+# --- Proxies: loopback is reached directly, anything else may use a proxy. ---------------
+
+_PROXY_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY")
+
+
+@contextmanager
+def _http_server(reply: dict) -> Iterator[tuple[str, list[str]]]:
+    """A loopback HTTP server that answers every POST with ``reply`` and records the
+    request lines it saw. Used both as a local model server and as a stand-in proxy."""
+    seen: list[str] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_POST(self):
+            self.rfile.read(int(self.headers["Content-Length"]))
+            seen.append(self.requestline)
+            body = json.dumps(reply).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}", seen
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def _route_through_proxy(monkeypatch, route: str, proxy: str) -> None:
+    """Point httpx at ``proxy`` the way a machine can: an env var, or the macOS/Windows
+    system proxy that urllib.request.getproxies() reports (patched where httpx calls it)."""
+    for var in _PROXY_VARS:
+        monkeypatch.delenv(var, raising=False)
+        monkeypatch.delenv(var.lower(), raising=False)
+    if route == "system":
+        monkeypatch.setattr(httpx._utils, "getproxies", lambda: {"http": proxy, "https": proxy})
+    else:
+        # Env vars only, so this machine's own system proxy cannot leak into the test.
+        monkeypatch.setattr(httpx._utils, "getproxies", urllib.request.getproxies_environment)
+        monkeypatch.setenv(route, proxy)
+
+
+# (base URL setting, path under the server root, success body) for every provider whose
+# base URL may be loopback; OpenRouter accepts a plain-http loopback URL (a local proxy).
+_LOOPBACK = {
+    "ollama": ("OLLAMA_BASE_URL", "", _ollama_body("ok")),
+    "lmstudio": ("LMSTUDIO_BASE_URL", "/v1", _openai_body("ok")),
+    "openrouter": ("OPENROUTER_BASE_URL", "/api/v1", _openai_body("ok")),
+}
+
+
+# A loopback provider connects straight to this machine, whatever proxy is configured.
+@pytest.mark.parametrize("route", ["HTTP_PROXY", "ALL_PROXY", "system"])
+@pytest.mark.parametrize("name", list(_LOOPBACK))
+def test_loopback_provider_bypasses_proxy(monkeypatch, name, route):
+    setting, path, body = _LOOPBACK[name]
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    with _http_server(body) as (target, target_seen), _http_server(body) as (proxy, proxy_seen):
+        _route_through_proxy(monkeypatch, route, proxy)
+        monkeypatch.setenv(setting, target + path)
+        assert make_provider(name, Settings()).generate("draft", "sys") == "ok"
+    assert proxy_seen == []
+    assert len(target_seen) == 1
+
+
+# A remote endpoint still goes through the configured proxy, which corporate networks need.
+@pytest.mark.parametrize("route", ["HTTP_PROXY", "system"])
+def test_remote_provider_keeps_proxy(monkeypatch, route):
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://ollama.example.test:11434")
+    with _http_server(_ollama_body("ok")) as (proxy, proxy_seen):
+        _route_through_proxy(monkeypatch, route, proxy)
+        provider = make_provider("ollama", Settings())
+        assert isinstance(provider, GatedProvider)
+        assert provider.generate("draft", "sys") == "ok"
+    assert proxy_seen == ["POST http://ollama.example.test:11434/api/chat HTTP/1.1"]
+
+
+# post_json decides per URL: no env or system proxy settings for this machine only.
+@pytest.mark.parametrize(
+    ("url", "trust_env"),
+    [
+        ("http://localhost:11434/api/chat", False),
+        ("http://127.0.0.2:1234/v1/chat/completions", False),
+        ("http://[::1]:11434/api/chat", False),
+        ("https://openrouter.ai/api/v1/chat/completions", True),
+        ("http://192.168.1.20:11434/api/chat", True),
+        ("http://localhost.example.com/api/chat", True),
+    ],
+)
+def test_post_json_trusts_env_only_off_loopback(fake_http, url, trust_env):
+    post_json("X", url, 5, json={})
+    assert fake_http.client_kwargs == [{"timeout": 5, "trust_env": trust_env}]
+    assert is_loopback(url) is not trust_env

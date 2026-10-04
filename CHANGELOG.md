@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Changed
+- Calls to a `localhost` base URL (Ollama, LM Studio, or a local proxy as `OPENROUTER_BASE_URL`)
+  now connect directly and ignore `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and the system proxy.
+  Remote endpoints still use them.
+- `.env` now sets only the settings listed in the README. Any other variable there (for example
+  `HTTPS_PROXY` or `SSL_CERT_FILE`) is ignored; set it in the real environment instead.
+
 ## 0.12.0
 
 ### Changed
