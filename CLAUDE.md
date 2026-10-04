@@ -82,7 +82,11 @@ Espanso does not inherit shell PATH):
   `HOME`, `XDG_CONFIG_HOME`, `APPDATA` and `_PROJECT_ROOT` at temp dirs.
 - `config_files.py` — the light read side (on the trigger path: `tomllib` only once a file
   exists) and `write_atomic()` (temp file in the same dir + `os.replace`; mode 600 from creation
-  on POSIX, a user-only `icacls` ACL applied while empty on Windows, no plaintext fallback).
+  on POSIX; on Windows a protected single-ACE DACL for the current user's SID, set via Win32
+  while the file is empty and read back, else `SecretStoreError`; no plaintext fallback).
+  A config dir that is a file or unreadable, or a `config.toml`/`secrets.toml` that is not a
+  regular file, counts as absent; only a real but unreadable file fails closed. The
+  migration marker is written before any change and names every place a `.env` may go.
 - `config_store.py` — services for the management commands (#92), never on the trigger path:
   `save_settings()` (validates with the field parsers, refuses secrets, a newer
   `config_version`, and a file changed since its `read_settings()` snapshot, naming the changed

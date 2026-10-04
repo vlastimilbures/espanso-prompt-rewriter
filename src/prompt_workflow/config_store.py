@@ -256,10 +256,20 @@ def _marker(directory: Path) -> Path:
 
 
 def _file_digest(path: Path) -> str | None:
+    """The sha256 of a file's bytes; None when there is no such file."""
     try:
         return config_files.digest(path.read_bytes())
-    except FileNotFoundError:
-        return None
+    except OSError:
+        if not config_files.is_file(path):
+            return None
+        raise
+
+
+def _backup_names(directory: Path) -> list[str]:
+    try:
+        return sorted(os.listdir(directory / BACKUP_DIR))
+    except OSError:
+        return []
 
 
 def _token(*parts: object) -> str:
@@ -281,9 +291,9 @@ def plan_migration(environ: Mapping[str, str] | None = None) -> MigrationPlan:
             "PROMPT_WORKFLOW_ENV is set, so that .env stays in use as it is; unset it to migrate"
         )
     directory = config_dir(env)
-    if _marker(directory).exists():
+    if config_files.is_file(_marker(directory)):
         return MigrationPlan("migrated")
-    if config.settings_file(env).exists():
+    if config_files.is_file(config.settings_file(env)):
         return MigrationPlan("saved")
 
     sources: list[EnvSource] = []
@@ -338,6 +348,9 @@ def plan_migration(environ: Mapping[str, str] | None = None) -> MigrationPlan:
         _file_digest(directory / config_files.SECRETS_FILE),
         settings,
         sorted(secret_values),
+        # Every migration attempt adds a backup directory, so a preview's token cannot be
+        # replayed after a migration and its rollback restored the same files.
+        _backup_names(directory),
     )
     return MigrationPlan(
         "ready", tuple(sources), settings, secret_values, tuple(defaults), tuple(ignored), token
@@ -381,7 +394,7 @@ def _write_marker(directory: Path, record: Mapping[str, Any]) -> None:
 def _move(source: Path, target: Path) -> bool:
     """Rename ``source`` to ``target`` (never over an existing file); False when it fails,
     for example across file systems."""
-    if target.exists():
+    if config_files.lexists(target):
         return False
     try:
         source.rename(target)
@@ -417,9 +430,35 @@ def apply_migration(environ: Mapping[str, str] | None = None, *, consent: str) -
     before = _effective(env)
     backup, stamp = _new_backup_dir(directory)
     secrets_copy = None
-    if secrets_path.exists():
-        secrets_copy = backup / config_files.SECRETS_FILE
-        config_files.write_atomic(secrets_copy, secrets_path.read_bytes(), private=True)
+    targets = {
+        s.path: backup / f"{index}-{_label(s.path)}.env.inactive"
+        for index, s in enumerate(plan.sources, start=1)
+    }
+    record: dict[str, Any] = {
+        "migrated_at": stamp,
+        "backup": str(backup),
+        "secrets_backup": None,
+        "sources": [
+            {
+                "from": str(s.path),
+                "to": str(targets[s.path]),
+                "in_place": str(s.path.with_name(f".env.inactive-{stamp}")),
+                "sha256": s.digest,
+            }
+            for s in plan.sources
+        ],
+    }
+    try:
+        if config_files.is_file(secrets_path):
+            secrets_copy = backup / config_files.SECRETS_FILE
+            config_files.write_atomic(secrets_copy, secrets_path.read_bytes(), private=True)
+            record["secrets_backup"] = secrets_copy.name
+        # Written before anything changes, and naming every place a .env may move to, so a
+        # rollback can undo whatever happened after it, even a run cut short.
+        _write_marker(directory, record)
+    except (OSError, SecretStoreError) as exc:
+        _marker(directory).unlink(missing_ok=True)
+        raise MigrationError(f"nothing was migrated: {exc}") from None
 
     try:
         store = config_files.secret_store(directory)
@@ -430,61 +469,46 @@ def apply_migration(environ: Mapping[str, str] | None = None, *, consent: str) -
         config_files.write_atomic(settings_path, config_files.dump_toml(table), private=False)
         after = _effective(env)
     except (ValueError, OSError, SecretStoreError) as exc:
-        _undo(settings_path, secrets_path, secrets_copy)
+        _undo(directory, settings_path, secrets_path, secrets_copy)
         raise MigrationError(f"nothing was migrated: {exc}") from None
     env_sources = {f"file:{s.path}" for s in plan.sources}
     changed = sorted(k for k in before if before[k][0] != after[k][0])
     still = sorted(k for k, (_, source) in after.items() if source in env_sources)
     if changed or still:
-        _undo(settings_path, secrets_path, secrets_copy)
+        _undo(directory, settings_path, secrets_path, secrets_copy)
         raise MigrationError(
             f"nothing was migrated: reloading changed {', '.join(changed or still)}"
         )
 
-    targets = {
-        s.path: backup / f"{index}-{_label(s.path)}.env.inactive"
-        for index, s in enumerate(plan.sources, start=1)
-    }
-    record: dict[str, Any] = {
-        "migrated_at": stamp,
-        "backup": str(backup),
-        "secrets_backup": secrets_copy.name if secrets_copy else None,
-        "sources": [
-            {"from": str(s.path), "to": str(targets[s.path]), "sha256": s.digest}
-            for s in plan.sources
-        ],
-    }
-    # Written before the moves, so a rollback finds every file even if one move is cut short.
-    _write_marker(directory, record)
     moved: dict[Path, Path] = {}
     left: list[Path] = []
     for entry in record["sources"]:
-        source = Path(entry["from"])
-        in_place = source.with_name(f".env.inactive-{stamp}")
+        source, in_place = Path(entry["from"]), Path(entry["in_place"])
         if _file_digest(source) != entry["sha256"]:
             # Edited since the preview: left where it is (ignored from now on), unmoved.
             left.append(source)
-            entry["to"] = None
         elif _move(source, targets[source]):
             moved[source] = targets[source]
         elif _move(source, in_place):
             moved[source] = in_place
-            entry["to"] = str(in_place)
         else:
             left.append(source)
-            entry["to"] = None
-    _write_marker(directory, record)
     return MigrationResult(backup, moved, tuple(left))
 
 
-def _undo(settings_path: Path, secrets_path: Path, secrets_copy: Path | None) -> None:
-    """Undo a migration's own writes after a failed verification: config.toml did not
-    exist before (plan_migration requires that), and secrets.toml gets its old bytes back."""
-    settings_path.unlink(missing_ok=True)
+def _undo(
+    directory: Path, settings_path: Path, secrets_path: Path, secrets_copy: Path | None
+) -> None:
+    """Undo a migration's own writes after a failure: config.toml was not a file before
+    (plan_migration requires that), secrets.toml gets its old bytes back (or is removed when
+    there was none), and the marker goes."""
+    if config_files.is_file(settings_path):
+        settings_path.unlink()
     if secrets_copy is not None:
         config_files.write_atomic(secrets_path, secrets_copy.read_bytes(), private=True)
-    else:
-        secrets_path.unlink(missing_ok=True)
+    elif config_files.is_file(secrets_path):
+        secrets_path.unlink()
+    _marker(directory).unlink(missing_ok=True)
 
 
 @dataclass(frozen=True)
@@ -527,14 +551,15 @@ def plan_rollback(environ: Mapping[str, str] | None = None) -> RollbackPlan:
     restores: list[tuple[Path, Path]] = []
     for entry in record["sources"]:
         original = Path(entry["from"])
-        stored = Path(entry["to"]) if entry["to"] else None
-        if stored is not None and stored.exists():
-            if original.exists():
+        places = [Path(entry[key]) for key in ("to", "in_place") if entry.get(key)]
+        stored = next((place for place in places if config_files.is_file(place)), None)
+        if stored is not None:
+            if config_files.lexists(original):
                 raise MigrationError(f"{original} exists again; move it away to roll back")
             if _file_digest(stored) != entry["sha256"]:
                 raise MigrationError(f"{stored} changed since the migration; restore it by hand")
             restores.append((stored, original))
-        elif not original.exists():
+        elif not config_files.is_file(original):
             raise MigrationError(f"the backup of {original} is missing; restore it by hand")
     token = _token(
         config_files.digest(data),
@@ -557,7 +582,9 @@ def apply_rollback(environ: Mapping[str, str] | None = None, *, consent: str) ->
     record, _ = _read_marker(directory)
     stamp = _stamp()
     for path in (config.settings_file(env), directory / config_files.SECRETS_FILE):
-        if path.exists() and not _move(path, plan.backup / f"rolled-back-{stamp}-{path.name}"):
+        if config_files.is_file(path) and not _move(
+            path, plan.backup / f"rolled-back-{stamp}-{path.name}"
+        ):
             raise MigrationError(f"could not move {path} into the backup; rollback stopped")
     if record.get("secrets_backup"):
         old = (plan.backup / record["secrets_backup"]).read_bytes()

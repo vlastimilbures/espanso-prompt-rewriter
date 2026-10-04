@@ -26,8 +26,6 @@ VERSION_KEY = "config_version"
 CONFIG_VERSION = 1
 
 _WINDOWS = os.name == "nt"
-# Seconds a Windows ACL helper (icacls, whoami) may take.
-_SUBPROCESS_TIMEOUT = 10
 
 
 class ConfigFileError(ValueError):
@@ -49,19 +47,33 @@ def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def is_file(path: Path) -> bool:
+    """``path`` is a regular file; False, never an error, when it is missing, a directory, or
+    cannot be checked (its folder is a file, or unreadable)."""
+    return os.path.isfile(path)
+
+
+def lexists(path: Path) -> bool:
+    """Something (a file, a folder, a link) is at ``path``; False when it cannot be checked."""
+    return os.path.lexists(path)
+
+
 def load_toml(path: Path) -> tuple[dict[str, Any], str] | None:
-    """The parsed table of a TOML file and the sha256 of its bytes, or None when it does not
-    exist. Raises ConfigFileError when it exists but cannot be read or parsed."""
+    """The parsed table of a TOML file and the sha256 of its bytes, or None when there is no
+    such file. A folder at ``path``, or a parent that is a file or cannot be read, counts as
+    no file, so an odd config dir never switches saved mode on. Raises ConfigFileError when a
+    regular file exists but cannot be read or parsed."""
     try:
         data = path.read_bytes()
-    except FileNotFoundError:
-        return None
     except OSError:
+        if not is_file(path):
+            return None
         raise ConfigFileError(f"{path.name} cannot be read") from None
     import tomllib  # only once a saved file exists (about 2 ms on top of the CLI imports)
 
     try:
-        table = tomllib.loads(data.decode("utf-8"))
+        # utf-8-sig: Windows Notepad may save the file with a byte-order mark.
+        table = tomllib.loads(data.decode("utf-8-sig"))
     except UnicodeDecodeError:
         raise ConfigFileError(f"{path.name} is not UTF-8 text") from None
     except tomllib.TOMLDecodeError as exc:
@@ -85,52 +97,200 @@ def dump_toml(table: Mapping[str, Any]) -> bytes:
     return tomli_w.dumps(dict(table)).encode("utf-8")
 
 
-def _windows_tool(name: str) -> str:
-    # By absolute path, so a planted icacls.exe earlier on PATH is never run.
-    return str(Path(os.environ.get("SYSTEMROOT") or r"C:\Windows") / "System32" / name)
+# Windows security constants (winnt.h, accctrl.h).
+_SE_FILE_OBJECT = 1
+_DACL_SECURITY_INFORMATION = 0x4
+_PROTECTED_DACL_SECURITY_INFORMATION = 0x80000000
+_TOKEN_QUERY = 0x0008
+_TOKEN_USER = 1
+_SDDL_REVISION_1 = 1
 
 
-def _current_user_sid() -> str:
-    import csv
-    import subprocess
+def _win32() -> tuple[Any, Any]:
+    """advapi32 and kernel32 with the signatures used here (64-bit safe handles)."""
+    import ctypes
+    from ctypes import POINTER, c_int, c_void_p, wintypes
 
+    win_dll = getattr(ctypes, "WinDLL")  # noqa: B009 - absent from ctypes off Windows
+    advapi, kernel = (
+        win_dll("advapi32", use_last_error=True),
+        win_dll("kernel32", use_last_error=True),
+    )
+    dword, handle, lpwstr = wintypes.DWORD, wintypes.HANDLE, wintypes.LPWSTR
+    signatures = {
+        kernel.GetCurrentProcess: ([], handle),
+        kernel.CloseHandle: ([handle], wintypes.BOOL),
+        kernel.LocalFree: ([c_void_p], c_void_p),
+        advapi.OpenProcessToken: ([handle, dword, POINTER(handle)], wintypes.BOOL),
+        advapi.GetTokenInformation: (
+            [handle, c_int, c_void_p, dword, POINTER(dword)],
+            wintypes.BOOL,
+        ),
+        advapi.ConvertSidToStringSidW: ([c_void_p, POINTER(lpwstr)], wintypes.BOOL),
+        advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW: (
+            [wintypes.LPCWSTR, dword, POINTER(c_void_p), POINTER(dword)],
+            wintypes.BOOL,
+        ),
+        advapi.GetSecurityDescriptorDacl: (
+            [c_void_p, POINTER(wintypes.BOOL), POINTER(c_void_p), POINTER(wintypes.BOOL)],
+            wintypes.BOOL,
+        ),
+        advapi.SetNamedSecurityInfoW: (
+            [lpwstr, c_int, dword, c_void_p, c_void_p, c_void_p, c_void_p],
+            dword,
+        ),
+        advapi.GetNamedSecurityInfoW: (
+            [
+                wintypes.LPCWSTR,
+                c_int,
+                dword,
+                c_void_p,
+                c_void_p,
+                c_void_p,
+                c_void_p,
+                POINTER(c_void_p),
+            ],
+            dword,
+        ),
+        advapi.ConvertSecurityDescriptorToStringSecurityDescriptorW: (
+            [c_void_p, dword, dword, POINTER(lpwstr), POINTER(dword)],
+            wintypes.BOOL,
+        ),
+    }
+    for function, (argtypes, restype) in signatures.items():
+        function.argtypes, function.restype = argtypes, restype
+    return advapi, kernel
+
+
+def _check(ok: object, what: str) -> None:
+    if not ok:
+        import ctypes
+
+        raise OSError(getattr(ctypes, "get_last_error")(), what)  # noqa: B009 - Windows only
+
+
+def current_user_sid() -> str:
+    """Windows: the SID of the account this process runs as, e.g. S-1-5-21-…-1001."""
+    import ctypes
+    from ctypes import wintypes
+
+    advapi, kernel = _win32()
+    token = wintypes.HANDLE()
+    _check(
+        advapi.OpenProcessToken(kernel.GetCurrentProcess(), _TOKEN_QUERY, ctypes.byref(token)),
+        "OpenProcessToken",
+    )
     try:
-        result = subprocess.run(  # noqa: S603 - fixed System32 executable and arguments
-            [_windows_tool("whoami.exe"), "/user", "/fo", "csv", "/nh"],
-            capture_output=True,
-            text=True,
-            timeout=_SUBPROCESS_TIMEOUT,
-            check=True,
+        size = wintypes.DWORD()
+        advapi.GetTokenInformation(token, _TOKEN_USER, None, 0, ctypes.byref(size))
+        buffer = ctypes.create_string_buffer(size.value)
+        _check(
+            advapi.GetTokenInformation(token, _TOKEN_USER, buffer, size, ctypes.byref(size)),
+            "GetTokenInformation",
         )
-        rows = list(csv.reader(result.stdout.splitlines()))
-        sid = rows[0][1].strip()
-    except (OSError, subprocess.SubprocessError, IndexError):
-        raise SecretStoreError("could not look up the current Windows user") from None
-    if not sid.startswith("S-1-"):
-        raise SecretStoreError("could not look up the current Windows user")
-    return sid
+    finally:
+        kernel.CloseHandle(token)
+    # TOKEN_USER starts with SID_AND_ATTRIBUTES, whose first field is the SID pointer.
+    sid = ctypes.cast(buffer, ctypes.POINTER(ctypes.c_void_p))[0]
+    text = wintypes.LPWSTR()
+    _check(advapi.ConvertSidToStringSidW(sid, ctypes.byref(text)), "ConvertSidToStringSidW")
+    try:
+        return str(text.value or "")
+    finally:
+        kernel.LocalFree(ctypes.cast(text, ctypes.c_void_p))
+
+
+def _set_dacl(path: Path, sddl: str) -> None:
+    """Windows: replace the DACL of ``path`` with the one in ``sddl``, protected from
+    inheritance."""
+    import ctypes
+    from ctypes import c_void_p, wintypes
+
+    advapi, kernel = _win32()
+    descriptor = c_void_p()
+    _check(
+        advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            sddl, _SDDL_REVISION_1, ctypes.byref(descriptor), None
+        ),
+        "ConvertStringSecurityDescriptorToSecurityDescriptorW",
+    )
+    try:
+        present, defaulted, dacl = wintypes.BOOL(), wintypes.BOOL(), c_void_p()
+        _check(
+            advapi.GetSecurityDescriptorDacl(
+                descriptor, ctypes.byref(present), ctypes.byref(dacl), ctypes.byref(defaulted)
+            ),
+            "GetSecurityDescriptorDacl",
+        )
+        flags = _DACL_SECURITY_INFORMATION | _PROTECTED_DACL_SECURITY_INFORMATION
+        error = advapi.SetNamedSecurityInfoW(
+            str(path), _SE_FILE_OBJECT, flags, None, None, dacl, None
+        )
+        if error:
+            raise OSError(error, "SetNamedSecurityInfoW")
+    finally:
+        kernel.LocalFree(descriptor)
+
+
+def _read_dacl(path: Path) -> str:
+    """Windows: the DACL of ``path`` in SDDL, e.g. ``D:P(A;;FA;;;S-1-5-21-…)``."""
+    import ctypes
+    from ctypes import c_void_p, wintypes
+
+    advapi, kernel = _win32()
+    descriptor = c_void_p()
+    error = advapi.GetNamedSecurityInfoW(
+        str(path),
+        _SE_FILE_OBJECT,
+        _DACL_SECURITY_INFORMATION,
+        None,
+        None,
+        None,
+        None,
+        ctypes.byref(descriptor),
+    )
+    if error:
+        raise OSError(error, "GetNamedSecurityInfoW")
+    try:
+        text = wintypes.LPWSTR()
+        _check(
+            advapi.ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                descriptor, _SDDL_REVISION_1, _DACL_SECURITY_INFORMATION, ctypes.byref(text), None
+            ),
+            "ConvertSecurityDescriptorToStringSecurityDescriptorW",
+        )
+        try:
+            return str(text.value or "")
+        finally:
+            kernel.LocalFree(ctypes.cast(text, c_void_p))
+    finally:
+        kernel.LocalFree(descriptor)
+
+
+def only_user(sddl: str, sid: str) -> bool:
+    """The SDDL DACL is protected (inherits nothing) and every entry allows ``sid`` alone."""
+    found = re.fullmatch(r"D:([A-Z]*)((?:\([^()]*\))+)", sddl)
+    if not found or "P" not in found.group(1):
+        return False
+    aces = [ace.split(";") for ace in re.findall(r"\(([^()]*)\)", found.group(2))]
+    return all(len(ace) == 6 and ace[0] == "A" and ace[5] == sid for ace in aces)
 
 
 def restrict_to_user(path: Path) -> None:
-    """Windows: replace the file's ACL with one entry for the current user (read, write,
-    delete), dropping inherited entries, so no other account or group can read it. Called
-    while the file is still empty. Raises SecretStoreError; there is no fallback."""
-    import subprocess
-
-    sid = _current_user_sid()
-    command = [
-        _windows_tool("icacls.exe"),
-        str(path),
-        "/inheritance:r",
-        "/grant:r",
-        f"*{sid}:(R,W,D)",
-    ]
+    """Windows: give ``path`` a protected DACL with one entry, full access for the current
+    user, so no other account or group (not SYSTEM, not Administrators, nothing inherited)
+    is granted access. Then reads the DACL back and refuses anything else. Called while the
+    file is still empty. Raises SecretStoreError; there is no fallback."""
     try:
-        subprocess.run(  # noqa: S603 - fixed System32 executable; the path is one argument
-            command, capture_output=True, timeout=_SUBPROCESS_TIMEOUT, check=True
-        )
-    except (OSError, subprocess.SubprocessError):
+        sid = current_user_sid()
+        if not sid.startswith("S-1-"):
+            raise OSError("no SID")
+        _set_dacl(path, f"D:P(A;;FA;;;{sid})")
+        actual = _read_dacl(path)
+    except OSError:
         raise SecretStoreError(f"could not make {path.name} private to your user") from None
+    if not only_user(actual, sid):
+        raise SecretStoreError(f"{path.name} is still open to other accounts; nothing was written")
 
 
 def make_private_dir(directory: Path) -> None:

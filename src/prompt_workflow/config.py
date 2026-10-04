@@ -108,7 +108,7 @@ def _find_env_file(
             note(source, ".env is not UTF-8 text; it was skipped")
             continue
         except OSError:
-            if candidate.exists():
+            if config_files.lexists(candidate):
                 note(source, ".env cannot be read; it was skipped")
             continue
         pairs, skipped = _parse_env_text(raw_text)
@@ -134,6 +134,8 @@ def _saved_layer(
         fail(source, str(exc))
         return Layer(source, {})
     if loaded is None:
+        if config_files.lexists(path):
+            note(source, f"{name} is not a file; it was ignored")
         return None
     table = loaded[0]
     version = table.get(VERSION_KEY, CONFIG_VERSION)
@@ -177,6 +179,9 @@ def _secrets_layer(
     except SecretStoreError as exc:
         fail(store.source, str(exc))
         return None
+    path = getattr(store, "path", None)
+    if not strict and path and config_files.lexists(path) and not config_files.is_file(path):
+        note(store.source, f"{path.name} is not a file; it was ignored")
     if not values:
         return None
     secrets = secret_names()
@@ -561,7 +566,7 @@ class ConfigLayers:
             layers.append(saved)
             if not strict:
                 for candidate in _env_file_candidates(environ):
-                    if candidate.is_file():
+                    if config_files.is_file(candidate):
                         note(
                             f"file:{candidate}",
                             f".env is ignored: settings are saved in {config_files.SETTINGS_FILE}",

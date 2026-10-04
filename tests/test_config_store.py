@@ -378,61 +378,101 @@ def test_secrets_file_is_mode_600_from_creation(saved_mode):
 
 
 def _icacls_principals(path: Path) -> list[str]:
+    """The principals in the file's ACL as icacls (an independent tool) lists them."""
     icacls = Path(os.environ.get("SYSTEMROOT", r"C:\Windows")) / "System32" / "icacls.exe"
-    out = subprocess.run(
-        [str(icacls), str(path)], capture_output=True, text=True, timeout=30, check=True
-    ).stdout
-    lines = out.splitlines()
-    first = lines[0][len(str(path)) :]
-    aces = [first, *(line for line in lines[1:])]
+    out = subprocess.run([str(icacls), str(path)], capture_output=True, timeout=30, check=True)
+    lines = out.stdout.decode("utf-8", errors="replace").splitlines()
+    aces = [lines[0][len(str(path)) :], *lines[1:]]
     entries = []
     for ace in aces:
         if not ace.strip():
             break
         principal, _, perms = ace.strip().rpartition(":")
         assert "(I)" not in perms, f"inherited entry: {ace}"
-        entries.append(principal.lower())
+        entries.append(principal)
     return entries
 
 
+# Exactly one ACE, for the current user: not SYSTEM, Administrators, OWNER RIGHTS or anything
+# inherited, even though Python creates the config dir with mode 0o700 (a protected DACL of
+# its own on Windows).
 @pytest.mark.skipif(os.name != "nt", reason="native Windows ACL check")
 def test_secrets_file_is_private_to_the_user_on_windows(saved_mode):
     config_store.save_secret("OPENROUTER_API_KEY", SECRET)
     config_store.save_secret("ANTHROPIC_API_KEY", ANTHROPIC_SECRET)  # a rewrite keeps it private
+    path = saved_mode / "secrets.toml"
+    sid = config_files.current_user_sid()
+    dacl = config_files._read_dacl(path)
+    assert config_files.only_user(dacl, sid), dacl
+    assert dacl.count("(") == 1, dacl
     whoami = Path(os.environ.get("SYSTEMROOT", r"C:\Windows")) / "System32" / "whoami.exe"
-    me = subprocess.run(
-        [str(whoami)], capture_output=True, text=True, timeout=30, check=True
-    ).stdout.strip()
-    assert _icacls_principals(saved_mode / "secrets.toml") == [me.lower()]
+    me = subprocess.run([str(whoami)], capture_output=True, timeout=30, check=True).stdout
+    principals = _icacls_principals(path)
+    assert [p.lower() for p in principals] == [me.decode("utf-8", "replace").strip().lower()]
     assert Settings.load().anthropic_api_key == ANTHROPIC_SECRET
 
 
-# The ACL helper runs fixed System32 tools with the path as one argument, and any failure
-# raises: write_atomic then removes its temporary file and writes nothing, so a secret never
-# lands in a file with the inherited ACL.
-def test_restrict_to_user_command_and_failure(saved_mode, monkeypatch):
-    calls = []
+SID = "S-1-5-21-1-2-3-1001"
 
-    def run(command, **kwargs):
-        calls.append((command, kwargs))
-        if command[0].endswith("whoami.exe"):
-            return subprocess.CompletedProcess(command, 0, '"pc\\me","S-1-5-21-1-2-3-1001"\n')
-        raise subprocess.CalledProcessError(5, command)
 
-    monkeypatch.setattr(subprocess, "run", run)
+@pytest.mark.parametrize(
+    ("sddl", "private"),
+    [
+        (f"D:P(A;;FA;;;{SID})", True),
+        (f"D:PAI(A;;FA;;;{SID})", True),
+        (f"D:P(A;;FA;;;{SID})(A;;FA;;;SY)", False),
+        (f"D:P(A;;FA;;;{SID})(A;;FA;;;BA)(A;;FA;;;OW)", False),
+        (f"D:(A;;FA;;;{SID})", False),
+        (f"D:P(D;;FA;;;{SID})", False),
+        ("D:P", False),
+        ("D:NO_ACCESS_CONTROL", False),
+    ],
+    ids=[
+        "user",
+        "auto-inherited-flag",
+        "system",
+        "python-0o700",
+        "unprotected",
+        "deny",
+        "empty",
+        "null-dacl",
+    ],
+)
+def test_only_user(sddl, private):
+    assert config_files.only_user(sddl, SID) is private
+
+
+# restrict_to_user sets a protected single-ACE DACL, reads it back, and refuses anything
+# else; write_atomic then removes its temporary file, so a secret never lands in a file open
+# to other accounts and nothing falls back to plaintext.
+@pytest.mark.parametrize(
+    ("read_back", "error"),
+    [
+        (f"D:P(A;;FA;;;{SID})(A;;FA;;;SY)", "still open to other accounts"),
+        (OSError(5, "denied"), "could not make .* private to your user"),
+    ],
+    ids=["leftover-ace", "os-error"],
+)
+def test_restrict_to_user_refuses_leftovers(saved_mode, monkeypatch, read_back, error):
+    applied = []
+
+    def read_dacl(path):
+        if isinstance(read_back, Exception):
+            raise read_back
+        return read_back
+
     monkeypatch.setattr(config_files, "_WINDOWS", True)
-    monkeypatch.setenv("SYSTEMROOT", r"C:\Windows")
-    with pytest.raises(SecretStoreError, match=r"could not make .* private to your user"):
+    monkeypatch.setattr(config_files, "current_user_sid", lambda: SID)
+    monkeypatch.setattr(config_files, "_set_dacl", lambda path, sddl: applied.append(sddl))
+    monkeypatch.setattr(config_files, "_read_dacl", read_dacl)
+    with pytest.raises(SecretStoreError, match=error):
         config_store.save_secret("OPENROUTER_API_KEY", SECRET)
-    icacls = calls[1][0]
-    assert icacls[0].endswith("icacls.exe")
-    assert icacls[2:] == ["/inheritance:r", "/grant:r", "*S-1-5-21-1-2-3-1001:(R,W,D)"]
-    assert all(kwargs["timeout"] and "shell" not in kwargs for _, kwargs in calls)
+    assert applied == [f"D:P(A;;FA;;;{SID})"]
     assert list(saved_mode.iterdir()) == []
 
-    monkeypatch.setattr(subprocess, "run", lambda command, **kw: (_ for _ in ()).throw(OSError()))
-    with pytest.raises(SecretStoreError, match="could not look up the current Windows user"):
-        config_files.restrict_to_user(saved_mode / "x")
+    monkeypatch.setattr(config_files, "_read_dacl", lambda path: f"D:P(A;;FA;;;{SID})")
+    config_store.save_secret("OPENROUTER_API_KEY", SECRET)
+    assert Settings.load().openrouter_api_key == SECRET
 
 
 # --- migrating .env ------------------------------------------------------------------------
@@ -542,7 +582,7 @@ def test_migration_falls_back_to_rename_in_place(saved_mode, project, monkeypatc
     assert inactive.name.startswith(".env.inactive-")
     assert inactive.read_bytes() == original
     record = json.loads((saved_mode / "migration.json").read_text("utf-8"))
-    assert record["sources"][0]["to"] == str(inactive)
+    assert record["sources"][0]["in_place"] == str(inactive)
     monkeypatch.setattr(config_store, "_move", real_move)
     config_store.apply_rollback(consent=config_store.plan_rollback().token)
     assert repo_env.read_bytes() == original
@@ -748,3 +788,155 @@ def test_env_edited_during_migration_is_left(saved_mode, project, monkeypatch):
     config_store.apply_rollback(consent=config_store.plan_rollback().token)
     assert repo_env.read_text("utf-8").endswith("# edited\n")
     assert not (saved_mode / "config.toml").exists()
+
+
+# --- odd config paths behave exactly as when nothing is saved -----------------------------
+
+
+def _baseline(project: Path) -> dict:
+    _write(project / ".env", "OLLAMA_MODEL=from-repo\n")
+    return {k: (e.value, e.source) for k, e in ConfigLayers.resolve().entries.items()}
+
+
+def _check_same(baseline: dict) -> list[str]:
+    """Strict mode matches the baseline exactly; repair mode runs and returns its messages."""
+    assert {k: (e.value, e.source) for k, e in ConfigLayers.resolve().entries.items()} == baseline
+    assert Settings.load().ollama_model == "from-repo"
+    return [f.message for f in ConfigLayers.resolve(strict=False).findings]
+
+
+# The config dir is a file: there is no config.toml or secrets.toml, as before #84.
+def test_config_dir_that_is_a_file(saved_mode, project):
+    baseline = _baseline(project)
+    saved_mode.rmdir()
+    saved_mode.write_text("not a folder\n")
+    assert _check_same(baseline) == []
+    with pytest.raises(MigrationError):  # nowhere to back up to; nothing changes
+        config_store.apply_migration(consent=config_store.plan_migration().token)
+    assert (project / ".env").read_text("utf-8") == "OLLAMA_MODEL=from-repo\n"
+
+
+# config.toml or secrets.toml is a folder: ignored, reported in repair mode only.
+@pytest.mark.parametrize("name", ["config.toml", "secrets.toml"])
+def test_saved_file_that_is_a_folder(saved_mode, project, name):
+    baseline = _baseline(project)
+    (saved_mode / name).mkdir()
+    assert _check_same(baseline) == [f"{name} is not a file; it was ignored"]
+
+
+# An unreadable config dir (mode 000) cannot even be checked: as if absent, never a crash.
+@pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0, reason="POSIX permissions")
+def test_unreadable_config_dir(saved_mode, project):
+    baseline = _baseline(project)
+    saved_mode.chmod(0)
+    try:
+        _check_same(baseline)
+    finally:
+        saved_mode.chmod(0o700)
+
+
+# A config.toml that is a real file but cannot be read still fails closed.
+@pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0, reason="POSIX permissions")
+def test_unreadable_config_toml_fails_closed(saved_mode, project):
+    _baseline(project)
+    path = _write(saved_mode / "config.toml", 'OLLAMA_MODEL = "saved"\n')
+    path.chmod(0)
+    try:
+        with pytest.raises(ValueError, match=r"config\.toml cannot be read"):
+            Settings.load()
+    finally:
+        path.chmod(0o600)
+
+
+# A byte-order mark (Windows Notepad) is not a syntax error.
+def test_bom_is_accepted(saved_mode):
+    (saved_mode / "config.toml").write_bytes(b'\xef\xbb\xbfOLLAMA_MODEL = "m"\n')
+    (saved_mode / "secrets.toml").write_bytes(
+        b"\xef\xbb\xbf" + f'OPENROUTER_API_KEY = "{SECRET}"\n'.encode()
+    )
+    settings = Settings.load()
+    assert (settings.ollama_model, settings.openrouter_api_key) == ("m", SECRET)
+
+
+# --- migration robustness ------------------------------------------------------------------
+
+
+# The marker is written before anything changes; if it cannot be written, nothing changes.
+def test_marker_write_failure_changes_nothing(saved_mode, project, monkeypatch):
+    repo_env = _write(project / ".env", _example_env())
+    plan = config_store.plan_migration()
+
+    def broken(directory, record):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(config_store, "_write_marker", broken)
+    with pytest.raises(MigrationError, match="nothing was migrated"):
+        config_store.apply_migration(consent=plan.token)
+    assert repo_env.read_text("utf-8") == _example_env()
+    assert not (saved_mode / "config.toml").exists()
+    assert not (saved_mode / "secrets.toml").exists()
+    assert config_store.plan_migration().status == "ready"
+
+
+# A run cut short after the writes (here: before any .env moved) is rolled back from the
+# marker written up front.
+def test_interrupted_migration_can_be_rolled_back(saved_mode, project, monkeypatch):
+    repo_env = _write(project / ".env", _example_env())
+    plan = config_store.plan_migration()
+    real_move = config_store._move
+
+    def crash(source, target):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(config_store, "_move", crash)
+    with pytest.raises(KeyboardInterrupt):
+        config_store.apply_migration(consent=plan.token)
+    assert config_store.plan_migration().status == "migrated"
+    monkeypatch.setattr(config_store, "_move", real_move)
+    config_store.apply_rollback(consent=config_store.plan_rollback().token)
+    assert repo_env.read_text("utf-8") == _example_env()
+    assert not (saved_mode / "config.toml").exists()
+
+
+# A preview's token cannot be replayed once a migration and its rollback restored the files.
+def test_consent_token_is_not_replayable(saved_mode, project):
+    _write(project / ".env", _example_env())
+    first = config_store.plan_migration().token
+    config_store.apply_migration(consent=first)
+    config_store.apply_rollback(consent=config_store.plan_rollback().token)
+    with pytest.raises(MigrationError, match="not confirmed"):
+        config_store.apply_migration(consent=first)
+    assert config_store.plan_migration().token != first
+
+
+# Smaller refusals: each is an error naming no value, and nothing is written.
+def test_more_refusals(saved_mode, project, monkeypatch):
+    _write(project / ".env", _example_env())
+    monkeypatch.setattr(
+        FileSecretStore, "read", lambda self: (_ for _ in ()).throw(SecretStoreError("locked"))
+    )
+    with pytest.raises(MigrationError, match="fix the current settings first: locked"):
+        config_store.plan_migration()
+
+
+def test_store_write_failure_and_odd_sid(saved_mode, monkeypatch):
+    saved_mode.rmdir()
+    saved_mode.write_text("")
+    with pytest.raises(SecretStoreError, match=r"could not write secrets\.toml"):
+        config_store.save_secret("OPENROUTER_API_KEY", SECRET)
+    monkeypatch.setattr(config_files, "current_user_sid", lambda: "")
+    with pytest.raises(SecretStoreError, match="private to your user"):
+        config_files.restrict_to_user(saved_mode)
+
+
+def test_move_never_overwrites(tmp_path):
+    source, target = _write(tmp_path / "a", "a"), _write(tmp_path / "b", "b")
+    assert config_store._move(source, target) is False
+    assert config_store._move(tmp_path / "missing", tmp_path / "c") is False
+    assert target.read_text() == "b"
+
+
+def test_damaged_marker(saved_mode):
+    _write(saved_mode / "migration.json", "{not json")
+    with pytest.raises(MigrationError, match="damaged"):
+        config_store.plan_rollback()
