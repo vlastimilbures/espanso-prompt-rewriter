@@ -810,9 +810,9 @@ def test_a_stale_sidecar_lock_is_broken_and_a_held_one_times_out(store, monkeypa
     lock.touch()
     old = time.time() - 60
     os.utime(lock, (old, old))
-    _use_real_budget(monkeypatch)
     assert store._mark_lost() is True  # left by a killed process
     lock.touch()
+    _use_real_budget(monkeypatch)
     assert store._mark_lost() is False  # held: give up within the lock budget
     assert _lost(store) == 1
     lock.unlink()
