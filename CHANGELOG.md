@@ -7,6 +7,14 @@ All notable changes to this project are documented here. The format follows
 ## Unreleased
 
 ### Security
+- A clipboard item that a password manager marked as concealed is refused before it is read,
+  for every trigger, and cleared, so Espanso's restore cannot put it back unmarked for the next
+  trigger (#24). Markers: `org.nspasteboard.ConcealedType` or `com.agilebits.onepassword` on
+  macOS; `ExcludeClipboardContentFromMonitorProcessing`, `Clipboard Viewer Ignore` or
+  `CanIncludeInClipboardHistory` (0, or present but unreadable) on Windows. The probe asks only
+  which formats are present, through ctypes (about 10-40 ms on macOS), and adds no dependency.
+  On Linux, for browser-extension copies, or if the probe fails, the clipboard is read as
+  before.
 - Invisible characters no longer reach the model or the paste (#22). `_clean()` now drops
   every code point Unicode marks as default-ignorable (zero-width space, word joiner, BOM, bidi
   marks, soft hyphen, combining grapheme joiner, Hangul fillers, variation selectors, and the

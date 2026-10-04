@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import io
 import re
 import sys
@@ -9,6 +10,7 @@ from collections.abc import Callable
 import pyperclip
 import typer
 
+from .clipboard_guard import is_concealed
 from .config import EFFORTS, KEEP, TIERS, Settings
 from .factory import PROVIDER_NAMES, make_provider
 from .gate import GatedProvider
@@ -97,6 +99,18 @@ def _clipboard[T](op: Callable[..., T], *args: str) -> T:
 
 def _read_input(source: str, text: str | None) -> str:
     if source == "clipboard":
+        # Checked before reading, so a vault password is never even loaded, let alone sent or
+        # pasted back, whichever provider the trigger uses. None (cannot tell) reads as before.
+        if is_concealed():
+            # Cleared, not left in place: Espanso pastes this marker through the clipboard and
+            # then restores what it held as plain text, without the concealed marker, so the
+            # next trigger would send the password. Espanso restores the empty clipboard instead.
+            with contextlib.suppress(pyperclip.PyperclipException):
+                pyperclip.copy("")
+            raise ProviderError(
+                "The clipboard held a password-manager item (marked concealed); it was cleared "
+                "and not sent. Copy the draft first"
+            )
         return str(_clipboard(pyperclip.paste))
     if source == "stdin":
         return sys.stdin.read()

@@ -558,3 +558,48 @@ def test_allow_flagged_note_on_failed_call(monkeypatch, fake_http):
     result = improve(*args, "--text", "Output is CONFIDENTIAL")
     assert result.stdout.startswith("[prompt-workflow: sent despite: confidential_label]\n\n")
     assert "HTTP 401" in result.stdout
+
+
+# A password-manager item on the clipboard is refused before it is read, with no provider
+# built, so it is neither sent nor pasted back, local trigger or cloud.
+@pytest.mark.parametrize("provider", ["openrouter", "ollama"])
+def test_concealed_clipboard_is_refused(monkeypatch, stub_provider, provider):
+    pasted, copied = [], []
+    monkeypatch.setattr(cli, "is_concealed", lambda: True)
+    monkeypatch.setattr(cli.pyperclip, "paste", lambda: pasted.append(1) or "hunter2")
+    monkeypatch.setattr(cli.pyperclip, "copy", copied.append)
+    result = improve("--provider", provider, "--source", "clipboard")
+    assert result.stdout == (
+        "[prompt-workflow: The clipboard held a password-manager item (marked concealed); it "
+        "was cleared and not sent. Copy the draft first]"
+    )
+    assert pasted == []
+    assert stub_provider.built == []
+    # Cleared, so Espanso's restore after pasting the marker cannot put the password back as
+    # plain, unmarked text for the next trigger to send.
+    assert copied == [""]
+
+
+# A clipboard that cannot be cleared still gets the refusal, not a clipboard error.
+def test_concealed_clipboard_refused_when_clearing_fails(monkeypatch, stub_provider):
+    monkeypatch.setattr(cli, "is_concealed", lambda: True)
+    monkeypatch.setattr(cli.pyperclip, "copy", _no_clipboard)
+    result = improve("--provider", "openrouter", "--source", "clipboard")
+    assert "password-manager item" in result.stdout
+    assert stub_provider.built == []
+
+
+# An ordinary item, or one the probe cannot judge (Linux, a probe error), is read as before.
+@pytest.mark.parametrize("verdict", [False, None])
+def test_unconcealed_clipboard_is_read(monkeypatch, stub_provider, verdict):
+    monkeypatch.setattr(cli, "is_concealed", lambda: verdict)
+    monkeypatch.setattr(cli.pyperclip, "paste", lambda: "summarise the minutes")
+    result = improve("--provider", "openrouter", "--source", "clipboard")
+    assert result.stdout == "improved"
+    assert stub_provider.calls[0]["prompt"] == "summarise the minutes"
+
+
+# Only the clipboard is probed: stdin and --text never touch it.
+def test_other_sources_skip_the_probe(monkeypatch, stub_provider):
+    monkeypatch.setattr(cli, "is_concealed", lambda: True)
+    assert improve("--source", "argument", "--text", "draft").stdout == "improved"

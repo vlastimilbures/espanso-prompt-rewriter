@@ -205,8 +205,11 @@ Triggers expand only at the start of a word: after a space, tab, newline, punctu
 such as `a[n-i-1]` or `only-if-cached` does not fire them, but `s[-i-1]` or `x = -i-1` still
 does. If a trigger follows anything else (a letter, digit, `-`, `=`, `/` …), type a space first.
 
-The improve triggers (`-i-`, `-ip-`, `-if-`, `-iok-`, `-il-`, `-ilm-`) read your current clipboard. Cloud
-triggers pass through the [data-protection gate](#privacy-and-data-protection) first. To enable `-ic-`,
+The improve triggers (`-i-`, `-ip-`, `-if-`, `-iok-`, `-il-`, `-ilm-`) send your current clipboard
+as-is, whatever it holds, so copy the draft first. On macOS and Windows an item a password
+manager marked as concealed is refused and cleared from the clipboard
+(`[prompt-workflow: The clipboard held a password-manager item …]`) when the check can tell. Cloud triggers pass through the
+[data-protection gate](#privacy-and-data-protection) first. To enable `-ic-`,
 uncomment it in [`espanso/match/prompts-llm.yml`](espanso/match/prompts-llm.yml) and re-run the
 installer.
 
@@ -359,6 +362,18 @@ Left empty, the rewrite uses only a role the draft itself states and never guess
 > `[prompt-workflow: PROMPT_LOCAL_ONLY=true: … would send the draft off this machine]` instead.
 > It judges by the base URL and the Ollama model tag, so a relay on `localhost` that forwards to
 > a cloud API (LiteLLM, an SSH tunnel) still counts as local.
+
+The trigger sends whatever is on the clipboard, unseen: if you forgot to copy the draft, the last
+thing you copied goes instead. On macOS and Windows the CLI first asks the clipboard which formats
+it holds, without reading the item, and refuses one that a password manager marked as concealed
+or as not for clipboard history (`org.nspasteboard.ConcealedType` or 1Password's own type on
+macOS; `ExcludeClipboardContentFromMonitorProcessing`, `Clipboard Viewer Ignore` or
+`CanIncludeInClipboardHistory` = 0 on Windows), for every trigger, local ones included. The
+refused item is then cleared from the clipboard: Espanso pastes the refusal through the clipboard
+and restores the previous content as plain text, without the marker, so the next trigger would
+otherwise send it. Not covered: browser extensions of password managers (they copy through the
+web clipboard and set no marker), apps that set none of these markers, a probe that fails, and
+Linux; there the item is sent like any other text.
 
 Every call that can send the draft off your machine first runs through a regex gate
 ([`redaction.py`](src/prompt_workflow/redaction.py)): OpenRouter and Anthropic always, and
