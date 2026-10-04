@@ -11,7 +11,10 @@ All notable changes to this project are documented here. The format follows
   no shell. On Windows, Espanso runs `type: shell` vars through PowerShell, which rejects a
   command line that starts with a quoted path, so every CLI trigger failed there. Re-run the
   installer to redeploy the match files.
-- The CLI ignores Python warnings, since a script var treats any stderr output as a failure.
+- The `prompt-workflow` console script (now `prompt_workflow.entry:main`) silences Python
+  warnings before importing the CLI, since a script var treats any stderr output as a failure.
+- On macOS, variables exported in shell startup files (such as `~/.zshenv`) no longer reach the
+  CLI, which Espanso now starts without a shell. Keep settings in `.env`.
 
 ## 0.12.0
 

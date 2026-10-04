@@ -1,7 +1,8 @@
 # Each CLI call below is a `type: script` var: Espanso starts the program in args[0] directly,
-# with no shell, and passes every other list item to it as one argument, verbatim. So there
-# are no quoting rules (cmd.exe, PowerShell and sh all differ), and a form value cannot
-# become shell syntax. Keep every item a quoted string: Espanso drops non-string items.
+# with no shell, and passes every other list item to it as one argument (after filling in
+# {{form1.*}} fields). So no shell quoting applies (cmd.exe, PowerShell and sh all differ),
+# and a form value cannot become shell syntax. Keep every item a quoted string: Espanso drops
+# non-string items.
 # The install scripts replace the CLI placeholder with the absolute CLI path, because
 # GUI-launched Espanso does not inherit shell PATH. A script var fails on any stderr output,
 # so the CLI keeps stderr empty. The CLI finds .env on its own (the repo checkout, or

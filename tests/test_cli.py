@@ -1,6 +1,7 @@
 import os
 import subprocess
 import sys
+import warnings
 
 import pyperclip
 import pytest
@@ -246,3 +247,17 @@ def test_output_is_utf8_under_legacy_code_page(tmp_path):
     )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.decode("utf-8") == persona
+
+
+# The console-script entry point silences warnings before it imports the CLI: Espanso's script
+# vars treat any stderr output, a warning included, as a failed expansion.
+def test_entry_point_silences_warnings(monkeypatch, capsys):
+    from prompt_workflow import entry
+
+    monkeypatch.setattr(sys, "argv", ["prompt-workflow", "persona"])
+    with warnings.catch_warnings():
+        with pytest.raises(SystemExit) as exited:
+            entry.main()
+        assert warnings.filters[0][0] == "ignore"
+    assert exited.value.code == 0
+    assert capsys.readouterr().out == "I am working as [role] in [company]."

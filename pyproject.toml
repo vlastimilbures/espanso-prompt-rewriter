@@ -17,7 +17,7 @@ Homepage = "https://github.com/vlastimilbures/espanso-prompt-rewriter"
 Changelog = "https://github.com/vlastimilbures/espanso-prompt-rewriter/blob/main/CHANGELOG.md"
 
 [project.scripts]
-prompt-workflow = "prompt_workflow.cli:app"
+prompt-workflow = "prompt_workflow.entry:main"
 
 # Development tools: `uv sync` installs this group; `uv tool install` never does.
 [dependency-groups]

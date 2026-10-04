@@ -48,14 +48,15 @@ def test_triggers_are_unique_across_files():
 
 
 CLI = "__PROMPT_WORKFLOW__"
-FORM_FIELD = re.compile(r"\{\{(\w+)\.(\w+)\}\}")
+# Espanso's own pattern allows spaces inside the braces.
+FORM_FIELD = re.compile(r"\{\{\s*(\w+)\.(\w+)\s*\}\}")
 
 
 def _cli_calls(path: Path):
-    """(trigger, args, form fields by form name) for every script var that runs the CLI."""
+    """(trigger, args, form params by form name) for every script var that runs the CLI."""
     for match in _load(path)["matches"]:
         vars_ = match.get("vars", [])
-        forms = {v["name"]: v["params"]["fields"] for v in vars_ if v.get("type") == "form"}
+        forms = {v["name"]: v["params"] for v in vars_ if v.get("type") == "form"}
         for var in vars_:
             args = var.get("params", {}).get("args")
             if var.get("type") == "script" and args and args[0] == CLI:
@@ -88,6 +89,7 @@ def test_cli_vars_run_without_a_shell():
                 args = params["args"]
                 assert args[0] == CLI, f"{trigger} must start with the CLI placeholder"
                 assert all(isinstance(a, str) and a and '"' not in a for a in args), trigger
+                assert "__REPO_DIR__" not in str(params), f"{trigger} still uses __REPO_DIR__"
     assert calls == len(CLI_CALLS) > 0
 
 
@@ -131,14 +133,25 @@ def test_installed_cli_path_is_one_argument(cli):
                     assert var["params"]["args"][0] == cli
 
 
-# Each CLI call, run the way Espanso's script extension runs it (no shell, the listed argv,
-# empty stdin), exits 0 with its output on stdout and nothing on stderr, which a script var
+# Marker each provider's call ends in when every argument was accepted: no API key, or the
+# closed local port. Any other marker means the CLI rejected an argument.
+RUN_CLEAN_MARKERS = {
+    "openrouter": "[prompt-workflow: OPENROUTER_API_KEY is not configured]",
+    "ollama": "[prompt-workflow: Ollama request failed: ",
+    "lmstudio": "[prompt-workflow: LM Studio request failed: ",
+}
+
+
+# Each CLI call, run through the console-script entry point with the listed argv and empty
+# stdin, exits 0 with the expected output on stdout and nothing on stderr, which a script var
 # treats as a failure. Form fields take their defaults, the draft comes from an argument,
 # there is no API key and the local endpoints point at a closed port, so nothing leaves the
-# machine. On Windows CI this runs the real CreateProcess path.
+# machine. (This starts Python itself, not the installed launcher.)
 @pytest.mark.parametrize(("trigger", "args", "forms"), CLI_CALLS, ids=[c[0] for c in CLI_CALLS])
 def test_cli_calls_run_clean(tmp_path, trigger, args, forms):
-    argv = [FORM_FIELD.sub(lambda f: str(forms[f[1]][f[2]]["default"]), a) for a in args[1:]]
+    argv = [
+        FORM_FIELD.sub(lambda f: str(forms[f[1]]["fields"][f[2]]["default"]), a) for a in args[1:]
+    ]
     if "--source" in argv:
         at = argv.index("--source")
         argv[at : at + 2] = ["--source", "argument", "--text", "draft"]
@@ -149,11 +162,14 @@ def test_cli_calls_run_clean(tmp_path, trigger, args, forms):
     }
     env |= {
         "PROMPT_WORKFLOW_ENV": str(tmp_path / ".env"),
+        # Show every warning, as a user's PYTHONWARNINGS could; the entry point must still
+        # keep stderr empty.
+        "PYTHONWARNINGS": "always",
         "OLLAMA_BASE_URL": "http://127.0.0.1:9",
         "LMSTUDIO_BASE_URL": "http://127.0.0.1:9/v1",
     }
     proc = subprocess.run(
-        [sys.executable, "-m", "prompt_workflow.cli", *argv],
+        [sys.executable, "-c", "from prompt_workflow.entry import main; main()", *argv],
         capture_output=True,
         stdin=subprocess.DEVNULL,
         env=env,
@@ -162,7 +178,11 @@ def test_cli_calls_run_clean(tmp_path, trigger, args, forms):
     )
     out = proc.stdout.decode("utf-8")
     assert (proc.returncode, proc.stderr) == (0, b""), trigger
-    assert out.startswith("[prompt-workflow: ") or out == PERSONA_PLACEHOLDER, (trigger, out)
+    provider = _option(args, "--provider")
+    if provider is None:
+        assert out == PERSONA_PLACEHOLDER, (trigger, out)
+    else:
+        assert out.startswith(RUN_CLEAN_MARKERS[provider]), (trigger, out)
 
 
 # form: blocks must interpolate at least one {{var}} — otherwise Espanso pops an
@@ -208,12 +228,19 @@ def _form_vars(path: Path):
 # Every {{formN.field}} a CLI call uses is a field that form declares, so a renamed field
 # cannot leave an unexpanded placeholder in the arguments.
 def test_form_fields_used_in_cli_calls_exist():
-    for path in MATCH_FILES:
-        for match, forms in _form_vars(path):
-            for _, args, _ in _cli_calls(path):
-                for form, name in (f.groups() for a in args for f in FORM_FIELD.finditer(a)):
-                    assert name in forms[form]["fields"], f"{match['trigger']}: {form}.{name}"
-                    assert f"[[{name}]]" in forms[form]["layout"], f"{match['trigger']}: {name}"
+    for trigger, args, forms in CLI_CALLS:
+        for form, name in (f.groups() for a in args for f in FORM_FIELD.finditer(a)):
+            assert name in forms[form]["fields"], f"{trigger}: {form}.{name}"
+            assert f"[[{name}]]" in forms[form]["layout"], f"{trigger}: {name}"
+
+
+# A form field is always a whole argument, so its value is exactly one fixed choice (checked
+# below) and never part of a longer argument such as --timeout={{form1.timeout}}.
+def test_form_fields_are_whole_arguments():
+    for trigger, args, _ in CLI_CALLS:
+        for arg in args:
+            if "{{" in arg:
+                assert FORM_FIELD.fullmatch(arg), f"{trigger}: {arg!r}"
 
 
 # Choice fields passed to the CLI must be fixed lists whose default is one of the values,

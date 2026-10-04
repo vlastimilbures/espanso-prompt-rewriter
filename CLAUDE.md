@@ -4,7 +4,7 @@
 
 A Python CLI (`prompt-workflow`) invoked by Espanso text-expansion triggers to rewrite a
 clipboard/stdin draft into a more precise prompt via a local or cloud LLM. Espanso match files
-in `espanso/match/` call the CLI as a shell command and paste back stdout.
+in `espanso/match/` call the CLI from Espanso `type: script` vars and paste back stdout.
 
 ## Commands
 
@@ -77,16 +77,18 @@ return through `_gate()`.
   `args: ["__PROMPT_WORKFLOW__", "improve", ...]`; the install scripts substitute
   `__PROMPT_WORKFLOW__` with the resolved absolute path to the installed CLI. Espanso starts
   `args[0]` with no shell (its default shell on Windows is PowerShell, which cannot run a quoted
-  path followed by arguments), so there are no quoting rules; there is no `cd`. A script var
-  fails on any stderr output, so the CLI ignores warnings (`cli._main`) and must never write to
-  stderr; `tests/test_yaml.py` runs every call as a subprocess to check it.
+  path followed by arguments), so no shell quoting applies (YAML's double-quote rules still
+  do, hence the installers' character checks); there is no `cd`. A script var fails on any
+  stderr output, so the console script (`entry.main`) silences warnings before importing the
+  CLI, and the CLI must never write to stderr; `tests/test_yaml.py` runs every call as a
+  subprocess to check it.
   The installers deploy `espanso/config/` only with `--with-config` / `-WithConfig`.
 - `espanso/match/prompts-core.yml` holds static, non-LLM form-based snippets (no CLI call).
 - `-i-` (OpenRouter, `default` profile) is the live cloud trigger, and `-ip-` is
   the same rewrite with `--tier pro` (reasoning model). `-if-` puts an Espanso form
   (choice dropdowns) in front of the pro tier and passes the picks as `--model model@endpoint
   --effort --max-tokens --timeout` via `{{form1.*}}`, which `Settings.with_overrides()` applies.
-  Its fields must stay fixed choices (no free text reaches the shell); `tests/test_yaml.py`
+  Its fields must stay fixed choices, each a whole argument (no free text reaches the CLI); `tests/test_yaml.py`
   checks each value against the CLI. `-ic-`
   (Anthropic) stays commented out in `prompts-llm.yml`. The data-protection gate is a heuristic,
   not a guarantee — cloud triggers should only be used where company policy permits.

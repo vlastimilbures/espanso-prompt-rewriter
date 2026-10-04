@@ -41,9 +41,9 @@ if (-not (Test-Path $Cli)) {
 $CliEscaped = $Cli -replace '\\', '/'
 # The path goes inside a double-quoted YAML string (args[0] of a script var, run without a
 # shell); refuse characters YAML or Espanso (%HOME%-style tokens) would interpret there,
-# and the shell metacharacters as well, rather than try to escape them.
-if ($CliEscaped -match '["%^&|<>]') {
-    Write-Error "CLI path contains a character YAML, Espanso or a shell would interpret: $Cli"
+# rather than try to escape them.
+if ($CliEscaped -match '["%]') {
+    Write-Error "CLI path contains a quote or % (YAML or Espanso would interpret it): $Cli"
     exit 1
 }
 Write-Host "Using CLI at: $Cli"
