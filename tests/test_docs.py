@@ -1,7 +1,10 @@
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
+from bench_module import bench
 
 from prompt_workflow.config import env_names
 
@@ -26,3 +29,19 @@ def test_setting_is_documented(name):
 # by the .env loader itself).
 def test_readme_documents_no_stale_settings():
     assert _readme_config_rows() - {*env_names(), "PROMPT_WORKFLOW_ENV"} == set()
+
+
+# Every bench output directory the docs mention, and the bench's own default, is gitignored, so
+# following the docs cannot commit outputs (with --persona env they hold a private persona).
+def test_documented_bench_outdirs_are_ignored():
+    git = shutil.which("git")
+    inside = git and subprocess.run([git, "rev-parse"], cwd=REPO, capture_output=True).returncode
+    if git is None or inside != 0:
+        pytest.skip("not a git checkout")
+    docs = [REPO / "README.md", REPO / "CONTRIBUTING.md", *(REPO / "docs").rglob("*.md")]
+    found = {m for p in docs for m in re.findall(r"--outdir[=\s]+(\S+)", p.read_text("utf-8"))}
+    assert found, "the docs no longer suggest any --outdir; drop or adapt this test"
+    for outdir in [*found, f"{bench.DEFAULT_OUTDIR}/20261004T120000000000Z"]:
+        probe = f"{outdir.rstrip('/')}/results.json"
+        ignored = subprocess.run([git, "check-ignore", "-q", probe], cwd=REPO, check=False)
+        assert ignored.returncode == 0, outdir

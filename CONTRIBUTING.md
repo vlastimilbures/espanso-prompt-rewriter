@@ -173,7 +173,10 @@ Template wording is scored by `scripts/bench_models.py`, and `tests/test_bench.p
 scored phrases still exist in `prompts/default.md` and in the static `-p-` template
 (`espanso/match/prompts-template.yml`), so change all three together. A/B a change on both the
 standard and pro defaults, on both suites, before proposing it, and include the before/after
-pass rates in the pull request:
+pass rates in the pull request, with each run's `meta.json` (commit, prompt hash, persona
+mode). The bench renders a fixed fictitious persona by default, so anyone can reproduce your
+numbers. Never commit the outputs of a `--persona env` run, which hold your own persona. For
+example:
 
 ```bash
 uv run python scripts/bench_models.py --suite all --runs 3 --models \

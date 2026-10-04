@@ -410,7 +410,14 @@ token counts come from OpenRouter's own usage data. Each model is given as
 `model@endpoint~effort`: the endpoint is pinned with fallbacks off, because the same model on
 another host can differ several-fold in latency and cost, and `~effort` sets the reasoning
 effort. The report splits passes by draft, so a draft every model fails shows up as a prompt
-problem rather than a model one.
+problem rather than a model one. By default a run renders the same fictitious persona
+(`--persona example`), so two machines score the same system prompt whatever their own
+`PROMPT_PERSONA`. Every run writes `meta.json` (git commit, prompt hashes, persona mode) next to
+its outputs in `bench-out/<UTC timestamp>/`. `--persona env` renders your own persona instead;
+keep those outputs to yourself.
+
+Both tables below come from the bench before it had a fixed persona: it rendered the runner's
+own `PROMPT_PERSONA` (today's `--persona env`), so they cannot be reproduced exactly.
 
 **Result (2026-09-30, current prompt):**
 

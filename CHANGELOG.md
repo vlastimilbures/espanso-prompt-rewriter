@@ -6,6 +6,20 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Changed
+- `scripts/bench_models.py` renders a fixed fictitious persona by default (`--persona example`)
+  instead of the runner's `PROMPT_PERSONA`, so every machine scores the same system prompt and
+  no private persona ends up in bench outputs. `--persona none` renders none, and
+  `--persona env` the runner's own. Each run writes `meta.json` (git commit and dirty flag,
+  SHA-256 of the template and, for the shared personas, of the rendered system prompt, persona
+  mode, temperature, models, drafts, runs) and goes to `bench-out/<UTC timestamp>/` unless
+  `--outdir` is given. It refuses an `--outdir` that is not empty.
+
+### Fixed
+- The bench output directories that the docs suggest (`--outdir bench-A`) were not gitignored,
+  so `git add .` could commit outputs that carried the runner's persona. Every `bench-*/`
+  directory is now ignored, and a test checks each documented `--outdir`.
+
 ## 0.13.0
 
 Upgrading: re-run the installer (`./scripts/install_macos.sh` or

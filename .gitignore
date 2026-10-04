@@ -10,7 +10,7 @@ __pycache__/
 .DS_Store
 .vscode/*.local.json
 output/
-bench-out*/
+bench-*/
 bench-*.log
 .tokensave/
 .claude/
