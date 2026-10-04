@@ -93,6 +93,16 @@ All notable changes to this project are documented here. The format follows
   guard that runs both in a fresh interpreter and fails if they load `textual`, `rich.console`,
   `sqlite3`, `tomli_w`, `tomlkit` or `keyring`, or more than 400 modules. CONTRIBUTING records
   the measured start-up time under "Trigger start-up budget". Nothing the CLI prints changes.
+- A local usage-history store (`history.py`, #88): a per-device SQLite file in the user data
+  dir (`~/.local/share/prompt-workflow`, `%LOCALAPPDATA%\prompt-workflow` on Windows) that
+  holds metadata only, from a fixed column allowlist, and never prompt, clipboard, output,
+  persona, key, form or raw-body text. Money is exact decimal text with its unit (`credits` or
+  `USD`). Writes are fail-open and bounded (0.25 s), keyed by (operation, attempt) so a retry
+  never duplicates, and a dropped write is counted in a `history.lost` marker. Services: stats
+  by trigger, provider, model or day (reported, estimated and unknown costs kept apart),
+  CSV/JSON export, prune, reset and health. New settings `PROMPT_HISTORY` (default `true`) and
+  `PROMPT_HISTORY_RETENTION_DAYS` (default `365`). Optional estimates come from a user
+  `prices.toml` in the config dir. Nothing records yet; the CLI starts recording in #89.
 
 ### Changed
 - Loading settings no longer copies `.env` values into the process environment (#83). A pure,

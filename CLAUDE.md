@@ -73,6 +73,21 @@ Espanso does not inherit shell PATH):
   cwd, so a planted `.env` cannot redirect the base URL or enable the override. This matters
   because Espanso runs the CLI as a GUI-spawned subprocess without an inherited login-shell
   environment. `tests/conftest.py` points `PROMPT_WORKFLOW_ENV` at a temp file per test.
+- `history.py` — the local usage history (#88): `HistoryStore` over a per-device SQLite file,
+  `config.user_data_dir()/history.sqlite3` (`$XDG_DATA_HOME` or `~/.local/share`,
+  `%LOCALAPPDATA%` on Windows; `tests/conftest.py` points both at a temp dir). Metadata only:
+  the tables' columns are `OPERATION_COLUMNS` and `ATTEMPT_COLUMNS` (the `AttemptUsage` fields
+  of #87, keyed by `(operation_id, seq)`), only those keys are read from a record mapping, and a
+  text value must be an enum or a short identifier without spaces that `redaction.scan()` does
+  not flag. `tests/test_history.py` holds the allowlist and fails on any other column; add a
+  column only through a new `_MIGRATIONS` step (forward only, `PRAGMA user_version`). Money is
+  exact decimal TEXT plus a unit, never REAL. `record()` never raises: one `BEGIN IMMEDIATE`
+  transaction within `_WRITE_BUDGET`, and a dropped write bumps the `history.lost` sidecar
+  (temp file + `os.replace` under a lock file). The services (`stats`, `export`, `prune`,
+  `reset`) raise `HistoryError`; `health()` never raises. `PROMPT_HISTORY` (default `true`) and
+  `PROMPT_HISTORY_RETENTION_DAYS` configure it; estimates come only from a user `prices.toml`
+  in the config dir and are kept apart from reported costs. `sqlite3`, `tomllib`, `csv` and
+  `decimal` are imported inside functions, and `cli.py` does not import the module yet (#89).
 - `prompt_builder.py` — `PROFILES` maps a profile name (`default`, `general`) to a system
   prompt used to instruct the rewrite; `ALIASES` keeps the retired `default-pro` resolving to `default`. `render()` fills the `{{PERSONA_RULE}}` token from
   `PROMPT_PERSONA` (also printed by the `persona` subcommand for the `-p-` snippet). `default` (the

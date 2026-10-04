@@ -33,6 +33,18 @@ def _user_config_dir(environ: Mapping[str, str] = os.environ) -> Path:
     return Path(environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "prompt-workflow"
 
 
+def user_data_dir(environ: Mapping[str, str] = os.environ) -> Path:
+    """Per-device data (the usage history): never roamed or synced with the settings, since
+    it describes this machine's calls. %LOCALAPPDATA% on Windows, $XDG_DATA_HOME or
+    ~/.local/share elsewhere."""
+    if os.name == "nt":
+        local = environ.get("LOCALAPPDATA")
+        return Path(local or Path.home() / "AppData" / "Local") / "prompt-workflow"
+    return (
+        Path(environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share") / "prompt-workflow"
+    )
+
+
 def _env_file_candidates(environ: Mapping[str, str] = os.environ) -> list[Path]:
     """Where .env may live, in priority order.
 
@@ -286,6 +298,11 @@ class Settings:
     # Extra `;`-separated regexes the data-protection gate blocks on, e.g. internal project
     # code names or customer-ID formats. Compiled by redaction.compile_extra().
     extra_patterns: str = _env("PROMPT_EXTRA_PATTERNS", "")
+    # Local usage history (history.py): metadata only, never prompt, clipboard, output,
+    # persona or key text, kept in user_data_dir() on this device. false records nothing.
+    history: bool = _env("PROMPT_HISTORY", "true", _bool)
+    # Days a history record is kept; HistoryStore.prune() deletes older ones.
+    history_retention_days: int = _env("PROMPT_HISTORY_RETENTION_DAYS", "365", _positive_int)
 
     @classmethod
     def load(cls) -> Settings:
