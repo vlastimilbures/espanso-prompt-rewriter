@@ -18,6 +18,14 @@ All notable changes to this project are documented here. The format follows
   finalised, so a reply that then fails still has its tokens on record. Records never hold the
   prompt, the response, a raw body or a key. No trigger output changes: nothing passes an
   observer yet.
+- A release workflow (#94). Run by hand (or, with the repository variable `RELEASE_ON_PUSH` set
+  to `true`, on a push to `main`) for a version with no tag yet, it builds the sdist and wheel,
+  installs the wheel in a clean venv on macOS, Windows and Linux and checks its match files,
+  profiles and `persona`, attests build provenance, and creates the annotated tag and a GitHub
+  Release with the version's CHANGELOG notes. Each Release also carries `constraints.txt`, the
+  runtime pins from `uv.lock`, so `uv tool install <wheel-url> -c <constraints-url>` installs
+  exactly the locked dependencies. CHANGELOG headings now carry their release date
+  (`## 0.15.0 - 2026-10-04`); a test checks that the newest one is the `pyproject.toml` version.
 
 ### Security
 - A clipboard item that a password manager marked as concealed is refused before it is read,
@@ -139,7 +147,7 @@ All notable changes to this project are documented here. The format follows
 - A draft over 50,000 characters is refused before it is cleaned, so a pasted multi-megabyte
   log no longer stalls the expansion.
 
-## 0.15.0
+## 0.15.0 - 2026-10-04
 
 Upgrading: `OPENROUTER_REASONING_EFFORT` and `OPENROUTER_PRO_REASONING_EFFORT` are now checked
 when settings load. A value other than empty, `none`, `minimal`, `low`, `medium` or `high`
@@ -182,7 +190,7 @@ turns every trigger into an inline error naming the variable, so fix it in `.env
   reasoning tags, is no longer cut short or pasted with the tags removed. Only reasoning at the
   start of the reply (a closed or unclosed `<think>` block, or a stray `</think>`) is stripped.
 
-## 0.14.0
+## 0.14.0 - 2026-10-04
 
 Upgrading: re-run the installer (`./scripts/install_macos.sh` or
 `.\scripts\install_windows.ps1`) to deploy the `-p-` template fix. If your `.env` sets
@@ -248,7 +256,7 @@ and `-if-` now use it too, unless `PROMPT_PRO_PROFILE` is set.
   repair fixed all 29 with the slip and left every well-formed one unchanged. The bench scores
   the repaired text, keeps the raw one as `*.raw`, and reports the count in a `rep` column.
 
-## 0.13.0
+## 0.13.0 - 2026-10-04
 
 Upgrading: re-run the installer (`./scripts/install_macos.sh` or
 `.\scripts\install_windows.ps1`). Every trigger that runs the CLI changed (`force_mode`,
@@ -309,7 +317,7 @@ variable set only in `.env` no longer applies; set it for GUI apps instead (see 
 - The README and `.env.example` no longer suggest that `PROMPT_PROVIDER=ollama` makes `-i-`
   local: every trigger passes its own `--provider`. Use `PROMPT_LOCAL_ONLY=true` instead.
 
-## 0.12.0
+## 0.12.0 - 2026-10-03
 
 ### Changed
 - The `default` prompt was reworked after an A/B run on both tiers (judged blind; details in
@@ -330,7 +338,7 @@ variable set only in `.env` no longer applies; set it for GUI apps instead (see 
 - Four held-out drafts in the bench's `edge` suite (`vendor-review`, `landlord`, `teams-jana`,
   `outliers`), and the `spanish` draft accepts a plain-text `OUTPUTS` line.
 
-## 0.11.0
+## 0.11.0 - 2026-09-30
 
 ### Changed
 - The `default` prompt was reworked after a benchmark review; the golden template and its fixed
@@ -360,7 +368,7 @@ variable set only in `.env` no longer applies; set it for GUI apps instead (see 
   the share of the draft's specifics carried over. The default is still the 8-draft `core`
   suite.
 
-## 0.10.0
+## 0.10.0 - 2026-09-29
 
 ### Security
 - Ollama and LM Studio pass the data-protection gate when the draft would leave the
@@ -393,7 +401,7 @@ variable set only in `.env` no longer applies; set it for GUI apps instead (see 
 - Development: the dev tools are a uv dependency group (`uv sync`, no `--extra dev`), mypy
   runs strict over `src` and `scripts`, and CI adds Python 3.14 and a 95% coverage floor.
 
-## 0.9.0
+## 0.9.0 - 2026-09-29
 
 ### Security
 - The redaction gate scans in linear time. An 80,000-character clipboard used to take
@@ -425,7 +433,7 @@ variable set only in `.env` no longer applies; set it for GUI apps instead (see 
 - CI: checkout no longer persists credentials; tests run on pushes to `main` and on
   pull requests. Ruff's version is pinned once, in `uv.lock`.
 
-## 0.8.0
+## 0.8.0 - 2026-09-29
 
 ### Changed
 - Bumped `typer` to 0.27.2.
@@ -434,7 +442,9 @@ variable set only in `.env` no longer applies; set it for GUI apps instead (see 
 - The `prompts-llm.yml` header comment no longer contains the CLI placeholder, so the
   installers stop writing your absolute CLI path into it.
 
-## 0.7.0 — first public release
+## 0.7.0 - 2026-09-29
+
+First public release.
 
 ### Features
 - `prompt-workflow improve` rewrites a clipboard, stdin or argument draft into a precise

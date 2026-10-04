@@ -178,6 +178,28 @@ with the output of `echo "$(uv tool dir --bin)/prompt-workflow"`, then run `espa
 
 </details>
 
+<details>
+<summary>Install a release wheel with the locked dependencies</summary>
+
+Each [GitHub Release](https://github.com/vlastimilbures/espanso-prompt-rewriter/releases) from
+0.16 on carries the wheel and `constraints.txt`, the exact dependency versions from `uv.lock`
+(a plain `uv tool install` resolves the version ranges afresh). Until a packaged channel exists,
+install a release with:
+
+```bash
+uv tool install \
+  https://github.com/vlastimilbures/espanso-prompt-rewriter/releases/download/v<version>/espanso_prompt_rewriter-<version>-py3-none-any.whl \
+  -c https://github.com/vlastimilbures/espanso-prompt-rewriter/releases/download/v<version>/constraints.txt
+```
+
+To check the files first, download them (`gh release download v<version> -R
+vlastimilbures/espanso-prompt-rewriter`), run `gh attestation verify <file> -R
+vlastimilbures/espanso-prompt-rewriter` on each, and install the local wheel with
+`-c constraints.txt`. This installs the CLI only: deploy the match files as in the manual install
+above. The CLI then reads `.env` from the user config directory, not from a checkout.
+
+</details>
+
 ## Usage
 
 ### Triggers

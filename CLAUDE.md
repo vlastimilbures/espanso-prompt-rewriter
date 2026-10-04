@@ -178,3 +178,14 @@ overrides any `--provider` a trigger passes; `PROMPT_PROVIDER` only sets the bar
   checks each value against the CLI. `-ic-`
   (Anthropic) stays commented out in `prompts-llm.yml`. The data-protection gate is a heuristic,
   not a guarantee — cloud triggers should only be used where company policy permits.
+
+### Releases
+
+`.github/workflows/release.yml` is the only way a version is tagged and released (steps in
+CONTRIBUTING's "Releasing"). It runs on a manual dispatch, or on a push to `main` only while the
+repository variable `RELEASE_ON_PUSH` is `true`, and does nothing for a version that already has
+a tag. Only its `release` job can write. `scripts/release_notes.py` gives the workflow the
+version and its notes and refuses a CHANGELOG whose newest `## X.Y.Z - YYYY-MM-DD` heading is not
+the `pyproject.toml` version (`## Unreleased` may come first); `tests/test_release.py` runs the
+same check. Each Release carries `constraints.txt` (uv.lock's runtime pins), and the artifact
+test installs the wheel with it and runs `scripts/check_wheel.py --constraints`.

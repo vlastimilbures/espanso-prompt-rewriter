@@ -65,6 +65,32 @@ uv run pytest -m live
 - **Changelog.** Add a line under *Unreleased* in [CHANGELOG.md](CHANGELOG.md) for anything a user
   would notice.
 
+## Releasing
+
+Releases are cut by `.github/workflows/release.yml`, never by hand-made tags.
+
+1. Open a `chore(release): X.Y.Z` pull request that sets `version` in `pyproject.toml`, runs
+   `uv lock` (which updates the project's version in `uv.lock`), and renames `## Unreleased` in
+   CHANGELOG.md to `## X.Y.Z - YYYY-MM-DD` (the release date). Leave no empty *Unreleased*
+   heading behind; the next change adds it back. `tests/test_release.py` fails unless the newest
+   CHANGELOG version is the `pyproject.toml` version and every version heading is dated.
+2. Merge it, then run the **release** workflow on `main` (Actions tab, or
+   `gh workflow run release.yml --ref main`). It builds the sdist, the wheel and
+   `constraints.txt` (`uv export --frozen --no-dev --no-emit-project --no-hashes`), installs the
+   wheel with those constraints into a clean venv on macOS, Windows and Linux and runs
+   `scripts/check_wheel.py --constraints`, then attests the files, creates the annotated tag
+   `vX.Y.Z` and publishes the Release with that CHANGELOG section as its notes. Tick *dry-run* to
+   stop after the artifact tests. It does nothing for a version that already has a tag.
+3. Check the result: `gh release download vX.Y.Z` and `gh attestation verify <file> -R
+   vlastimilbures/espanso-prompt-rewriter` for each file.
+
+With the repository variable `RELEASE_ON_PUSH` set to `true`, step 2 also happens on every push
+to `main` whose version has no tag yet. It is off by default, so merging a branch never releases
+by surprise. Only the workflow's last job can write (`contents`, `id-token`, `attestations`).
+The Release is created as a draft and published once every file is attached, so with
+[immutable releases](https://docs.github.com/en/code-security/supply-chain-security/understanding-your-software-supply-chain/immutable-releases)
+enabled in the repository settings, the published Release cannot be changed.
+
 ## Trigger start-up budget
 
 Espanso starts a fresh `prompt-workflow` process for every trigger, so everything `cli.py`
@@ -136,7 +162,8 @@ espanso-prompt-rewriter/
 │   ├── install_macos.sh          install the CLI and deploy the match files
 │   ├── install_windows.ps1       the same for Windows
 │   ├── bench_models.py           score models on template fidelity, latency, cost
-│   └── check_wheel.py            CI: what an installed wheel really contains
+│   ├── check_wheel.py            CI: what an installed wheel really contains
+│   └── release_notes.py          release: the version and its CHANGELOG notes
 ├── tests/                        unit tests, no network (fake_http in conftest.py)
 │   ├── test_live.py              opt-in real OpenRouter calls (pytest -m live)
 │   ├── test_trigger_contract.py  exact trigger output, imports and module budget
