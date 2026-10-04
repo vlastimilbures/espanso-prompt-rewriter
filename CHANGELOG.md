@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## 0.15.0
+
 Upgrading: `OPENROUTER_REASONING_EFFORT` and `OPENROUTER_PRO_REASONING_EFFORT` are now checked
 when settings load. A value other than empty, `none`, `minimal`, `low`, `medium` or `high`
 turns every trigger into an inline error naming the variable, so fix it in `.env`.
