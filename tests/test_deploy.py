@@ -1025,3 +1025,14 @@ def test_detach_leaves_a_link_alone(tmp_path, espanso):
     assert link.is_symlink()
     assert real.exists()
     assert any("it is a link" in line for line in outcome.lines)
+
+
+# Before v0.11 a Windows checkout had CRLF sources, which the Windows script copied as they were.
+def test_crlf_file_an_old_windows_script_wrote_is_stale(monkeypatch, espanso):
+    old = _old_release(monkeypatch)
+    rendered = old.replace("__PROMPT_WORKFLOW__", "C:/Users/me/prompt-workflow.exe")
+    target = espanso / "match" / "prompts-llm.yml"
+    target.write_bytes(rendered.replace("\n", "\r\n").encode("utf-8"))
+    assert _states(espanso)["prompts-llm.yml"] == deploy.STALE
+    target.write_bytes(("\ufeff" + rendered).encode("utf-8"))
+    assert _states(espanso)["prompts-llm.yml"] == deploy.STALE

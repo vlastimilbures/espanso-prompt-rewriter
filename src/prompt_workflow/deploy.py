@@ -343,7 +343,9 @@ def _released_rendering(name: str, current: str, launchers: Sequence[str]) -> bo
     a source some release shipped (match_history): its stamp, if any, dropped and the
     launcher it holds put back as the placeholder. Any edit changes the digest."""
     known = KNOWN_SOURCES.get(name, frozenset())
-    body = _STAMP_LINE.sub("", current, count=1)
+    # Before v0.11 (.gitattributes eol=lf) a Windows checkout held CRLF sources, which the
+    # Windows script copied byte for byte; the digests are of the LF sources.
+    body = _STAMP_LINE.sub("", current.removeprefix("\ufeff").replace("\r\n", "\n"), count=1)
     # Every release quoted the launcher the same way; Windows paths have forward slashes.
     candidates = {*_QUOTED_LAUNCHER.findall(body), *launchers}
     for launcher in [None, *sorted(candidates)]:
