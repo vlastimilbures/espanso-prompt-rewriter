@@ -384,6 +384,15 @@ def test_empty_content(fake_http, name, text):
         build().generate("d", "s")
 
 
+# A <think> tag inside the answer is text, not reasoning: the rewrite is not cut short.
+@ALL
+def test_mid_text_think_survives(fake_http, name):
+    build, body, _ = PROVIDERS[name]
+    text = "<INSTRUCTIONS>\n1/ Reason inside <think> tags.\n2/ Keep it short.\n</INSTRUCTIONS>"
+    fake_http.reply(body(text))
+    assert build().generate("d", "s") == text
+
+
 # A null content field (some reasoning models) raises ProviderError, not TypeError.
 @pytest.mark.parametrize("name", ["ollama", "openai_compatible", "anthropic"])
 def test_null_content(fake_http, name):
