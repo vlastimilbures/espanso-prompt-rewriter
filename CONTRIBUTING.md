@@ -45,7 +45,9 @@ uv run pytest -m live
   traceback or a blank line reaches the user as a silent failure. Print only through
   `cli._emit()`, which strips control and invisible characters from whatever gets pasted.
   `tests/test_trigger_contract.py` compares the whole stdout of `improve` and `persona` byte
-  for byte; a change there is a change to what every trigger pastes.
+  for byte; a change there is a change to what every trigger pastes. On Windows each newline
+  in the output is printed as CRLF (Python's standard streams translate it there); the test
+  expects that.
 - **The gate.** Build providers only through `factory.make_provider()`. It wraps every provider
   that can send the draft off the machine in `GatedProvider`: the cloud ones always, a local one
   when its base URL is not loopback or the Ollama model is a cloud model.

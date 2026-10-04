@@ -20,11 +20,19 @@ runner = CliRunner()
 
 PLACEHOLDER = b"I am working as [role] in [company]."
 
+# What a newline in the output becomes on this platform. _emit() writes text to sys.stdout,
+# which on Windows translates "\n" to "\r\n" (CPython opens the standard streams with
+# newline=None there, and _main()'s reconfigure() keeps that), so a multi-line rewrite and the
+# "sent despite" note reach Espanso with CRLF on Windows and LF elsewhere. CliRunner's stdout
+# wrapper translates the same way. Frozen as it is, so a change either way fails here.
+EOL = os.linesep.encode()
+
 
 def _golden(args: list[str], expected: bytes) -> None:
+    """``expected`` is written with LF; each newline is checked as this platform prints it."""
     result = runner.invoke(app, args)
     assert result.exit_code == 0
-    assert result.stdout_bytes == expected
+    assert result.stdout_bytes == expected.replace(b"\n", EOL)
     assert not result.stdout_bytes.endswith(b"\n")
 
 
@@ -33,8 +41,8 @@ IMPROVE = ["improve", "--provider", "ollama", "--source", "argument", "--text", 
 
 # The rewrite is pasted as-is, UTF-8, cleaned of control characters, with no newline added.
 def test_improve_success(stub_provider):
-    stub_provider.result = "Přepiš — done\x1b[201~ ✓"
-    _golden(IMPROVE, "Přepiš — done[201~ ✓".encode())
+    stub_provider.result = "Přepiš —\ndone\x1b[201~ ✓"
+    _golden(IMPROVE, "Přepiš —\ndone[201~ ✓".encode())
 
 
 # Each failure class becomes one marker; only an unexpected error gets the prefix.
@@ -131,7 +139,8 @@ def handler(request):
     if status[0] != 200:
         return httpx.Response(status[0], json={"error": {"message": "down"}})
     if "/api/chat" in str(request.url):
-        return httpx.Response(200, json={"message": {"content": "local"}, "done_reason": "stop"})
+        reply = {"message": {"content": "local\\nline"}, "done_reason": "stop"}
+        return httpx.Response(200, json=reply)
     choice = {"message": {"content": "cloud"}, "finish_reason": "stop"}
     return httpx.Response(200, json={"choices": [choice]})
 
@@ -218,7 +227,7 @@ def test_trigger_run_output(trigger_run):
     outputs, data = trigger_run
     local, cloud, cloud_error, settings_error, persona, persona_fallback, rest = outputs
     assert (local, cloud, persona, persona_fallback, rest) == (
-        b"local",
+        b"local" + EOL + b"line",
         b"cloud",
         PLACEHOLDER,
         PLACEHOLDER,
