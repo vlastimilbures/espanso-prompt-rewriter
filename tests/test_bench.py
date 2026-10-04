@@ -123,7 +123,7 @@ def test_drafts_span_all_branch_combinations():
 def test_suites():
     core, edge, every = (bench.suite_drafts(s) for s in ("core", "edge", "all"))
     assert len(core) == 8
-    assert len(edge) == 24
+    assert len(edge) == 25
     assert every == core + edge
 
 
@@ -211,6 +211,82 @@ def test_retention():
     assert bench.retention(GOOD, _draft()) == 1.0
 
 
+# A key matches at the start of a word, and an acronym only in capitals.
+def test_key_found():
+    assert bench.key_found("NPL", "the NPL spike")
+    assert bench.key_found("phase", "in three Phases")
+    assert not bench.key_found("ID", "validate all inputs")
+    assert not bench.key_found("MAD", "fixes made")
+    assert not bench.key_found("MAD", "a mad rush")
+    assert bench.key_found("MAD", "median and MAD")
+
+
+def _skeleton() -> str:
+    """A rewrite holding only what every output contains whatever the draft: the persona,
+    the tags, both variants of each branching step, the fixed steps and the .md line."""
+    profile = PROFILES["default"]
+    fixed = [ln for ln in profile.splitlines() if ln.startswith(tuple(bench.MANDATORY.values()))]
+    return "\n".join(
+        [
+            bench.EXAMPLE_PERSONA,
+            *(f"<{t}>\n</{t}>" for t in bench.TAGS),
+            *re.findall(r'<variant id="[ab]">(.*?)</variant>', profile, re.DOTALL),
+            *fixed,
+            bench.DEFAULT_OUTPUTS,
+            "- Language: write the result in",
+            "- Out of scope:",
+        ]
+    )
+
+
+def test_skeleton_holds_the_fixed_wordings():
+    skeleton = _skeleton()
+    phrases = [
+        bench.PLAN_FIRST,
+        bench.SELF_REVIEW,
+        "fixes made",
+        "before drafting",
+        "let me decide",
+    ]
+    for phrase in phrases:
+        assert phrase in skeleton
+
+
+# No retention key is satisfied by the fixed wording alone, or retention would score a
+# rewrite that dropped every specific of the draft.
+@pytest.mark.parametrize("name", list(bench.DRAFTS))
+def test_retention_keys_miss_the_fixed_wording(name):
+    skeleton = _skeleton()
+    hits = [k for alts in bench.DRAFTS[name].keys for k in alts if bench.key_found(k, skeleton)]
+    assert hits == []
+
+
+# Pasted material must reach INPUTS word for word; re-wrapped lines still count.
+def test_check_draft_material():
+    pasted = _draft(material=("from 1 January our API price rises by 8%",))
+    copied = GOOD.replace("NPL data.", "Dear customer, from 1 January our API price rises by 8%.")
+    assert bench.check_draft(copied, pasted) == []
+    wrapped = copied.replace("our API price", "our API\nprice")
+    assert bench.check_draft(wrapped, pasted) == []
+    described = GOOD.replace("NPL data.", "Orbis Data's price update email.")
+    assert bench.check_draft(described, pasted) == ["pasted material not copied"]
+    # A copy outside INPUTS (e.g. in a work step) does not count.
+    elsewhere = described.replace(
+        "3/ Analyse", "3/ Note: from 1 January our API price rises by 8%."
+    )
+    assert bench.check_draft(elsewhere, pasted) == ["pasted material not copied"]
+    # Every probe must be there: copying only one message of a thread is not a copy.
+    two = _draft(material=("from 1 January our API price rises by 8%", "Regards, Orbis"))
+    assert bench.check_draft(copied, two) == ["pasted material not copied"]
+
+
+# Each probe is copied from its draft and sits on one line of it.
+def test_material_is_in_its_draft():
+    for name, d in bench.DRAFTS.items():
+        for probe in d.material:
+            assert any(probe in line for line in d.text.splitlines()), (name, probe)
+
+
 def test_split_spec():
     assert bench.split_spec("a/b") == ("a/b", "", "")
     assert bench.split_spec("a/b@c/d") == ("a/b", "c/d", "")
@@ -229,8 +305,11 @@ def test_call_sends_reasoning_effort(fake_http, monkeypatch):
     assert sent["reasoning"] == {"effort": "low", "exclude": True}
     assert sent["max_tokens"] == bench.BENCH_MAX_TOKENS
     fake_http.reply({"choices": [{"message": {"content": "ok"}}]})
+    bench._call(Settings(), "a/b", "", "draft", "sys", max_tokens=2400)
+    assert fake_http.calls[-1]["json"]["max_tokens"] == 2400
+    fake_http.reply({"choices": [{"message": {"content": "ok"}}]})
     bench._call(Settings(), "a/b", "", "draft", "sys")
-    assert "reasoning" not in fake_http.calls[1]["json"]
+    assert "reasoning" not in fake_http.calls[-1]["json"]
 
 
 # A response cut off by max_tokens is a failure, and reasoning tokens are recorded.
@@ -352,6 +431,17 @@ def test_default_run_is_reproducible_and_private(fake_http, monkeypatch, tmp_pat
         assert meta["system_prompt_sha256"] == _sha(systems[-1])
     assert systems[0] == systems[1]
     assert bench.EXAMPLE_PERSONA in systems[0]
+
+
+# --max-tokens reaches the request and meta.json.
+def test_main_max_tokens(fake_http, monkeypatch, tmp_path):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k")
+    fake_http.reply({"choices": [{"message": {"content": GOOD}}]})
+    meta = _main(monkeypatch, tmp_path / "out", "--max-tokens", "2400")
+    assert meta["max_tokens"] == 2400
+    assert fake_http.calls[-1]["json"]["max_tokens"] == 2400
+    with pytest.raises(SystemExit):
+        _main(monkeypatch, tmp_path / "zero", "--max-tokens", "0")
 
 
 # --persona env renders the runner's own persona and records only the mode; a candidate

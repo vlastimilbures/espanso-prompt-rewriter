@@ -6,7 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Added
+- The bench checks that sentences from the start, middle and end of pasted material reach
+  `INPUTS` word for word (`pasted material not copied`) on `pasted`, `outage`,
+  `pasted-injection` and a new 35-line `long-thread` edge draft. On the 2026-10 review's saved
+  outputs (local, not in the repo) it flags the shipped prompt on `long-thread` in 9 of 9 runs
+  and on flash-lite `pasted` in 6 of 6.
+- `scripts/bench_models.py --max-tokens` sets the output cap per call (default 6000), so a run
+  can score what a trigger returns under the CLI's `OPENROUTER_MAX_TOKENS`.
+
 ### Changed
+- The bench's `kept` metric matches a key only at the start of a word, and an acronym only in
+  capitals, so "ID" no longer matches inside "validate" or "MAD" inside "fixes made". A test
+  checks that no key matches the fixed template wordings.
 - `scripts/bench_models.py` renders a fixed fictitious persona by default (`--persona example`)
   instead of the runner's `PROMPT_PERSONA`, so every machine scores the same system prompt and
   no private persona ends up in bench outputs. `--persona none` renders none, and
