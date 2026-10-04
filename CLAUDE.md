@@ -23,7 +23,9 @@ Espanso does not inherit shell PATH):
   with no trailing newline (Espanso inserts stdout verbatim). All failures are caught and
   converted to a `[prompt-workflow: ...]` marker printed to stdout with exit code 0, rather than a
   stack trace or blank expansion, since Espanso has no good way to surface a nonzero exit /
-  stderr to the user. Everything printed goes through `_emit()`, which strips control, bidi and
+  stderr to the user. A golden-template rewrite (its profile contains `<output_template>`, which
+  `tests/test_prompts.py` ties to `<CONTEXT>`) first goes through
+  `prompt_builder.repair_template_tags()`, which fixes only the `<CONTEXT>…</GOAL>` slip. Everything printed goes through `_emit()`, which strips control, bidi and
   Unicode tag characters (the draft gets the same `_clean()`); stdin/stdout are reconfigured to
   UTF-8 because Windows pipes default to the ANSI code page. `--tier pro` swaps in the
   `OPENROUTER_PRO_*` settings and `PROMPT_PRO_PROFILE` (if set) via `Settings.for_tier()`; `--model`/`--effort`/`--max-tokens`/

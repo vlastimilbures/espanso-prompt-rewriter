@@ -406,8 +406,10 @@ all six sections present and correctly closed, mandatory steps verbatim, `1/ 2/ 
 both branch choices right, no leaked scaffolding or `[domain]` placeholder, the draft's language
 and role respected, `OUTPUTS` matching the deliverable, sentences from the start, middle
 and end of pasted material copied word for word into `INPUTS`, no third-person context, no
-degeneration. A `kept` column reports the share of the draft's specifics carried over. Cost and
-token counts come from OpenRouter's own usage data. Each model is given as
+degeneration. A `kept` column reports the share of the draft's specifics carried over, and `rep`
+how many rewrites had a `<CONTEXT>…</GOAL>` slip (seen on flash-lite), which the CLI repairs
+before pasting; those are scored on the repaired text. Cost and token counts come from
+OpenRouter's own usage data. Each model is given as
 `model@endpoint~effort`: the endpoint is pinned with fallbacks off, because the same model on
 another host can differ several-fold in latency and cost, and `~effort` sets the reasoning
 effort. The report splits passes by draft, so a draft every model fails shows up as a prompt

@@ -44,7 +44,12 @@ from pathlib import Path
 from prompt_workflow import prompt_builder
 from prompt_workflow.config import Settings, split_model_spec
 from prompt_workflow.factory import make_provider
-from prompt_workflow.prompt_builder import PROFILES, render
+from prompt_workflow.prompt_builder import (
+    PROFILES,
+    TEMPLATE_MARKER,
+    render,
+    repair_template_tags,
+)
 from prompt_workflow.providers.base import TRUNCATED_NOTE
 
 MODELS: list[str] = [
@@ -712,6 +717,7 @@ class Result:
     reasoning_tokens: int = 0
     finish_reason: str = ""
     retried: bool = False
+    repaired: bool = False  # the CLI's tag repair changed the text (counted, not failed)
     retention: float = 0.0
     failed: list[str] = field(default_factory=list)
     error: str | None = None
@@ -849,6 +855,10 @@ def run_one(
 
     # Truncation is reported once, from finish_reason; the pasted note is not scored.
     text = text.removesuffix(TRUNCATED_NOTE)
+    # Score what the CLI would paste, and count the repairs separately.
+    raw = text
+    if TEMPLATE_MARKER in sys_prompt:
+        text = repair_template_tags(text)
     failed = check(text, draft.plan, draft.independent, scaffold_tags(sys_prompt))
     failed += check_draft(text, draft, persona)
     if finish_reason == "length":
@@ -856,6 +866,8 @@ def run_one(
 
     slug = spec.replace("/", "_").replace("@", "__at__").replace("~", "__effort__")
     (outdir / f"{slug}__{draft_name}__{run}.txt").write_text(text, encoding="utf-8")
+    if text != raw:  # keep the slip itself, for checking a change to the repair later
+        (outdir / f"{slug}__{draft_name}__{run}.raw").write_text(raw, encoding="utf-8")
     return result(
         seconds=elapsed,
         out_tokens=int(usage.get("completion_tokens", 0)),
@@ -865,6 +877,7 @@ def run_one(
         reasoning_tokens=reasoning_tokens,
         finish_reason=finish_reason,
         retried=retried,
+        repaired=text != raw,
         retention=retention(text, draft),
         failed=failed,
     )
@@ -954,7 +967,7 @@ def report(results: list[Result], budget: Budget, meta: dict[str, object] | None
         by_model.setdefault(r.label, []).append(r)
 
     header = (
-        f"{'model':62s} {'pass':>7s} {'kept':>5s} {'p50 s':>7s} {'p95 s':>7s} "
+        f"{'model':62s} {'pass':>7s} {'rep':>4s} {'kept':>5s} {'p50 s':>7s} {'p95 s':>7s} "
         f"{'in':>6s} {'out':>6s} {'reas':>6s} {'$/1k':>7s} backend"
     )
     print(f"\n{header}")
@@ -971,6 +984,7 @@ def report(results: list[Result], budget: Budget, meta: dict[str, object] | None
                 statistics.median(times) if times else 999.0,
                 model,
                 f"{n_passed}/{len(rs)}",
+                sum(r.repaired for r in rs),
                 statistics.mean([r.retention for r in done]) if done else float("nan"),
                 statistics.median(times) if times else float("nan"),
                 _p95(times) if times else float("nan"),
@@ -981,9 +995,9 @@ def report(results: list[Result], budget: Budget, meta: dict[str, object] | None
                 next((r.backend for r in done if r.backend), "?"),
             )
         )
-    for _, _, model, passed, kept, p50, p95, tin, tout, reas, per_k, backend in sorted(rows):
+    for _, _, model, passed, rep, kept, p50, p95, tin, tout, reas, per_k, backend in sorted(rows):
         print(
-            f"{model:62s} {passed:>7s} {kept:5.2f} {p50:7.1f} {p95:7.1f} "
+            f"{model:62s} {passed:>7s} {rep:4d} {kept:5.2f} {p50:7.1f} {p95:7.1f} "
             f"{tin:6.0f} {tout:6.0f} {reas:6.0f} {per_k:7.2f} {backend}"
         )
 
@@ -1011,6 +1025,12 @@ def report(results: list[Result], budget: Budget, meta: dict[str, object] | None
             print(f"  {r.label} {r.draft}#{r.run}: {', '.join(r.failed)}")
     if not any_failure:
         print("  none")
+
+    repaired = [f"{r.label} {r.draft}#{r.run}" for r in results if r.repaired]
+    if repaired:
+        print("\nrepaired <CONTEXT>...</GOAL> slips (scored on the repaired text; raw in *.raw):")
+        for run in repaired:
+            print(f"  {run}")
 
     print(f"\ntotal spend: ${budget.spent:.4f} of ${budget.limit:.2f} budget")
 
@@ -1085,6 +1105,8 @@ def main() -> None:
         prompt = Path(args.system_prompt_file).name  # never a local absolute path
     else:
         template, prompt = PROFILES["default"], "default"
+    if "<CONTEXT>" in template and TEMPLATE_MARKER not in template:
+        print(f"warning: no {TEMPLATE_MARKER} in the prompt, so no tag repair: the CLI keys on it")
     persona = bench_persona(args.persona, cfg)
     meta = run_meta(
         prompt=prompt,
