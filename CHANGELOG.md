@@ -76,6 +76,19 @@ All notable changes to this project are documented here. The format follows
   finding, and `scheme://:password@host` (no user name) counts as `url_credentials` (#21).
 
 ### Added
+- Saved settings (#84). Once `config.toml` exists in the config folder
+  (`~/.config/prompt-workflow/`, `%APPDATA%\prompt-workflow\` on Windows), it is the saved
+  configuration and no `.env` is read, so an old `.env` never overrides a saved value. API keys
+  live apart in `secrets.toml`, private to your user (mode 600 from creation on macOS/Linux, a
+  user-only access list on Windows; if that cannot be set, nothing is written). Precedence:
+  default < `config.toml` or `.env` < `secrets.toml` < real environment < a trigger's options.
+  With `PROMPT_WORKFLOW_ENV` set, that `.env` is used alone, as before, and without
+  `config.toml` nothing changes. Services (the commands follow in #92) save settings validated
+  and atomically, refuse a write over an edit made since the file was read (naming the changed
+  settings), never write a secret to `config.toml`, treat a newer `config_version` as
+  read-only, and migrate a `.env` after a preview and explicit confirmation: back up, write,
+  verify by reloading, then move the `.env` into `backups/` (never deleted); a rollback
+  restores the exact files. New dependency: `tomli-w`, loaded only when saving.
 - Your own profiles live in `~/.config/prompt-workflow/profiles/<name>.md`
   (`%APPDATA%\prompt-workflow\profiles\` on Windows), next to the user `.env`, where an
   upgrade cannot replace them (#85). A new name works with `--profile <name>`, `PROMPT_PROFILE`
@@ -114,6 +127,12 @@ All notable changes to this project are documented here. The format follows
   `prices.toml` in the config dir. Nothing records yet; the CLI starts recording in #89.
 
 ### Changed
+- `.env.example` sets only `OPENROUTER_API_KEY` and `PROMPT_PERSONA`; every other setting is
+  shown commented out with its default, so a copied file no longer pins the model, endpoint or
+  effort, and later default changes reach you (#28). The README now recommends keeping the file
+  with your key in the config folder, outside the repository (#35).
+- A `config.toml` or `secrets.toml` that cannot be parsed fails closed: `improve` pastes its
+  error marker without calling a provider, and `persona` its placeholder.
 - Loading settings no longer copies `.env` values into the process environment (#83). A pure,
   layered merge (`ConfigLayers`: built-in default < `.env` < real environment, then per-call
   overrides) builds `Settings`, so loading again in the same process sees an edited `.env`, child

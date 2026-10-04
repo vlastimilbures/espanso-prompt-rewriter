@@ -8,6 +8,8 @@ from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 from typing import Any
 
+from . import config_files
+from .config_files import CONFIG_VERSION, VERSION_KEY, ConfigFileError, SecretStoreError
 from .redaction import safe_repr
 
 
@@ -43,6 +45,12 @@ def user_data_dir(environ: Mapping[str, str] = os.environ) -> Path:
     return (
         Path(environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share") / "prompt-workflow"
     )
+
+
+def settings_file(environ: Mapping[str, str] = os.environ) -> Path:
+    """The user TOML settings file (non-secret settings): once it exists it is the saved
+    source, and no .env is read (unless PROMPT_WORKFLOW_ENV names one)."""
+    return _user_config_dir(environ) / config_files.SETTINGS_FILE
 
 
 def _env_file_candidates(environ: Mapping[str, str] = os.environ) -> list[Path]:
@@ -110,6 +118,77 @@ def _find_env_file(
     return None
 
 
+def _saved_layer(
+    path: Path,
+    fail: Callable[[str, str], None],
+    note: Callable[[str, str], None],
+) -> Layer | None:
+    """The settings in config.toml, or None when it does not exist. A file that exists but
+    cannot be parsed still returns a layer (an empty one), so saved mode stays on and a .env
+    never steps in for a broken config.toml."""
+    source = f"file:{path}"
+    name = config_files.SETTINGS_FILE
+    try:
+        loaded = config_files.load_toml(path)
+    except ConfigFileError as exc:
+        fail(source, str(exc))
+        return Layer(source, {})
+    if loaded is None:
+        return None
+    table = loaded[0]
+    version = table.get(VERSION_KEY, CONFIG_VERSION)
+    if not isinstance(version, int) or isinstance(version, bool) or version < 1:
+        fail(source, f"{VERSION_KEY} in {name} must be a whole number above 0")
+    elif version > CONFIG_VERSION:
+        note(
+            source,
+            f"{name} has {VERSION_KEY} {version}, newer than this version reads "
+            f"({CONFIG_VERSION}); it is read-only here",
+        )
+    known, secrets = env_names(), secret_names()
+    values = {}
+    for key, value in table.items():
+        if key == VERSION_KEY:
+            continue
+        if key not in known:
+            note(source, f"{safe_repr(key)} in {name} is not a setting; it was ignored")
+            continue
+        text = config_files.scalar_text(value)
+        if text is None:
+            fail(source, f"{key} in {name} must be text, a number or true/false")
+            continue
+        if key in secrets:
+            note(source, f"{key} is a secret; move it from {name} to the secret store")
+        values[key] = text
+    return Layer(source, values)
+
+
+def _secrets_layer(
+    directory: Path,
+    strict: bool,
+    fail: Callable[[str, str], None],
+    note: Callable[[str, str], None],
+) -> Layer | None:
+    """The API keys in the secret store, or None when it holds none. A store that fails
+    fails the settings: there is no fallback to another store."""
+    store = config_files.secret_store(directory)
+    try:
+        values = store.read()
+    except SecretStoreError as exc:
+        fail(store.source, str(exc))
+        return None
+    if not values:
+        return None
+    secrets = secret_names()
+    for key in values:
+        if key not in secrets:
+            note(store.source, f"{safe_repr(key)} is not a secret setting; it was ignored")
+    exposed = getattr(store, "exposed", None)
+    if not strict and exposed is not None and exposed():
+        note(store.source, "the secrets file can be read by other users; make it private (600)")
+    return Layer(store.source, {k: v for k, v in values.items() if k in secrets})
+
+
 def _merged_lines(pairs: Mapping[str, str]) -> list[str]:
     """Keys whose value holds another assignment (a setting name in any case, or any
     `UPPER_CASE` name, then `=`): a .env saved without the newline between two lines, whose
@@ -148,13 +227,19 @@ def _env(
     def read() -> Any:
         return _parse_setting(name, parse, os.getenv(name, default))
 
-    metadata = {"env": name, "default": default, "parse": parse}
+    metadata = {"env": name, "default": default, "parse": parse, "secret": secret}
     return field(default_factory=read, repr=not secret, metadata=metadata)
 
 
 def env_names() -> tuple[str, ...]:
     """Every environment variable Settings reads, in field order."""
     return tuple(f.metadata["env"] for f in fields(Settings))
+
+
+def secret_names() -> tuple[str, ...]:
+    """The settings that hold a secret (API keys): saved only in the secret store, never in
+    config.toml, and kept out of repr()."""
+    return tuple(f.metadata["env"] for f in fields(Settings) if f.metadata["secret"])
 
 
 # Parsers raise ValueError(what the value must be); _env and _override name the setting.
@@ -311,8 +396,9 @@ class Settings:
 
     @classmethod
     def load(cls) -> Settings:
-        """Settings from ConfigLayers.resolve(): default < .env < real environment. Each call
-        reads the .env again, and os.environ is never written."""
+        """Settings from ConfigLayers.resolve(): default < config.toml or .env < secret store
+        < real environment. Each call reads the files again, and os.environ is never
+        written."""
         return ConfigLayers.resolve().settings()
 
     def for_tier(self, tier: str) -> Settings:
@@ -384,8 +470,8 @@ class Settings:
         return replace(self, **changes) if changes else self
 
 
-# Provenance of a setting value: a built-in default, a .env file (`file:<path>`) or the
-# real environment.
+# Provenance of a setting value: a built-in default, a settings file (`file:<path>`: a .env,
+# config.toml or secrets.toml) or the real environment.
 DEFAULT_SOURCE = "default"
 ENV_SOURCE = "env"
 
@@ -426,7 +512,7 @@ class ConfigLayers:
 
     A pure merge: building it reads the environment mapping and the .env file but never
     writes os.environ, so a second resolve sees an edited file and child processes inherit
-    nothing from it. More layers (a user TOML file) can slot into ``layers`` later.
+    nothing from it.
     """
 
     layers: tuple[Layer, ...]
@@ -437,7 +523,13 @@ class ConfigLayers:
     def resolve(
         cls, environ: Mapping[str, str] | None = None, *, strict: bool = True
     ) -> ConfigLayers:
-        """Merge default < first readable .env < ``environ`` (os.environ by default).
+        """Merge default < saved settings < secret store < ``environ`` (os.environ by default).
+
+        The saved settings are, in order of preference: the .env named by PROMPT_WORKFLOW_ENV
+        (legacy mode: that file alone, no config.toml or secret store, exactly as before);
+        config.toml in the user config dir once it exists (a .env elsewhere is then ignored,
+        so it can never shadow a saved value); else the first readable .env candidate. The
+        secret store (secrets.toml) is read outside legacy mode.
 
         Only env_names() keys are taken from either source: any other key (HTTP_PROXY,
         SSL_CERT_FILE, ...) would change how httpx connects, which is not what a settings
@@ -463,8 +555,18 @@ class ConfigLayers:
         known = env_names()
         defaults = {f.metadata["env"]: f.metadata["default"] for f in fields(Settings)}
         layers = [Layer(DEFAULT_SOURCE, defaults)]
-        found = _find_env_file(environ, note)
-        if found is not None:
+        legacy = bool(environ.get("PROMPT_WORKFLOW_ENV"))
+        saved = None if legacy else _saved_layer(settings_file(environ), fail, note)
+        if saved is not None:
+            layers.append(saved)
+            if not strict:
+                for candidate in _env_file_candidates(environ):
+                    if candidate.is_file():
+                        note(
+                            f"file:{candidate}",
+                            f".env is ignored: settings are saved in {config_files.SETTINGS_FILE}",
+                        )
+        elif (found := _find_env_file(environ, note)) is not None:
             path, pairs = found
             source = f"file:{path}"
             merged = _merged_lines(pairs)
@@ -472,6 +574,10 @@ class ConfigLayers:
                 fail(source, _merged_line_error(key))
             values = {k: v for k, v in pairs.items() if k in known and k not in merged}
             layers.append(Layer(source, values))
+        if not legacy and (
+            secrets := _secrets_layer(_user_config_dir(environ), strict, fail, note)
+        ):
+            layers.append(secrets)
         layers.append(Layer(ENV_SOURCE, {k: environ[k] for k in known if k in environ}))
 
         entries: dict[str, Entry] = {}

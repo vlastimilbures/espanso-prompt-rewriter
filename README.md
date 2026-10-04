@@ -116,7 +116,7 @@ step. A quick note to yourself would get "execute now" and a self-review checkli
 ```mermaid
 flowchart LR
     A["You type -i-"] --> B["Espanso runs<br/>prompt-workflow improve"]
-    B --> C["Load .env,<br/>read clipboard"]
+    B --> C["Load settings,<br/>read clipboard"]
     C --> D{"Leaves this<br/>machine?"}
     D -- yes --> E{"Sensitive content?"}
     E -- "yes, no override" --> X["Pastes a<br/>Blocked cloud call message"]
@@ -129,8 +129,8 @@ flowchart LR
 
 Espanso starts the CLI as a GUI subprocess without your shell's `PATH` or environment. So the
 install scripts write the CLI's absolute path into the match files, and the CLI reads its
-settings from the `.env` in the repository it was installed from (see
-[Configuration](#configuration)).
+settings from files rather than your shell: a `.env`, or the saved `config.toml` and
+`secrets.toml` (see [Configuration](#configuration)).
 
 ## Requirements
 
@@ -145,12 +145,16 @@ settings from the `.env` in the repository it was installed from (see
 ```bash
 git clone https://github.com/vlastimilbures/espanso-prompt-rewriter.git
 cd espanso-prompt-rewriter
-cp .env.example .env    # set OPENROUTER_API_KEY, optionally PROMPT_PERSONA
-chmod 600 .env          # macOS/Linux: the file holds your API key
+mkdir -p ~/.config/prompt-workflow
+cp .env.example ~/.config/prompt-workflow/.env  # set OPENROUTER_API_KEY, optionally PROMPT_PERSONA
+chmod 600 ~/.config/prompt-workflow/.env        # the file holds your API key
 ```
 
-Keep `.env` in the repository folder: the triggers load it from there. Then install the CLI and
-deploy the Espanso match files:
+On Windows, copy it to `%APPDATA%\prompt-workflow\.env` instead. Keep the file holding your key
+outside the repository folder, so the key never sits in the working tree where a careless
+`git add` or a shared folder could pick it up. A `.env` in the repository folder is still read
+(and wins over the one in your config folder), so move an existing one out. Then install the
+CLI and deploy the Espanso match files:
 
 ```bash
 ./scripts/install_macos.sh      # macOS
@@ -280,18 +284,37 @@ at its max-tokens cap, the partial rewrite is pasted with
 
 ## Configuration
 
-All settings are environment variables, usually set in `.env` (see
-[`.env.example`](.env.example)). Real environment variables take precedence over `.env`.
+All settings are named like environment variables and usually set in a `.env` (see
+[`.env.example`](.env.example): it sets only the key and the persona, and shows every other
+setting commented out with its default, so later default changes still reach you). Real
+environment variables take precedence over any file.
 
-The CLI reads the first `.env` it finds in:
+The CLI reads its settings from the first of these that exists:
 
-1. the file named by `PROMPT_WORKFLOW_ENV`, if set;
-2. the repository the CLI was installed from (the installers use an editable install);
-3. `~/.config/prompt-workflow/.env` (`%APPDATA%\prompt-workflow\.env` on Windows).
+1. the `.env` named by `PROMPT_WORKFLOW_ENV`, if set. That file alone is used, as before.
+2. `config.toml` in the config folder: `~/.config/prompt-workflow/` (`%APPDATA%\prompt-workflow\`
+   on Windows). Once it exists, it is the saved configuration and no `.env` is read, so an old
+   `.env` can never override a saved value.
+3. the `.env` in the repository the CLI was installed from (the installers use an editable
+   install);
+4. the `.env` in the config folder.
 
-It never reads a `.env` from the current directory, so running the CLI inside some other
-project cannot change its endpoint or switch off the gate. Only the settings in the table below
-are read from `.env`; anything else there (such as `HTTPS_PROXY` or `SSL_CERT_FILE`) is ignored.
+Unless `PROMPT_WORKFLOW_ENV` is set, API keys are also read from `secrets.toml` in the config
+folder, which wins over a key in a `.env`. Order of precedence: built-in default <
+`config.toml` or `.env` < `secrets.toml` < real environment variable < a trigger's own options.
+
+`config.toml` holds plain TOML with the same names (`OPENROUTER_MODEL = "…"`,
+`OLLAMA_THINK = true`) and a `config_version`; it never holds a key. `secrets.toml` holds only
+`OPENROUTER_API_KEY` and `ANTHROPIC_API_KEY` and is private to your user (mode 600 on
+macOS/Linux, an access list for your account alone on Windows). An existing `.env` can be
+migrated to both after a preview and your confirmation: values equal to their default are
+left out, the `.env` is moved into `backups/` in the config folder rather than deleted, and a
+rollback restores it exactly. The commands that drive this are planned (#92). A keychain is not
+supported yet.
+
+It never reads a settings file from the current directory, so running the CLI inside some
+other project cannot change its endpoint or switch off the gate. Only the settings in the table
+below are read; anything else (such as `HTTPS_PROXY` or `SSL_CERT_FILE`) is ignored.
 
 Cloud calls use the system proxy (macOS System Settings, Windows Internet Options) or the
 `HTTP_PROXY`, `HTTPS_PROXY` and `ALL_PROXY` environment variables. Since Espanso starts the CLI
@@ -339,7 +362,7 @@ short and does not look like a key.
 | `PROMPT_EXTRA_PATTERNS`      | *(empty)*                      | Your own `;`-separated regexes for the gate               |
 | `PROMPT_HISTORY`             | `true`                         | Keep a local [usage history](#usage-history) (metadata only); `false` keeps none |
 | `PROMPT_HISTORY_RETENTION_DAYS` | `365`                       | Days a usage-history record is kept before pruning (1 to 36500) |
-| `PROMPT_WORKFLOW_ENV`        | *(unset)*                      | Path of the `.env` to load (real environment only)        |
+| `PROMPT_WORKFLOW_ENV`        | *(unset)*                      | Path of the `.env` to load, alone: no `config.toml` or `secrets.toml` (real environment only) |
 
 ## Profiles and persona
 
@@ -466,8 +489,8 @@ passwords, cards, private keys, a bare token and your own `PROMPT_EXTRA_PATTERNS
 this way. `ALLOW_CLOUD_OVERRIDE=true` turns the gate off for every finding and every later call;
 prefer `-iok-` for a one-off. No code path builds a
 provider that can reach another machine without the gate. Cloud base URLs must be `https://`
-(plain `http` only to `localhost`), so a key is never sent in clear text. Keys stay in `.env`,
-which is gitignored, never logged and never shown in a traceback.
+(plain `http` only to `localhost`), so a key is never sent in clear text. Keys stay in your
+`.env` or `secrets.toml` (never `config.toml`), are never logged and never shown in a traceback.
 
 The rewrite comes from a model that read your clipboard, so text copied from a web page can steer
 it. Before anything is pasted, the CLI removes control characters (an escape sequence could end a
@@ -625,7 +648,8 @@ uv run python scripts/bench_models.py --profile general --suite all       # the 
 |---------|-----|
 | Trigger does not expand right after a letter, digit, `-` or `=`, or in a field you emptied with the keyboard | Triggers only fire at the start of a word, judged by what you last typed. Type a space first, or click into the field. |
 | Trigger does not expand | Run `espanso status`, check the match files are in `$(espanso path config)/match`, re-run the installer. |
-| `[prompt-workflow: OPENROUTER_API_KEY is not configured]` | The key is missing from `.env`, or `.env` is not in one of the [places the CLI looks](#configuration). |
+| `[prompt-workflow: OPENROUTER_API_KEY is not configured]` | The key is missing from `.env` (or `secrets.toml`), or the file is not in one of the [places the CLI looks](#configuration). Once `config.toml` exists, a `.env` is no longer read. |
+| `[prompt-workflow: config.toml is not valid TOML (at line …)]` | Fix that line of `config.toml` in the config folder (`secrets.toml` likewise). |
 | `[prompt-workflow: OpenRouter returned HTTP 401: check the API key…]` | Wrong key. Replace it in `.env`. |
 | `[prompt-workflow: OpenRouter returned HTTP 402: out of credits…]` | Add credits to your OpenRouter account. |
 | `[prompt-workflow: … returned HTTP 429: rate limited…]`, `… HTTP 5xx: provider unavailable…` or `… returned an error (code …)` | The provider is busy or down. A rate limit (unless it asks to wait more than 3 s), a 502/503/504/529 or a refused connection to another machine was already retried once within the time limit. Trigger again in a moment, or pick another endpoint in `-if-`. The text after the hint is the provider's own reason. |
