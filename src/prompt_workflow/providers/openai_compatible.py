@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from .base import ProviderError, chat_messages, finalize_content, post_json
+from .base import ProviderError, body_error, chat_messages, finalize_content, post_json
 
 
 @dataclass
@@ -57,9 +57,11 @@ class OpenAICompatibleProvider:
 
         try:
             choice = data["choices"][0]  # type: ignore[index]
+            # OpenRouter puts an error raised mid-generation in the choice it cut short.
+            if error := body_error(self.label, choice):
+                raise error
             content = choice["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
             raise ProviderError(f"{self.label} response was malformed") from exc
 
-        truncated = choice.get("finish_reason") == "length"
-        return finalize_content(content, self.label, truncated=truncated)
+        return finalize_content(content, self.label, stop_reason=choice.get("finish_reason"))

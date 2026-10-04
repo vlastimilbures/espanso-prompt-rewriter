@@ -154,6 +154,8 @@ Snippets that need no model go in `espanso/match/prompts-core.yml`, as plain Esp
 1. Implement `generate(prompt, system_prompt) -> str` (the `Provider` protocol) in
    `src/prompt_workflow/providers/`. Use `post_json()` and `finalize_content()` from
    `providers/base.py` so transport errors and `<think>` stripping behave like the other providers.
+   Pass the response's raw stop reason to `finalize_content(..., stop_reason=...)`, so a cut-off,
+   failed or filtered reply is marked instead of pasted as complete.
 2. Add it to `PROVIDER_NAMES` and `make_provider()` in `factory.py`. If it can send data off the
    machine, return it through `_gate()`, as the other providers do, and make `_leaves_machine()`
    report it, so the gate and `PROMPT_LOCAL_ONLY` both cover it.

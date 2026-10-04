@@ -135,6 +135,21 @@ def test_bad_name_error_never_echoes_key(monkeypatch, fake_http, setting):
     assert fake_http.calls == []
 
 
+# Out of credits on OpenRouter: one inline line with the hint and the provider's reason.
+def test_provider_reason_reaches_the_marker(monkeypatch, fake_http):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    fake_http.reply(
+        {"error": {"code": 402, "message": "Insufficient credits. Add more using the dashboard"}},
+        status_code=402,
+    )
+    result = improve("--provider", "openrouter", "--source", "argument", "--text", "draft")
+    assert result.exit_code == 0
+    assert result.stdout == (
+        "[prompt-workflow: OpenRouter returned HTTP 402: out of credits; "
+        "Insufficient credits. Add more using the dashboard]"
+    )
+
+
 # Two .env lines run together into the persona are an inline error for improve, and the -p-
 # snippet falls back to its placeholder.
 def test_merged_env_line_is_reported_not_pasted(tmp_path):

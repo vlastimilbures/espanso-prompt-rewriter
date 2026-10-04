@@ -6,15 +6,33 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
-### Fixed
-- `pytest -m live` runs again. Since 0.11.0 it failed with a `TypeError` before any network
-  call. An offline twin now runs the same command and checks on a canned reply in every
-  default test run.
+Upgrading: `OPENROUTER_REASONING_EFFORT` and `OPENROUTER_PRO_REASONING_EFFORT` are now checked
+when settings load. A value other than empty, `none`, `minimal`, `low`, `medium` or `high`
+turns every trigger into an inline error naming the variable, so fix it in `.env`.
 
 ### Changed
+- Error markers say why a call failed. A non-2xx reply shows the status, a hint
+  (`out of credits`, `rate limited, try again shortly`, `provider unavailable, try again`, …)
+  and the provider's own reason, cut to 160 printable characters and dropped if it matches a
+  sensitive pattern. `ProviderError` carries `status` and `transient`.
 - The `fake_http` test fixture runs real httpx over `httpx.MockTransport`, so provider tests
   exercise httpx's own request building (header encoding, JSON body, timeouts) instead of a
   stand-in client.
+
+### Fixed
+- An error OpenRouter returns with HTTP 200 (raised after generation started) was reported as
+  "response was malformed". It is now reported with its code and message, and the partial
+  text is not pasted.
+- An API key containing a non-ASCII character, such as a smart quote, was reported as
+  "returned invalid JSON". The key is now refused by name before any request is made.
+- A mistyped `OPENROUTER_REASONING_EFFORT` or `OPENROUTER_PRO_REASONING_EFFORT` was sent to
+  OpenRouter and came back as a bare HTTP 400. It is now rejected when settings load.
+- A reply that stopped on `error` was pasted as complete; it is now an inline marker. A reply
+  stopped by `content_filter` or `refusal` gets a visible "stopped early" note, or says the
+  request was declined when it has no text.
+- `pytest -m live` runs again. Since 0.11.0 it failed with a `TypeError` before any network
+  call. An offline twin now runs the same command and checks on a canned reply in every
+  default test run.
 
 ## 0.14.0
 

@@ -35,5 +35,4 @@ class OllamaProvider:
         except (KeyError, TypeError) as exc:
             raise ProviderError("Ollama response was malformed") from exc
 
-        truncated = data.get("done_reason") == "length"
-        return finalize_content(content, "Ollama", truncated=truncated)
+        return finalize_content(content, "Ollama", stop_reason=data.get("done_reason"))

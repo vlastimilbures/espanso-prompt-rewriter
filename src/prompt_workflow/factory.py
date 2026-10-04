@@ -43,6 +43,13 @@ def openrouter_body(cfg: Settings) -> dict[str, object]:
 def _require(value: str | None, env_name: str) -> str:
     if not value:
         raise ProviderError(f"{env_name} is not configured")
+    # A key is printable ASCII; anything else came from a rich-text paste and cannot be sent
+    # in a header. The key itself is never shown.
+    if not (value.isascii() and value.isprintable()):
+        raise ProviderError(
+            f"{env_name} contains a non-ASCII or invisible character (a smart quote?); "
+            "paste the key again"
+        )
     return value
 
 

@@ -14,9 +14,12 @@ from prompt_workflow.factory import make_provider
 from prompt_workflow.gate import GatedProvider
 from prompt_workflow.providers.anthropic import ANTHROPIC_VERSION, AnthropicProvider
 from prompt_workflow.providers.base import (
+    FILTERED_NOTE,
+    SERVER_MESSAGE_MAX,
     TRUNCATED_NOTE,
     Provider,
     ProviderError,
+    error_detail,
     is_loopback,
     post_json,
 )
@@ -197,19 +200,21 @@ def test_success_strips_thinking(fake_http, name):
 
 
 @pytest.mark.parametrize(
-    ("exc", "message"),
+    ("exc", "message", "transient"),
     [
-        (httpx.TimeoutException("slow"), "timed out after 1s"),
-        (httpx.ConnectError("refused"), "request failed"),
-        (httpx.InvalidURL("bad url"), "base URL invalid"),
+        (httpx.TimeoutException("slow"), "timed out after 1s", True),
+        (httpx.ConnectError("refused"), "request failed: refused", True),
+        (httpx.ReadError("reset"), "request failed: reset", False),
+        (httpx.InvalidURL("bad url"), "base URL invalid", False),
     ],
 )
 @ALL
-def test_transport_errors_become_provider_errors(fake_http, name, exc, message):
+def test_transport_errors_become_provider_errors(fake_http, name, exc, message, transient):
     build, _, label = PROVIDERS[name]
     fake_http.exc = exc
-    with pytest.raises(ProviderError, match=f"^{label} {message}"):
+    with pytest.raises(ProviderError, match=f"^{label} {message}") as caught:
         build().generate("d", "s")
+    assert caught.value.transient is transient
 
 
 @ALL
@@ -218,6 +223,129 @@ def test_http_error_status(fake_http, name):
     fake_http.reply(status_code=401)
     with pytest.raises(ProviderError, match=f"^{label} returned HTTP 401"):
         build().generate("d", "s")
+
+
+# A non-2xx reply names the status, what the user can do, and the provider's own reason.
+@ALL
+@pytest.mark.parametrize(
+    ("status", "hint", "transient"),
+    [
+        (400, "bad request (check the model and settings)", False),
+        (401, "check the API key", False),
+        (402, "out of credits", False),
+        (403, "access denied", False),
+        (404, "not found (check the model and base URL)", False),
+        (429, "rate limited, try again shortly", True),
+        (500, "provider unavailable, try again", True),
+        (502, "provider unavailable, try again", True),
+        (529, "provider unavailable, try again", True),
+    ],
+)
+def test_http_error_carries_hint_and_reason(fake_http, name, status, hint, transient):
+    build, _, label = PROVIDERS[name]
+    fake_http.reply({"error": {"message": "Upstream said no."}}, status_code=status)
+    with pytest.raises(ProviderError) as caught:
+        build().generate("d", "s")
+    assert str(caught.value) == f"{label} returned HTTP {status}: {hint}; Upstream said no."
+    assert caught.value.status == status
+    assert caught.value.transient is transient
+
+
+# Ollama reports errors as a plain string.
+def test_ollama_string_error(fake_http):
+    fake_http.reply({"error": "model 'x' not found"}, status_code=404)
+    with pytest.raises(ProviderError) as caught:
+        OllamaProvider("http://x", "m").generate("d", "s")
+    assert str(caught.value) == (
+        "Ollama returned HTTP 404: not found (check the model and base URL); model 'x' not found"
+    )
+
+
+# An error page that is not JSON still gets the status and the hint.
+def test_http_error_without_json_body(fake_http):
+    fake_http.reply(bad_json=True, status_code=502)
+    with pytest.raises(ProviderError, match=r"^Ollama returned HTTP 502: provider unavailable"):
+        OllamaProvider("http://x", "m").generate("d", "s")
+
+
+# The provider's reason is cut to one short printable line before it reaches the paste.
+def test_error_detail_is_short_and_printable():
+    long = error_detail({"error": {"message": "x" * 500}})
+    assert len(long) == SERVER_MESSAGE_MAX
+    assert long.endswith("…")
+    cleaned = error_detail({"error": {"message": "bad\u202e model\u200b\n id\x07\x1b[0m"}})
+    assert cleaned == "bad model id[0m"
+
+
+# A reason that quotes something secret-shaped (some providers echo the rejected key) is
+# dropped; the status and hint still show.
+def test_error_detail_drops_sensitive_text(fake_http):
+    key = "sk-or-v1-" + "cd" * 32
+    assert error_detail({"error": {"message": f"Incorrect API key provided: {key}"}}) == ""
+    fake_http.reply({"error": {"message": f"Incorrect API key provided: {key}"}}, status_code=401)
+    with pytest.raises(ProviderError) as caught:
+        OllamaProvider("http://x", "m").generate("d", "s")
+    assert str(caught.value) == "Ollama returned HTTP 401: check the API key"
+
+
+@pytest.mark.parametrize("body", [None, [], {}, {"error": None}, {"error": {"code": 1}}])
+def test_error_detail_without_a_reason(body):
+    assert error_detail(body) == ""
+
+
+# OpenRouter reports an error raised after generation started as HTTP 200 with an error
+# object; it is reported as that error, not as a malformed response.
+@ALL
+def test_ok_status_with_error_body(fake_http, name):
+    build, _, label = PROVIDERS[name]
+    fake_http.reply({"error": {"code": 502, "message": "Upstream provider error"}})
+    with pytest.raises(ProviderError) as caught:
+        build().generate("d", "s")
+    assert str(caught.value) == f"{label} returned an error (code 502): Upstream provider error"
+    assert caught.value.status == 502
+    assert caught.value.transient is True
+
+
+def test_ok_status_with_error_without_code(fake_http):
+    fake_http.reply({"error": "boom"})
+    with pytest.raises(ProviderError, match=r"^Ollama returned an error: boom$") as caught:
+        OllamaProvider("http://x", "m").generate("d", "s")
+    assert caught.value.status is None
+    assert caught.value.transient is False
+
+
+# The error can also sit inside the choice it cut short; its partial text is not pasted.
+def test_choice_level_error(fake_http):
+    fake_http.reply(
+        {
+            "choices": [
+                {
+                    "finish_reason": "error",
+                    "error": {"code": 503, "message": "Provider disconnected"},
+                    "message": {"content": "<CONTEXT>\nhalf a prompt"},
+                }
+            ]
+        }
+    )
+    with pytest.raises(ProviderError) as caught:
+        OpenAICompatibleProvider("http://x/v1", "m", label="OpenRouter").generate("d", "s")
+    assert str(caught.value) == "OpenRouter returned an error (code 503): Provider disconnected"
+    assert caught.value.transient is True
+
+
+# A key with a character httpx cannot put in a header (a smart quote, an accented letter)
+# fails before anything is sent, without being repeated, and is not called invalid JSON.
+@pytest.mark.parametrize("key", ["sk-or-v1-t\u00ebst", "sk-or-v1-\u201ctest\u201d"])
+def test_non_ascii_key_is_a_header_error(fake_http, key):
+    for provider in (
+        OpenAICompatibleProvider("http://x/v1", "m", api_key=key),
+        AnthropicProvider("http://x", "m", key),
+    ):
+        with pytest.raises(ProviderError, match="invalid header value") as caught:
+            provider.generate("d", "s")
+        assert "test" not in str(caught.value)
+        assert "tëst" not in str(caught.value)
+    assert fake_http.requests == []
 
 
 # A non-JSON body is a ProviderError, not a raw JSONDecodeError.
@@ -281,15 +409,19 @@ def test_anthropic_without_text_block(fake_http, blocks):
         AnthropicProvider("http://x", "m", "key").generate("d", "s")
 
 
-def _truncated(name, text):
+def _stopped(name, text, reason):
     body = PROVIDERS[name][1](text)
     if name == "ollama":
-        body["done_reason"] = "length"
+        body["done_reason"] = reason
     elif name == "openai_compatible":
-        body["choices"][0]["finish_reason"] = "length"
+        body["choices"][0]["finish_reason"] = reason
     else:
-        body["stop_reason"] = "max_tokens"
+        body["stop_reason"] = reason
     return body
+
+
+def _truncated(name, text):
+    return _stopped(name, text, "max_tokens" if name == "anthropic" else "length")
 
 
 # A rewrite cut off at the token cap is pasted with a visible note, never as if complete.
@@ -311,6 +443,47 @@ def test_truncated_without_text_asks_for_more_tokens(fake_http, name, text):
         body["content"] = [{"type": "thinking", "thinking": "x"}]
     fake_http.reply(body)
     with pytest.raises(ProviderError, match=f"^{label} used the whole max-tokens budget"):
+        build().generate("d", "s")
+
+
+# A reply that ended normally is pasted as is.
+@ALL
+@pytest.mark.parametrize("reason", ["stop", "end_turn", None, {"unexpected": "shape"}])
+def test_normal_stop_reason(fake_http, name, reason):
+    build, _, _ = PROVIDERS[name]
+    fake_http.reply(_stopped(name, "a prompt", reason))
+    assert build().generate("d", "s") == "a prompt"
+
+
+# A reply that stopped on an error is a marker, never the partial text.
+@ALL
+def test_error_stop_reason_pastes_nothing(fake_http, name):
+    build, _, label = PROVIDERS[name]
+    fake_http.reply(_stopped(name, "<CONTEXT>\nhalf a", "error"))
+    with pytest.raises(ProviderError, match=f"^{label} stopped with an error before") as caught:
+        build().generate("d", "s")
+    assert caught.value.transient is True
+
+
+# A filtered or refused reply keeps its text but says it may be incomplete.
+@ALL
+@pytest.mark.parametrize("reason", ["content_filter", "refusal"])
+def test_filtered_stop_reason_is_marked(fake_http, name, reason):
+    build, _, _ = PROVIDERS[name]
+    fake_http.reply(_stopped(name, "<CONTEXT>\nhalf a", reason))
+    assert build().generate("d", "s") == "<CONTEXT>\nhalf a" + FILTERED_NOTE.format(reason=reason)
+
+
+# With no text at all, a refusal says so instead of "no text content".
+@ALL
+@pytest.mark.parametrize("text", [None, ""])
+def test_filtered_without_text_is_declined(fake_http, name, text):
+    build, _, label = PROVIDERS[name]
+    body = _stopped(name, text, "refusal")
+    if name == "anthropic" and text is None:
+        body["content"] = []
+    fake_http.reply(body)
+    with pytest.raises(ProviderError, match=rf"^{label} declined the request \(refusal\)$"):
         build().generate("d", "s")
 
 
