@@ -25,6 +25,12 @@ All notable changes to this project are documented here. The format follows
   sets `force_mode: clipboard`, so Espanso always pastes the result instead of typing short
   replies key by key. This overrides any Espanso `backend` setting for these triggers. Re-run
   the installer to redeploy the match files.
+- `-ip-` and `-if-` now use `PROMPT_PRO_PROFILE` (default `default-pro`), as documented. They
+  passed `--profile default`, which took precedence. `-i-` likewise follows `PROMPT_PROFILE`.
+  In `-if-`, a model other than `OPENROUTER_PRO_MODEL` uses `PROMPT_PROFILE`, because
+  `default-pro` is tuned for the pro model. Re-run the installer to redeploy the match files.
+- `--model default` keeps the configured model, as the `-if-` popup's `default` does for the other
+  fields. It used to request a model literally named `default`.
 
 ## 0.12.0
 

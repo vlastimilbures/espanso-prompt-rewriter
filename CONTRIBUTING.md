@@ -79,7 +79,8 @@ espanso-prompt-rewriter/
 │   ├── redaction.py              the gate's sensitive-content patterns
 │   ├── prompt_builder.py         loads profiles, fills in the persona rule
 │   ├── prompts/
-│   │   ├── default.md            golden-template rewrite (-i-, -ip-, -if-)
+│   │   ├── default.md            golden-template rewrite (-i-)
+│   │   ├── default-pro.md        default minus one review clause (-ip-, -if-)
 │   │   └── general.md            lighter "make this precise" rewrite (local triggers)
 │   └── providers/
 │       ├── base.py               HTTP call, error mapping, <think> stripping
@@ -130,7 +131,10 @@ instead of typing short replies key by key.
 ```
 
 `tests/test_yaml.py` checks the placeholder, quoting and `force_mode`, and that the profile and
-provider exist.
+provider exist. Add the trigger's expected provider, profile and tier to `EXPECTED` in
+`tests/test_triggers.py`, which replays every trigger's command line through the CLI. Pass
+`--profile` only when the trigger needs a fixed profile: it overrides `PROMPT_PROFILE` and the
+pro tier's profile.
 
 ### Add a setting
 

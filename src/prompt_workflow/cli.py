@@ -71,7 +71,10 @@ def _read_input(source: str, text: str | None) -> str:
 @app.command()
 def improve(
     provider: str | None = typer.Option(None, help=", ".join(PROVIDER_NAMES)),
-    profile: str | None = typer.Option(None, help="Defaults to PROMPT_PROFILE, e.g. default"),
+    profile: str | None = typer.Option(
+        None,
+        help="Defaults to PROMPT_PROFILE (PROMPT_PRO_PROFILE with --tier pro on the pro model)",
+    ),
     model: str | None = typer.Option(
         None, help="Override the model for this call; slug@endpoint also pins the endpoint"
     ),
@@ -91,10 +94,8 @@ def improve(
 ) -> None:
     """Improve a draft prompt. Errors are printed inline so Espanso shows them."""
     try:
-        cfg = (
-            Settings.load()
-            .for_tier(tier)
-            .with_overrides(model=model, effort=effort, max_tokens=max_tokens, timeout=timeout)
+        cfg = Settings.load().for_call(
+            tier, model=model, effort=effort, max_tokens=max_tokens, timeout=timeout
         )
         draft = _clean(_read_input(source, text))
         if not draft.strip():

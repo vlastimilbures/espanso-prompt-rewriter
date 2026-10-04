@@ -185,14 +185,19 @@ with the output of `echo "$(uv tool dir --bin)/prompt-workflow"`, then run `espa
 | Trigger           | What it does                                                 | Provider   | Profile   |
 |-------------------|--------------------------------------------------------------|------------|-----------|
 | `-i-`             | Rewrites the clipboard into the golden template              | OpenRouter | `default` |
-| `-ip-`            | Same rewrite on the pro tier (reasoning model, slower)       | OpenRouter | `default` |
-| `-if-`            | Same rewrite; a popup picks model, effort, tokens, timeout   | OpenRouter | `default` |
+| `-ip-`            | Same rewrite on the pro tier (reasoning model, slower)       | OpenRouter | `default-pro` |
+| `-if-`            | Same rewrite; a popup picks model, effort, tokens, timeout   | OpenRouter | `default-pro` |
 | `-il-`            | General prompt improvement, fully local                      | Ollama     | `general` |
 | `-ilm-`           | General prompt improvement, fully local                      | LM Studio  | `general` |
 | `-ic-`            | General improvement via Claude (commented out by default)    | Anthropic  | `general` |
 | `-p-`             | Empty golden template to fill in, opening with your persona  | —          | —         |
 | `-prompt-`        | Form: role, objective, context, constraints, output          | —          | —         |
 | `-risk-`          | Enterprise-risk analysis prompt scaffold                     | —          | —         |
+
+The Profile column shows the defaults. `-i-` uses `PROMPT_PROFILE`; `-ip-` and `-if-` use
+`PROMPT_PRO_PROFILE`, except that a model other than `OPENROUTER_PRO_MODEL` picked in `-if-` gets
+`PROMPT_PROFILE`, since `default-pro` is tuned for the pro model. The local triggers always use
+`general`.
 
 The improve triggers (`-i-`, `-ip-`, `-if-`, `-il-`, `-ilm-`) read your current clipboard. Cloud
 triggers pass through the [data-protection gate](#privacy-and-data-protection) first. To enable `-ic-`,
@@ -226,7 +231,7 @@ prompt-workflow persona          # prints PROMPT_PERSONA (used by -p-)
 | Option       | Default                     | Meaning                                         |
 |--------------|-----------------------------|-------------------------------------------------|
 | `--provider` | `PROMPT_PROVIDER`           | `ollama`, `lmstudio`, `openrouter`, `anthropic` |
-| `--profile`  | `PROMPT_PROFILE`            | `default`, `general`, or any file in `prompts/` |
+| `--profile`  | `PROMPT_PROFILE` (`PROMPT_PRO_PROFILE` with `--tier pro` on `OPENROUTER_PRO_MODEL`) | `default`, `default-pro`, `general`, or any file in `prompts/` |
 | `--model`    | provider's configured model | Override the model of whichever provider runs; `model@endpoint` also pins the OpenRouter endpoint (`@auto` unpins) |
 | `--tier`     | `standard`                  | `pro` uses the `OPENROUTER_PRO_*` settings      |
 | `--effort`   | tier's setting              | `none`, `minimal`, `low`, `medium`, `high`      |
@@ -272,7 +277,7 @@ short and does not look like a key.
 | Variable                     | Default                        | Purpose                                                   |
 |------------------------------|--------------------------------|-----------------------------------------------------------|
 | `PROMPT_PROVIDER`            | `openrouter`                   | Provider when `--provider` is not given                   |
-| `PROMPT_PROFILE`             | `default`                      | Profile when `--profile` is not given                     |
+| `PROMPT_PROFILE`             | `default`                      | Profile when `--profile` is not given (`-i-`, and `-if-` on a non-pro model) |
 | `PROMPT_PERSONA`             | *(empty)*                      | Your first-person role, see [persona](#profiles-and-persona) |
 | `PROMPT_TIMEOUT_SECONDS`     | `30`                           | Request timeout                                           |
 | `PROMPT_TEMPERATURE`         | `0.2`                          | Kept low so fixed template wording survives               |
@@ -287,7 +292,7 @@ short and does not look like a key.
 | `OPENROUTER_PRO_PROVIDER`    | `openai`                       | Endpoint pin for the pro tier                             |
 | `OPENROUTER_PRO_REASONING_EFFORT` | `low`                     | Reasoning effort for the pro tier                         |
 | `PROMPT_PRO_TIMEOUT_SECONDS` | `60`                           | Request timeout for the pro tier                          |
-| `PROMPT_PRO_PROFILE`         | `default-pro`                  | Profile for the pro tier; empty = `PROMPT_PROFILE`        |
+| `PROMPT_PRO_PROFILE`         | `default-pro`                  | Profile for the pro tier (`-ip-`, `-if-`) when it runs `OPENROUTER_PRO_MODEL`; empty = `PROMPT_PROFILE` |
 | `ANTHROPIC_API_KEY`          | —                              | Required for Anthropic                                    |
 | `ANTHROPIC_MODEL`            | `claude-sonnet-5`              |                                                           |
 | `ANTHROPIC_MAX_TOKENS`       | `2400`                         |                                                           |
@@ -321,6 +326,9 @@ A profile is a system prompt in [`src/prompt_workflow/prompts/`](src/prompt_work
   organised in lowercase XML sections (`<section_rules>`, `<step>`, `<decision_rule>`,
   `<example>`…), which keeps its own scaffolding visibly apart from the uppercase sections the
   model must write.
+- **`default-pro`** is `default` without one clause of the review rule, which the pro model
+  over-applies. The pro tier (`-ip-`, `-if-`) uses it on `OPENROUTER_PRO_MODEL`. If you change
+  that model, check whether `PROMPT_PRO_PROFILE` still fits it.
 - **`general`** is a lighter "make this prompt precise" rewrite, used by the local triggers.
 
 Drop another `*.md` file into that folder and it becomes a profile. See
