@@ -380,8 +380,8 @@ ollama.com). The gate blocks drafts containing:
 > addresses, most countries' ID formats, look-alike letters from other alphabets) and sometimes
 > flags harmless text.
 
-The draft is also scanned in a normalised form, so no-break or zero-width spaces, soft hyphens and
-fullwidth digits cannot split a card number or key.
+The draft is also scanned in a normalised form, so no-break or zero-width spaces, soft hyphens,
+variation selectors, Hangul fillers and fullwidth digits cannot split a card number or key.
 
 A blocked draft pastes `[prompt-workflow: Blocked cloud call. Sensitive content detected: …]`
 instead of calling the API. `ALLOW_CLOUD_OVERRIDE=true` disables the block. No code path builds a
@@ -391,9 +391,15 @@ which is gitignored, never logged and never shown in a traceback.
 
 The rewrite comes from a model that read your clipboard, so text copied from a web page can steer
 it. Before anything is pasted, the CLI removes control characters (an escape sequence could end a
-terminal's bracketed paste and run the lines after it), bidi overrides and invisible Unicode tag
-characters (hidden instructions for the next AI). The same characters are removed from the draft
-before it is sent. Still read a rewrite before running anything it contains.
+terminal's bracketed paste and run the lines after it) and every character Unicode marks as
+default-ignorable, which renders as nothing and can carry hidden instructions for the next AI:
+zero-width spaces, bidi marks and overrides, Unicode tag characters, Hangul fillers and variation
+selectors. Other line breaks become newlines. An emoji keeps the one presentation selector and
+joiner it needs, a keycap (`1️⃣`) keeps its selector, and the joiners Persian and Indic scripts use
+survive. One selector or joiner can still follow each non-ASCII character, so a hidden channel of
+a few bits per character remains in non-Latin text, but none in English prose. The same
+characters are removed from the draft before it is sent. Still read a rewrite before running
+anything it contains.
 
 ## Model benchmark
 
