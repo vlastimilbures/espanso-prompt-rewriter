@@ -25,6 +25,9 @@ def isolated_env(tmp_path, monkeypatch):
     # ...and its real user profile directory is never read either (prompt_builder).
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.setenv("APPDATA", str(tmp_path / "config"))
+    # The usage history and price table go to per-test dirs, never the developer's real ones.
+    for key in ("XDG_DATA_HOME", "LOCALAPPDATA"):
+        monkeypatch.setenv(key, str(tmp_path / "data"))
     # Never probe the developer's real clipboard: a concealed item there would fail tests.
     import prompt_workflow.cli as cli
 

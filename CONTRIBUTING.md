@@ -119,6 +119,7 @@ espanso-prompt-rewriter/
 │   ├── gate.py                   GatedProvider: scans every draft that can leave the machine
 │   ├── clipboard_guard.py        refuses password-manager (concealed) clipboard items
 │   ├── redaction.py              the gate's sensitive-content patterns
+│   ├── history.py                local usage history (SQLite, metadata only, fail-open)
 │   ├── prompt_builder.py         loads built-in and user profiles, fills in the persona rule
 │   ├── profiles.py               migrate a checkout's own profiles to the user directory
 │   ├── assets.py                 the packaged Espanso match files (importlib.resources)

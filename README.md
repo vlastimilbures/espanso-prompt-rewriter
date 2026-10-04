@@ -315,6 +315,8 @@ short and does not look like a key.
 | `ALLOW_CLOUD_OVERRIDE`       | `false`                        | `true` lets flagged drafts reach cloud providers          |
 | `PROMPT_LOCAL_ONLY`          | `false`                        | `true` refuses every provider that can send the draft off this machine |
 | `PROMPT_EXTRA_PATTERNS`      | *(empty)*                      | Your own `;`-separated regexes for the gate               |
+| `PROMPT_HISTORY`             | `true`                         | Keep a local [usage history](#usage-history) (metadata only); `false` keeps none |
+| `PROMPT_HISTORY_RETENTION_DAYS` | `365`                       | Days a usage-history record is kept before pruning (1 to 36500) |
 | `PROMPT_WORKFLOW_ENV`        | *(unset)*                      | Path of the `.env` to load (real environment only)        |
 
 ## Profiles and persona
@@ -456,6 +458,56 @@ survive. One selector or joiner can still follow each non-ASCII character, so a 
 a few bits per character remains in non-Latin text, but none in English prose. The same
 characters are removed from the draft before it is sent. Still read a rewrite before running
 anything it contains.
+
+### Usage history
+
+The CLI is getting a local usage history, so you can see what your triggers cost and how
+fast they are. This release adds the store; the triggers start recording in a later one. It is
+on by default (`PROMPT_HISTORY=true`), and stays on this device:
+
+- **What is stored:** metadata only, from a fixed list of columns: when a trigger ran, which
+  trigger, profile and outcome (`ok`, an error marker, a blocked draft, …), how long it took,
+  and per request the provider, model, HTTP status, token counts and the cost the provider
+  reported, with its unit (OpenRouter credits are never converted to USD).
+- **What is never stored:** your draft or clipboard, the rewrite, your persona, API keys, form
+  picks or any raw response; no column is meant for them, and a record's other fields are
+  never read. Each text column also has a fixed shape: the outcome, endpoint, cost state and
+  error kind are words from fixed lists; a trigger looks like `-i-`; a profile, provider or
+  version is a short lower-case or slug name; a response id must start with `gen-`, `msg_` or
+  `chatcmpl-`. Only the two model columns take `/` and `:` (`openai/gpt-x:free`). No column
+  takes a space, `@` or `\`, and a value the data-protection gate or your
+  `PROMPT_EXTRA_PATTERNS` would flag, or that holds a token-like word, is not stored. So a
+  sentence, a path, an email, a `user:password@host` or a key cannot get in; a single
+  harmless-looking word in a name column (say, a model called `hunter2`) can, which is why only
+  your settings and the provider's reply fill those columns, never the draft.
+- **Where:** an SQLite file, `history.sqlite3`, in `~/.local/share/prompt-workflow/` (or
+  `$XDG_DATA_HOME/prompt-workflow/`) on macOS and Linux, `%LOCALAPPDATA%\prompt-workflow\` on
+  Windows. It is never synced and never sent anywhere.
+- **How long:** 365 days by default (`PROMPT_HISTORY_RETENTION_DAYS`, at most 36500). Older
+  records are deleted when the history is pruned; automatic pruning arrives together with the
+  recording.
+- **Off:** set `PROMPT_HISTORY=false` in `.env`, then delete the file to remove what is there.
+
+Writing to the history never breaks a trigger and delays it by about 0.25 s at most: a write
+that cannot finish in that time (a locked, read-only, full or corrupt file) is dropped, and a
+small `history.lost` file next to it counts the dropped writes. Only a disk the operating
+system itself stalls (a hung network drive) can hold it up longer. Costs are reported only as the provider reported them; an
+unknown cost is shown as unknown, never as 0. If you want an estimate for providers that report
+no cost (Anthropic), create `prices.toml` in the config directory
+(`~/.config/prompt-workflow/`, `%APPDATA%\prompt-workflow\` on Windows) with your prices per
+million tokens:
+
+```toml
+version = "2026-10-01"
+unit = "USD"
+[models."claude-sonnet-5"]
+input_uncached = 3.00
+cache_read = 0.30
+cache_write = 3.75
+output = 15.00
+```
+
+An estimate is stored with the table's `version` and always shown apart from reported costs.
 
 ## Model benchmark
 
