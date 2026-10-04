@@ -124,12 +124,41 @@ def test_make_provider_unknown():
         make_provider("bogus", Settings())
 
 
-# Every advertised provider name is buildable (keys set so cloud branches pass).
-@pytest.mark.parametrize("name", PROVIDER_NAMES)
-def test_every_provider_name_builds(monkeypatch, name):
+# Every advertised provider name builds from the default settings and reaches its endpoint
+# (keys set so the cloud branches pass).
+@pytest.mark.parametrize(
+    ("name", "url", "body"),
+    [
+        ("ollama", "http://localhost:11434/api/chat", {"message": {"content": "ok"}}),
+        (
+            "lmstudio",
+            "http://localhost:1234/v1/chat/completions",
+            {"choices": [{"message": {"content": "ok"}}]},
+        ),
+        (
+            "openrouter",
+            "https://openrouter.ai/api/v1/chat/completions",
+            {"choices": [{"message": {"content": "ok"}}]},
+        ),
+        (
+            "anthropic",
+            "https://api.anthropic.com/v1/messages",
+            {"content": [{"type": "text", "text": "ok"}]},
+        ),
+    ],
+)
+def test_every_provider_name_builds(monkeypatch, fake_http, name, url, body):
     monkeypatch.setenv("OPENROUTER_API_KEY", "k")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
-    assert hasattr(make_provider(name, Settings()), "generate")
+    fake_http.reply(body)
+    assert make_provider(name, Settings()).generate("d", "s") == "ok"
+    assert [call["url"] for call in fake_http.calls] == [url]
+
+
+# The table above covers every advertised name.
+def test_every_provider_name_is_listed():
+    names = {"ollama", "lmstudio", "openrouter", "anthropic"}
+    assert set(PROVIDER_NAMES) == names
 
 
 # With the default settings only the cloud providers are gated.

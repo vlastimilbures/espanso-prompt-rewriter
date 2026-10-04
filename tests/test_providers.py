@@ -23,11 +23,6 @@ from prompt_workflow.providers.base import (
 from prompt_workflow.providers.ollama import OllamaProvider
 from prompt_workflow.providers.openai_compatible import OpenAICompatibleProvider
 
-# mypy verifies each provider actually conforms to the Provider protocol.
-_ollama_conforms: Provider = OllamaProvider("http://x", "m")
-_openai_compatible_conforms: Provider = OpenAICompatibleProvider("http://x", "m")
-_anthropic_conforms: Provider = AnthropicProvider("http://x", "m", "key")
-
 
 def _ollama_body(text):
     return {"message": {"content": text}}
@@ -82,7 +77,8 @@ def test_ollama_request_shape(fake_http):
                 "think": True,
                 "options": {"temperature": 0.2},
             },
-            "headers": None,
+            # Set by httpx from json=; Ollama needs no other header.
+            "headers": {"Content-Type": "application/json"},
         }
     ]
 

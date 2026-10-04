@@ -50,7 +50,8 @@ uv run pytest -m live
 - **Cross-platform.** Everything must work on macOS and Windows. Use `pathlib` and explicit
   timeouts.
 - **Tests.** Unit tests never touch the network; use the `fake_http` fixture in
-  `tests/conftest.py`, which records requests and replays responses, or `stub_provider` to
+  `tests/conftest.py`, which runs real httpx over `httpx.MockTransport`, records each request
+  and replays responses (`reply()`, or `queue()` for a sequence), or `stub_provider` to
   replace the provider behind a CLI test. Add a test for every
   behaviour change, and a regression test for every bug fix.
 - **Triggers.** Keep existing trigger names working. Tests enforce the `-name-` shape, uniqueness
@@ -150,7 +151,7 @@ Snippets that need no model go in `espanso/match/prompts-core.yml`, as plain Esp
 
 ### Add a provider
 
-1. Implement `generate(prompt, system_prompt, model=None) -> str` in
+1. Implement `generate(prompt, system_prompt) -> str` (the `Provider` protocol) in
    `src/prompt_workflow/providers/`. Use `post_json()` and `finalize_content()` from
    `providers/base.py` so transport errors and `<think>` stripping behave like the other providers.
 2. Add it to `PROVIDER_NAMES` and `make_provider()` in `factory.py`. If it can send data off the

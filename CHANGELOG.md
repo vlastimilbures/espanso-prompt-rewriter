@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Fixed
+- `pytest -m live` runs again. Since 0.11.0 it failed with a `TypeError` before any network
+  call. An offline twin now runs the same command and checks on a canned reply in every
+  default test run.
+
+### Changed
+- The `fake_http` test fixture runs real httpx over `httpx.MockTransport`, so provider tests
+  exercise httpx's own request building (header encoding, JSON body, timeouts) instead of a
+  stand-in client.
+
 ## 0.14.0
 
 Upgrading: re-run the installer (`./scripts/install_macos.sh` or
