@@ -62,13 +62,12 @@ def git_pristine_profiles(checkout: Path, rev: str | None = None) -> dict[str, s
         raise ValueError("git is not installed")
 
     def run(*args: str) -> str:
-        return subprocess.run(  # noqa: S603 - git with fixed subcommands, no shell
-            [git, "-C", str(checkout), *args],
-            capture_output=True,
-            check=True,
-            encoding="utf-8",
-            timeout=10,
+        # Bytes, decoded here: in text mode Windows decodes in a reader thread, which loses a
+        # UnicodeDecodeError and hands back no output instead of raising.
+        out: bytes = subprocess.run(  # noqa: S603 - git with fixed subcommands, no shell
+            [git, "-C", str(checkout), *args], capture_output=True, check=True, timeout=10
         ).stdout
+        return out.decode("utf-8").replace("\r\n", "\n")
 
     try:
         if rev is None:
@@ -108,8 +107,11 @@ def migrate_profiles(
                 with target.open("xb") as out:
                     out.write(data)
                 status = COPIED
-            except FileExistsError:
+            except OSError:
                 # Whatever is there (a dangling link, a folder) is left alone and reported.
+                # Windows refuses a folder with PermissionError, not FileExistsError.
+                if not (target.is_symlink() or target.exists()):
+                    raise
                 try:
                     same = target.read_bytes() == data
                 except OSError:

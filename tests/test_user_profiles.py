@@ -392,3 +392,19 @@ def test_wheel_declares_match_files_only():
     pyproject = tomllib.loads((REPO / "pyproject.toml").read_text("utf-8"))
     force = pyproject["tool"]["hatch"]["build"]["targets"]["wheel"]["force-include"]
     assert force == {"espanso/match": "prompt_workflow/espanso/match"}
+
+
+# A refusal with nothing at the target (a read-only folder) is a real error, not "exists".
+def test_migrate_reraises_when_nothing_is_there(monkeypatch, tmp_path):
+    prompts = _checkout(tmp_path)
+    (prompts / "alpha.md").write_text("alpha", "utf-8")
+    real_open = Path.open
+
+    def refuse(self, mode="r", *args, **kwargs):
+        if mode == "xb":
+            raise PermissionError(13, "Permission denied")
+        return real_open(self, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", refuse)
+    with pytest.raises(PermissionError):
+        profiles.migrate_profiles(prompts, PROFILES)
