@@ -35,17 +35,10 @@ def test_default_profile_offers_both_branches():
     assert "Review your own output against these checks" in text
 
 
-# default-pro (the pro tier's profile) is default minus one review-rule clause that flash-lite
-# needs and gpt-6-luna over-applies; the files must not drift apart otherwise.
-FLASH_LITE_CLAUSE = (
-    "; so is a reply to a proposal or request from another company, and any text that will be "
-    "published, such as an FAQ or help-center answer."
-)
-
-
-def test_default_pro_is_default_without_flash_lite_clause():
-    assert FLASH_LITE_CLAUSE in PROFILES["default"]
-    assert PROFILES["default-pro"] == PROFILES["default"].replace(FLASH_LITE_CLAUSE, ".")
+# The retired default-pro profile (an old .env's PROMPT_PRO_PROFILE) renders default.
+def test_default_pro_alias():
+    assert "default-pro" not in PROFILES
+    assert system_prompt("default-pro", "I test.") == system_prompt("default", "I test.")
 
 
 # general profile returns a non-empty system prompt distinct from default's golden template.

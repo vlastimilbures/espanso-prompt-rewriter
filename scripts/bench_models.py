@@ -1,5 +1,8 @@
 """Benchmark OpenRouter models on the `default` (golden template) profile.
 
+With the shipped settings both tiers send `default` (PROMPT_PRO_PROFILE is empty), so a run
+without --system-prompt-file scores what every OpenRouter trigger sends.
+
 Scores every run mechanically: tag balance, mandatory steps, branch selection, scaffolding
 leaks, the draft-specific expectations (language, role, OUTPUTS format) and degeneration.
 Token counts and cost come from OpenRouter's own `usage` block, not from an estimate. Run
@@ -18,7 +21,7 @@ A spec is `model`, optionally `@provider-tag` to pin one endpoint and `~effort` 
 OpenRouter's reasoning effort (none/minimal/low/medium/high).
 
 The `core` suite (default) is the 8 drafts the model choice was made on. The `edge` suite adds
-25 drafts that probe what `core` cannot: prompt injection, questions, pasted material,
+28 drafts that probe what `core` cannot: prompt injection, questions, pasted material,
 non-English drafts, a draft stating its own role, code, and outside readers that are only
 implied. `edge` is not expected to pass in full; see CONTRIBUTING.md for its known gaps.
 """
@@ -187,8 +190,72 @@ LONG_THREAD = (
     "---"
 )
 
+# A 57-line pasted thread, just under the prompt's 60-line copy limit: its last material probe
+# sits near the end, so a copy cut short by the output cap fails.
+CAP_THREAD = (
+    "summarise this thread in 5 bullets for my manager and list the decisions that are still open\n"
+    "\n"
+    "---\n"
+    "From: Marta Lindqvist (Lindqvist Facilities)\n"
+    "Subject: RE: RE: RE: Office move - floor 4 fit-out\n"
+    "\n"
+    "Hi all,\n"
+    "Quick update after this morning's site walk with your facilities lead.\n"
+    "The electrical survey found that the floor 4 distribution board cannot carry the\n"
+    "extra load from the new server room. We see two options:\n"
+    "Option A: upgrade the board during the fit-out, which adds 9 working days and 14,200 EUR.\n"
+    "Option B: keep the server room on floor 2 for now and move it in a second phase next year.\n"
+    "Either way, the furniture delivery stays on 17 March.\n"
+    "We need your decision by Wednesday so we can order the switchgear in time.\n"
+    "The landlord has also asked for the updated fire-escape drawings before any wall goes up,\n"
+    "and their building manager wants a named contact for the weekend deliveries.\n"
+    "Best,\n"
+    "Marta\n"
+    "\n"
+    "From: Jonas Becker (us)\n"
+    "Subject: RE: RE: Office move - floor 4 fit-out\n"
+    "\n"
+    "Hi Marta,\n"
+    "Thanks. Before we choose, can you confirm whether option A moves the handover date?\n"
+    "Our lease on the current office ends on 30 April and we cannot extend it.\n"
+    "Also, the quote from January assumed the server room on floor 4 from day one.\n"
+    "If option B is cheaper now, how much of the 14,200 EUR comes back later as a second job?\n"
+    "For the weekend deliveries, our office manager Ines will be the contact.\n"
+    "Regards,\n"
+    "Jonas\n"
+    "\n"
+    "From: Marta Lindqvist (Lindqvist Facilities)\n"
+    "Subject: RE: Office move - floor 4 fit-out\n"
+    "\n"
+    "Hello Jonas,\n"
+    "Option A moves handover from 3 April to 15 April, still before your lease ends.\n"
+    "Option B keeps 3 April. The second-phase move next year would cost roughly 11,000 EUR,\n"
+    "because the cabling has to be redone once the room is in use.\n"
+    "One more point: the meeting-room glass partitions are back-ordered by two weeks.\n"
+    "We can install temporary partitions at no cost, or wait and keep handover as planned\n"
+    "for everything except the two corner rooms.\n"
+    "The fire-escape drawings will be with the landlord by Monday.\n"
+    "Kind regards,\n"
+    "Marta\n"
+    "\n"
+    "From: Jonas Becker (us)\n"
+    "Subject: Office move - floor 4 fit-out\n"
+    "\n"
+    "Hi Marta,\n"
+    "Attaching the signed layout for floor 4. Key points from our side:\n"
+    "- 64 desks, 6 meeting rooms, 2 phone booths and the server room.\n"
+    "- The kitchen stays where the landlord's drawings show it.\n"
+    "- We need badge readers on both stairwell doors from the first day.\n"
+    "- Our IT team will do the network cabling inside the server room themselves.\n"
+    "- Quiet zone near the windows, away from the kitchen.\n"
+    "Please send the updated schedule and any open risks by end of next week.\n"
+    "Thanks,\n"
+    "Jonas\n"
+    "---"
+)
+
 # The two axes are chosen independently in prompts/default.md: the planning branch on
-# complexity/ambiguity, the review branch on audience/consequence. The core drafts span all
+# complexity/ambiguity, the review branch on who reads the result. The core drafts span all
 # four combinations, so a model that merely couples the branches cannot score 100%.
 DRAFTS: dict[str, Draft] = {
     "light": Draft(
@@ -544,6 +611,45 @@ DRAFTS: dict[str, Draft] = {
             "Breakdown of effort to follow.",
         ),
     ),
+    "cap-thread": Draft(
+        CAP_THREAD,
+        None,
+        False,
+        "edge",
+        keys=(
+            ("Lindqvist",),
+            ("14,200", "14200"),
+            ("17 March", "March 17"),
+            ("30 April", "April 30"),
+            ("manager",),
+        ),
+        outputs="message",
+        material=(
+            "The electrical survey found that the floor 4 distribution board cannot carry the",
+            "Option A moves handover from 3 April to 15 April, still before your lease ends.",
+            "We need badge readers on both stairwell doors from the first day.",
+        ),
+    ),
+    # Drafts from the 2026-10 review (#43): a supplier and a public status page are readers
+    # outside the team, however short the text.
+    "supplier": Draft(
+        "email to Brightline Print asking why the 2,000 brochures promised for 12 March have not "
+        "arrived and whether they can still deliver by Friday",
+        False,
+        True,
+        "edge",
+        keys=(("Brightline",), ("2,000", "2000"), ("12 March", "March 12"), ("Friday",)),
+        outputs="message",
+    ),
+    "status-page": Draft(
+        "brief text for our public status page saying the mobile app login problem from this "
+        "morning is fixed and what users should do if they still cannot sign in",
+        False,
+        True,
+        "edge",
+        keys=(("status page",), ("login", "log in", "sign in"), ("this morning",)),
+        outputs="message",
+    ),
 }
 SUITES = ("core", "edge", "all")
 
@@ -579,7 +685,10 @@ def scaffold_tags(system_prompt: str) -> frozenset[str]:
     return frozenset(re.findall(r"</([a-z_]+)>", system_prompt))
 
 
-SCAFFOLD = scaffold_tags(PROFILES["default"])
+# The profile a run scores without --system-prompt-file: what -i-, -ip- and -if- send with the
+# shipped settings (tests/test_bench.py).
+PROFILE = "default"
+SCAFFOLD = scaffold_tags(PROFILES[PROFILE])
 
 
 def section(text: str, tag: str) -> str:
@@ -814,7 +923,7 @@ def run_one(
     model, pin, effort = split_spec(spec)
     draft = DRAFTS[draft_name]
     # A --system-prompt-file candidate gets the same token filling as a shipped profile.
-    sys_prompt = render(PROFILES["default"] if sys_prompt is None else sys_prompt, persona)
+    sys_prompt = render(PROFILES[PROFILE] if sys_prompt is None else sys_prompt, persona)
 
     # Identity of this run, shared by every Result it can produce.
     result = partial(Result, model=model, draft=draft_name, run=run, pin=pin, effort=effort)
@@ -1048,7 +1157,7 @@ def main() -> None:
         "--suite",
         choices=SUITES,
         default="core",
-        help="core: the 8 model-choice drafts; edge: 25 injection, language, pasted-material "
+        help="core: the 8 model-choice drafts; edge: 28 injection, language, pasted-material "
         "and audience drafts; all: both",
     )
     parser.add_argument("--drafts", nargs="*", help="run these drafts instead of a suite")
@@ -1080,7 +1189,7 @@ def main() -> None:
     # A/B a candidate template without adding a throwaway file to
     # src/prompt_workflow/prompts/, where _load_profiles() would pick it up as a profile.
     parser.add_argument(
-        "--system-prompt-file", help="score this file instead of the 'default' profile"
+        "--system-prompt-file", help=f"score this file instead of the '{PROFILE}' profile"
     )
     args = parser.parse_args()
 
@@ -1104,7 +1213,7 @@ def main() -> None:
         template = Path(args.system_prompt_file).read_text(encoding="utf-8").strip()
         prompt = Path(args.system_prompt_file).name  # never a local absolute path
     else:
-        template, prompt = PROFILES["default"], "default"
+        template, prompt = PROFILES[PROFILE], PROFILE
     if "<CONTEXT>" in template and TEMPLATE_MARKER not in template:
         print(f"warning: no {TEMPLATE_MARKER} in the prompt, so no tag repair: the CLI keys on it")
     persona = bench_persona(args.persona, cfg)

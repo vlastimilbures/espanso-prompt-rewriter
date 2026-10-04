@@ -123,7 +123,7 @@ def test_drafts_span_all_branch_combinations():
 def test_suites():
     core, edge, every = (bench.suite_drafts(s) for s in ("core", "edge", "all"))
     assert len(core) == 8
-    assert len(edge) == 25
+    assert len(edge) == 28
     assert every == core + edge
 
 
@@ -519,3 +519,18 @@ def test_run_one_well_formed_is_not_repaired(fake_http, monkeypatch, tmp_path):
     result = bench.run_one(Settings(), "a/b", "board", 1, tmp_path, bench.Budget(1.0))
     assert not result.repaired
     assert not list(tmp_path.glob("*.raw"))
+
+
+# A bare run scores what every OpenRouter trigger sends with the shipped settings: both tiers
+# resolve to the bench's profile (#61).
+@pytest.mark.parametrize("tier", ["standard", "pro"])
+def test_bench_profile_is_what_each_tier_sends(tier):
+    assert Settings().for_call(tier).profile == bench.PROFILE
+
+
+# cap-thread stays just under the prompt's 60-line copy limit, and its last material probe
+# sits near the end, so a copy truncated by the output cap fails.
+def test_cap_thread_size():
+    draft = bench.DRAFTS["cap-thread"]
+    assert 50 <= len(draft.text.split("---\n", 1)[1].splitlines()) <= 60
+    assert draft.text.index(draft.material[-1]) > 0.8 * len(draft.text)
