@@ -347,6 +347,7 @@ def test_migrate_skips_odd_targets(tmp_path):
 
     report = {m.name: m.status for m in profiles.migrate_profiles(prompts, PROFILES)}
     assert report == expected
+    assert not (tmp_path / "nowhere.md").exists()  # the dangling link was not followed
     assert (dest / "alpha.md").is_dir()
     assert (dest / "gamma.md").read_text("utf-8") == "gamma"
     assert not (tmp_path / "nowhere.md").exists()

@@ -103,6 +103,9 @@ def migrate_profiles(
             data = source.read_bytes()
             dest.mkdir(parents=True, exist_ok=True)
             try:
+                # Windows follows a dangling link on exclusive create, writing outside dest.
+                if target.is_symlink():
+                    raise FileExistsError(target.name)
                 # Exclusive create: even a file appearing meanwhile is not overwritten.
                 with target.open("xb") as out:
                     out.write(data)
