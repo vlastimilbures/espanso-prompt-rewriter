@@ -235,9 +235,15 @@ def persona_problem(settings: config.Settings) -> str | None:
     findings = persona_findings(settings)
     if not findings or _persona_stays_local(settings) or not _persona_used(settings):
         return None
+    # With PROMPT_LOCAL_ONLY no cloud call is made: only a relaying loopback server sends it on.
+    sent = (
+        "with every call through a local relay (PROMPT_GATE_LOCAL=true)"
+        if settings.local_only
+        else "with every cloud call"
+    )
     return (
         f"PROMPT_PERSONA matches the data-protection patterns: {', '.join(findings)}; "
-        "it is sent unscanned with every cloud call"
+        f"it is sent unscanned {sent}"
     )
 
 

@@ -18,7 +18,8 @@ rewritten by a local or cloud model.
 
 One small Python CLI sits behind every trigger. It reads your clipboard, checks the draft for
 sensitive content before anything leaves your machine, sends it with the rewrite instructions
-(including your persona, if you set one, which is not checked) to the model, and pastes the
+(including your persona, if you set one, which the gate does not scan; `config validate` and
+`doctor` check it) to the model, and pastes the
 result back — or a readable `[prompt-workflow: …]` message if something went wrong. See
 [What is sent, and to whom](#what-is-sent-and-to-whom). It works the same way on macOS and Windows, with
 [OpenRouter](https://openrouter.ai), [Anthropic](https://www.anthropic.com),
@@ -498,7 +499,8 @@ Values may be quoted, and an unquoted value may be followed by a ` # comment`. Q
 that itself contains ` #`: for `PROMPT_EXTRA_PATTERNS` and `PROMPT_PERSONA`, where `#` may be
 part of the text, `config validate`, `doctor` and `config migrate` report a value cut at ` #`
 (migrate refuses until it is quoted), and a cut `PROMPT_EXTRA_PATTERNS` also stops every
-trigger with a marker, so the gate never runs on part of your patterns. A `.env` must be UTF-8 (a byte order mark is fine); any other encoding is
+rewrite trigger with a marker (`-p-` still pastes the persona), so the gate never runs on part
+of your patterns. A `.env` must be UTF-8 (a byte order mark is fine); any other encoding is
 an error. Booleans are
 `true` or `false`, timeouts and token caps are numbers above 0 (temperature may be 0, or empty to send none); anything
 else is reported inline rather than silently ignored. An error repeats the bad value only when it is
@@ -655,7 +657,8 @@ Ollama and LM Studio on `localhost`. The gate blocks drafts containing:
   `PROMPT_EXTRA_PATTERNS="project[- ]falcon;CUST-\d{6}"` (case-insensitive; reported as
   `custom_1`, `custom_2`, … so the pattern itself never appears in the message). An entry
   that is not a valid regex is rejected when settings load: `config validate`, `config set`
-  and `doctor` report it by position, and every trigger prints a marker until it is fixed.
+  and `doctor` report it by position, and every rewrite trigger prints a marker until it is
+  fixed (`-p-` still pastes the persona).
   Keep each pattern simple: it runs on every draft and on each value written to the usage
   history, and Python's regex engine can take exponential time on a pattern with nested
   quantifiers such as `(\w+\s?)+` or `(a|aa)+`. Prefer a literal word, a character class with
@@ -707,8 +710,9 @@ carrying:
   with every call and is **not** scanned by the gate: an email, a company name or one of your
   `PROMPT_EXTRA_PATTERNS` in the persona is sent even where the same text in the draft would be
   blocked. Keep the persona to what you are happy to send to every recipient below.
-  `config validate` and `doctor` (and the interface's Home tab) run the gate's scan over the
-  persona once, when your profiles send it, and name what it matches, never the text;
+  `config validate` and `doctor` (and the interface's Home and Diagnostics tabs) run the gate's
+  scan over the persona once, when your profiles send it (not with `PROMPT_LOCAL_ONLY=true`
+  unless `PROMPT_GATE_LOCAL=true`), and name what it matches, never the text;
 - the model name and request settings, such as the temperature and maximum tokens (for
   OpenRouter also the reasoning effort and the endpoint preference; for Ollama its `think`
   setting; the Anthropic API version header);
@@ -848,7 +852,7 @@ run it are in [docs/benchmark.md](docs/benchmark.md).
 | `[prompt-workflow: Blocked call to the local server …]` | `PROMPT_GATE_LOCAL=true` and the gate matched a `-il-`/`-ilm-` draft. Remove the content, or set `PROMPT_GATE_LOCAL=false` if your `localhost` server runs the model itself (not a relay to a cloud API). |
 | `[prompt-workflow: sent despite: …]` at the top of a rewrite | You used `-iok-`; the draft was sent despite those findings. Delete the line. |
 | `[prompt-workflow: Input is too long …]` | The clipboard holds more than 50,000 characters. Copy just the draft. |
-| `… the reply hit the model's output limit and is cut off]` at the end, or `… used its whole output limit before writing any text` | The model hit its output cap, often by spending it on reasoning. Raise `OPENROUTER_MAX_TOKENS` (`OPENROUTER_PRO_MAX_TOKENS` for `-ip-` alone, `ANTHROPIC_MAX_TOKENS` for Anthropic), or pick a larger max tokens (or lower effort) in `-if-`. For Ollama the cap is the model's own setting. |
+| `… the reply hit the model's output limit and is cut off]` at the end, or `… used its whole output limit before writing any text` | The model hit its output cap, often by spending it on reasoning. Raise `OPENROUTER_MAX_TOKENS` (`OPENROUTER_PRO_MAX_TOKENS` for the pro tier alone: `-ip-`, `-if-`, `--tier pro`; `ANTHROPIC_MAX_TOKENS` for Anthropic), or pick a larger max tokens (or lower effort) in `-if-`. For Ollama and LM Studio pass `--max-tokens` (in your own variant trigger); without it the server's own default applies. |
 | A `base.yml.bak-…` file appeared in Espanso's `match` folder | Versions before 0.9 deployed `-p-` as `match/base.yml`, the file Espanso creates for your own snippets. The installer backed up that copy and replaced it with `prompts-template.yml`. Older installers overwrote `base.yml` without a backup, so snippets you kept there before first installing this project can only come from your own backups. |
 | Expansion is slow | Use a faster model or endpoint (see [benchmark](#model-benchmark)); Espanso waits for the CLI. |
 | `[prompt-workflow: … must be an https:// URL]` | A cloud `*_BASE_URL` uses `http`. Switch it to `https`. |
