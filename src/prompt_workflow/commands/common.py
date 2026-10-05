@@ -200,7 +200,8 @@ def shown_value(name: str, entry: Entry) -> str:
         return f"<set, {len(entry.value)} chars>" if entry.value else "<not set>"
     if entry.value.isprintable() and "\n" not in entry.value:
         return entry.value
-    return safe_repr(entry.value)
+    # The user's patterns would hide the pattern setting itself when it matches its own text.
+    return safe_repr(entry.value, user_patterns=name != "PROMPT_EXTRA_PATTERNS")
 
 
 def looks_like_a_key(value: str) -> bool:

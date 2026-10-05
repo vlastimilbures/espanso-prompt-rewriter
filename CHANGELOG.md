@@ -28,6 +28,14 @@ All notable changes to this project are documented here. The format follows
   prints a marker until it is fixed (before, the local triggers ran and the usage history
   silently dropped each record). README and `.env.example` now warn against patterns with
   nested quantifiers, which can take exponential time on every draft.
+- An error that quotes a rejected value no longer repeats one that matches your
+  `PROMPT_EXTRA_PATTERNS` (#32): for example `PROMPT_PROVIDER=PRJ-12345` with the pattern
+  `PRJ-\d+` now pastes `Unknown provider <redacted, 9 chars>`, and a bad
+  `PROMPT_TIMEOUT_SECONDS` matching a pattern is described in the marker and in
+  `config validate`. `config show` still shows the
+  patterns themselves.
+- `--tier` with an unknown value is quoted like every other rejected value (#32), so a
+  key-shaped one is described instead of pasted back.
 ### Added
 - `PROMPT_GATE_LOCAL` (default `false`) (#33): `true` runs the data-protection gate for Ollama
   and LM Studio on `localhost` too, with the same override rules, for a local server that
@@ -35,9 +43,9 @@ All notable changes to this project are documented here. The format follows
   draft it blocks pastes `[prompt-workflow: Blocked call to the local server …]`.
 
 
-### Added
 - The interface's header now shows the installed version next to the name
   (`prompt-workflow 0.17.0 — set up and manage`) on every screen (#112).
+
 
 ### Changed
 - Match files (#38, #23, #41): every match, the commented-out `-ic-` too, has a `label:`

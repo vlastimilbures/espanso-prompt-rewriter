@@ -47,6 +47,11 @@ def isolated_env(tmp_path, monkeypatch):
         raise AssertionError(f"a test ran a real command: {argv}")
 
     monkeypatch.setattr(deploy, "run_command", refuse)
+    # The user patterns safe_repr() hides are set by every settings load: start each test
+    # without the previous test's.
+    from prompt_workflow import redaction
+
+    monkeypatch.setattr(redaction, "_user_patterns", ())
 
 
 # Headers httpx adds to every request on its own; calls[i]["headers"] leaves them out so a

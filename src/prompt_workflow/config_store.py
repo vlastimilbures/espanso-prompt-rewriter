@@ -323,16 +323,26 @@ def _checkout_env(source: Path) -> Path:
     return path
 
 
+def _env_pairs(path: Path, data: bytes, fix: str) -> dict[str, str]:
+    """The pairs of a .env's bytes. Refused when it is not UTF-8, or when a free-text
+    setting's unquoted value was cut at ` #` (config._HASH_IN_VALUE): config.toml would keep
+    only the part before it, and the rest (part of a regex, say) would be lost with the .env.
+    Any other setting's ` # note` is a comment, as dotenv reads it."""
+    try:
+        pairs, _, cut = config._parse_env_text(config._env_text(data))
+    except UnicodeDecodeError:
+        raise MigrationError(f"{path} is not UTF-8 text; nothing was migrated") from None
+    for key in cut:
+        raise MigrationError(f"fix {fix} first: {config._cut_value_error(key)}")
+    return pairs
+
+
 def _read_env(path: Path) -> tuple[bytes, dict[str, str]]:
     try:
         data = path.read_bytes()
     except OSError:
         raise MigrationError(f"{path} cannot be read; nothing was migrated") from None
-    try:
-        pairs = config._parse_env_text(data.decode("utf-8"))[0]
-    except UnicodeDecodeError:
-        raise MigrationError(f"{path} is not UTF-8 text; nothing was migrated") from None
-    return data, pairs
+    return data, _env_pairs(path, data, str(path))
 
 
 def plan_migration(
@@ -376,10 +386,7 @@ def plan_migration(
                 continue
             raise MigrationError(f"{path} cannot be read; nothing was migrated") from None
         if pairs is None:
-            try:
-                pairs = config._parse_env_text(data.decode("utf-8"))[0]
-            except UnicodeDecodeError:
-                raise MigrationError(f"{path} is not UTF-8 text; nothing was migrated") from None
+            pairs = _env_pairs(path, data, "the .env")
         sources.append(EnvSource(path, len(sources) == 0, config_files.digest(data)))
     if pairs is None and foreign is None:
         return MigrationPlan("nothing")

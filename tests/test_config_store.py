@@ -224,8 +224,8 @@ def test_exposed_secrets_file_is_reported(saved_mode):
 # --- fail closed ---------------------------------------------------------------------------
 
 
-# An invalid config makes improve print its marker without building a provider; persona keeps
-# its placeholder.
+# An invalid config makes improve print its marker without building a provider; persona still
+# prints a persona that an unrelated bad value does not affect (#32).
 def test_invalid_config_fails_closed_in_cli(saved_mode, stub_provider):
     _write(saved_mode / "config.toml", "OPENROUTER_MAX_TOKENS = 0\n")
     result = runner.invoke(app, ["improve", "--source", "argument", "--text", "draft"])
@@ -235,6 +235,8 @@ def test_invalid_config_fails_closed_in_cli(saved_mode, stub_provider):
     )
     assert stub_provider.built == []
     _write(saved_mode / "config.toml", 'PROMPT_PERSONA = "I am x."\nOLLAMA_THINK = "y"\n')
+    assert runner.invoke(app, ["persona"]).stdout == "I am x."
+    _write(saved_mode / "config.toml", 'PROMPT_PERSONA = "I am x."\nOLLAMA_THINK = \n')
     assert runner.invoke(app, ["persona"]).stdout == PERSONA_PLACEHOLDER
 
 
@@ -971,3 +973,32 @@ def test_backup_folder_failure(saved_mode, project, monkeypatch):
     with pytest.raises(MigrationError, match="cannot create the backup folder"):
         config_store.apply_migration(consent=plan.token)
     assert repo_env.read_text("utf-8") == _example_env()
+
+
+# A UTF-8 byte order mark is not part of the first key, so migration keeps it (#32).
+def test_migration_reads_env_with_byte_order_mark(saved_mode, project):
+    (project / ".env").write_bytes(b"\xef\xbb\xbfOLLAMA_MODEL=m\n")
+    plan = config_store.plan_migration()
+    assert dict(plan.settings) == {"OLLAMA_MODEL": "m"}
+    assert plan.ignored == ()
+
+
+# A value cut at an unquoted ` #` is never carried into config.toml: the migration is refused
+# until the value is quoted (#32).
+def test_migration_refuses_a_value_cut_at_a_comment(saved_mode, project):
+    _write(project / ".env", "PROMPT_EXTRA_PATTERNS=ticket #\\d{5}\n")
+    with pytest.raises(
+        MigrationError,
+        match=r"fix the \.env first: the value of PROMPT_EXTRA_PATTERNS was cut at ' #'",
+    ):
+        config_store.plan_migration()
+    _write(project / ".env", 'PROMPT_EXTRA_PATTERNS="ticket #\\d{5}"\n')
+    assert dict(config_store.plan_migration().settings) == {
+        "PROMPT_EXTRA_PATTERNS": "ticket #\\d{5}"
+    }
+
+
+# Any other setting's ` # note` is an ordinary comment: migrated without it, not refused.
+def test_migration_keeps_an_ordinary_inline_comment(saved_mode, project):
+    _write(project / ".env", "OLLAMA_MODEL=m  # a note\n")
+    assert dict(config_store.plan_migration().settings) == {"OLLAMA_MODEL": "m"}

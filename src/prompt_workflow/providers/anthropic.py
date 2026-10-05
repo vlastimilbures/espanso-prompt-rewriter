@@ -58,16 +58,19 @@ class AnthropicProvider:
         )
 
         try:
-            # None when there is no text block, e.g. only thinking before the token cap.
-            content = next(
-                (
-                    block["text"]
-                    for block in data["content"]  # type: ignore[attr-defined]
-                    if block.get("type") == "text"
-                ),
-                None,
-            )
+            # Every text block, in order (a reply may be split into several); thinking and
+            # other blocks are skipped. None when there is no text block, e.g. only thinking
+            # before the token cap.
+            texts = [
+                block["text"]
+                for block in data["content"]  # type: ignore[attr-defined]
+                if block.get("type") == "text"
+            ]
+            ok = texts and all(isinstance(text, str) for text in texts)
+            content = "".join(texts) if ok else None
         except (KeyError, TypeError, AttributeError) as exc:
             raise ProviderError("Anthropic response was malformed") from exc
 
-        return finalize_content(content, "Anthropic", stop_reason=data.get("stop_reason"))
+        return finalize_content(
+            content, "Anthropic", stop_reason=data.get("stop_reason"), capped=True
+        )

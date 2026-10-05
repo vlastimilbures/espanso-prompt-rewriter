@@ -355,12 +355,26 @@ def _normalize(text: str) -> str:
 # Longest raw value an error message repeats back as-is.
 SHOWN_MAX_CHARS = 40
 
+# The user's PROMPT_EXTRA_PATTERNS, compiled, from the settings resolved last
+# (config.ConfigLayers.resolve(), before any other value is parsed), so error messages hide a
+# value they match too. Replaced
+# by one assignment, so a reader sees the old or the new tuple, never a mix.
+_user_patterns: tuple[re.Pattern[str], ...] = ()
 
-def safe_repr(raw: str) -> str:
+
+def set_user_patterns(patterns: tuple[re.Pattern[str], ...]) -> None:
+    global _user_patterns
+    _user_patterns = patterns
+
+
+def safe_repr(raw: str, *, user_patterns: bool = True) -> str:
     """How an error message quotes a value it rejects. Errors are pasted into whatever app
     has focus, so a value that may hold a secret is described instead of repeated: a long
-    one, one that scan() flags, or one containing '=' (two .env lines run together)."""
-    if len(raw) <= SHOWN_MAX_CHARS and "=" not in raw and not scan(raw):
+    one, one that scan() flags (with the user's patterns, see set_user_patterns, unless
+    ``user_patterns`` is false: for showing PROMPT_EXTRA_PATTERNS itself, which may match
+    its own text), or one containing '=' (two .env lines run together)."""
+    extra = _user_patterns if user_patterns else ()
+    if len(raw) <= SHOWN_MAX_CHARS and "=" not in raw and not scan(raw, extra):
         return repr(raw)
     merged = "; two .env lines may have run together" if "=" in raw else ""
     return f"<redacted, {len(raw)} chars{merged}>"
@@ -373,7 +387,10 @@ def redact_words(text: str) -> str:
     """``text`` with every word scan() flags described instead of repeated: for messages
     that quote what was typed (a usage error naming a stray argument), which may be a key."""
     return _WORD.sub(
-        lambda m: f"<redacted, {len(m.group())} chars>" if scan(m.group()) else m.group(), text
+        lambda m: (
+            f"<redacted, {len(m.group())} chars>" if scan(m.group(), _user_patterns) else m.group()
+        ),
+        text,
     )
 
 

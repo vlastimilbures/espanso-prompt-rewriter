@@ -76,4 +76,9 @@ class OpenAICompatibleProvider:
         except (KeyError, IndexError, TypeError) as exc:
             raise ProviderError(f"{self.label} response was malformed") from exc
 
-        return finalize_content(content, self.label, stop_reason=choice.get("finish_reason"))
+        return finalize_content(
+            content,
+            self.label,
+            stop_reason=choice.get("finish_reason"),
+            capped=bool(self.max_tokens),
+        )

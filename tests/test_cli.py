@@ -309,7 +309,7 @@ def test_improve_bad_effort_reports_inline():
 def test_improve_unknown_tier():
     result = improve("--tier", "ultra", "--source", "argument", "--text", "d")
     assert result.exit_code == 0
-    assert result.stdout.startswith("[prompt-workflow: Unknown tier: ultra")
+    assert result.stdout.startswith("[prompt-workflow: Unknown tier: 'ultra'")
 
 
 # `persona` prints PROMPT_PERSONA for the -p- snippet, with no trailing newline.
@@ -638,3 +638,94 @@ def test_fence_strip_edge_cases(stub_provider, reply, pasted):
     stub_provider.result = reply
     result = improve("--profile", "general", "--source", "argument", "--text", "draft")
     assert result.stdout == pasted
+
+
+# An error in another setting, or in the secret store, never hides a configured persona from
+# the -p- snippet (#32); improve still reports the error.
+def test_persona_survives_an_unrelated_setting_error(tmp_path):
+    (tmp_path / ".env").write_text('PROMPT_PERSONA="I am a tester."\nPROMPT_TIMEOUT_SECONDS=abc\n')
+    assert improve("--source", "argument", "--text", "d").stdout.startswith(
+        "[prompt-workflow: PROMPT_TIMEOUT_SECONDS must be"
+    )
+    result = runner.invoke(app, ["persona"])
+    assert result.exit_code == 0
+    assert result.stdout == "I am a tester."
+
+
+def test_persona_survives_a_broken_secret_store(tmp_path, monkeypatch):
+    monkeypatch.delenv("PROMPT_WORKFLOW_ENV")
+    directory = tmp_path / "config" / "prompt-workflow"
+    directory.mkdir(parents=True)
+    (directory / "config.toml").write_text('PROMPT_PERSONA = "I am a tester."\n')
+    (directory / "secrets.toml").write_text("not = = toml\n")
+    assert runner.invoke(app, ["persona"]).stdout == "I am a tester."
+
+
+# When the persona itself cannot be read (a broken config.toml, a .env that is not UTF-8),
+# the snippet keeps its placeholder.
+@pytest.mark.parametrize("broken", ["config.toml", "utf-16"])
+def test_persona_placeholder_when_the_persona_cannot_be_read(tmp_path, monkeypatch, broken):
+    if broken == "config.toml":
+        monkeypatch.delenv("PROMPT_WORKFLOW_ENV")
+        directory = tmp_path / "config" / "prompt-workflow"
+        directory.mkdir(parents=True)
+        (directory / "config.toml").write_text('PROMPT_PERSONA = "I am a tester."\nx = = 1\n')
+    else:
+        (tmp_path / ".env").write_bytes('PROMPT_PERSONA="I am a tester."\n'.encode("utf-16"))
+    assert runner.invoke(app, ["persona"]).stdout == cli.PERSONA_PLACEHOLDER
+
+
+# A .env that is not UTF-8 is a marker on the trigger path, never silently skipped (#32).
+def test_undecodable_env_is_a_marker(tmp_path, fake_http):
+    (tmp_path / ".env").write_bytes("PROMPT_EXTRA_PATTERNS=CUST-\\d{6}\n".encode("utf-16"))
+    result = improve("--provider", "ollama", "--source", "argument", "--text", "CUST-123456")
+    assert result.exit_code == 0
+    assert result.stdout == (
+        "[prompt-workflow: the .env named by PROMPT_WORKFLOW_ENV is not UTF-8 text; "
+        "save it as UTF-8]"
+    )
+    assert fake_http.calls == []
+
+
+# A gate pattern cut at an unquoted ` #` fails closed: no request, a marker naming the setting.
+def test_cut_extra_pattern_is_a_marker(tmp_path, fake_http):
+    (tmp_path / ".env").write_text("PROMPT_EXTRA_PATTERNS=ticket #\\d{5};CUST-\\d{6}\n")
+    result = improve("--provider", "ollama", "--source", "argument", "--text", "CUST-123456")
+    assert result.stdout == (
+        "[prompt-workflow: the value of PROMPT_EXTRA_PATTERNS was cut at ' #' (a comment); "
+        "quote the value]"
+    )
+    assert fake_http.calls == []
+
+
+# A persona in the real environment is printed whatever happens to the settings files.
+def test_persona_from_the_environment_survives_a_broken_env_file(tmp_path, monkeypatch):
+    (tmp_path / ".env").write_bytes("OLLAMA_MODEL=m\n".encode("utf-16"))
+    monkeypatch.setenv("PROMPT_PERSONA", "I am a tester.")
+    assert runner.invoke(app, ["persona"]).stdout == "I am a tester."
+
+
+def test_bad_value_matching_a_user_pattern_is_redacted_in_the_marker(monkeypatch):
+    monkeypatch.setenv("PROMPT_EXTRA_PATTERNS", "falcon")
+    monkeypatch.setenv("PROMPT_TIMEOUT_SECONDS", "falcon")
+    result = improve("--source", "argument", "--text", "d")
+    assert result.stdout.startswith("[prompt-workflow: PROMPT_TIMEOUT_SECONDS must be")
+    assert "falcon" not in result.stdout
+
+
+# A tier that looks like a key is described, never pasted back (#32).
+def test_unknown_tier_is_redacted():
+    tier = "sk-or-v1-" + "a" * 40
+    result = improve("--tier", tier, "--source", "argument", "--text", "d")
+    assert result.stdout.startswith("[prompt-workflow: Unknown tier: <redacted, 49 chars>")
+    assert "sk-or" not in result.stdout
+
+
+# A rejected value that matches one of the user's PROMPT_EXTRA_PATTERNS is described, not
+# repeated (#32).
+def test_error_hides_a_value_matching_a_user_pattern(monkeypatch):
+    monkeypatch.setenv("PROMPT_EXTRA_PATTERNS", r"PRJ-\d+")
+    monkeypatch.setenv("PROMPT_PROVIDER", "PRJ-12345")
+    result = improve("--source", "argument", "--text", "d")
+    assert result.stdout.startswith("[prompt-workflow: Unknown provider <redacted, 9 chars>")
+    assert "PRJ-12345" not in result.stdout

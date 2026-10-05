@@ -792,3 +792,18 @@ def test_curl_user_needs_the_curl_command(text, flagged):
 )
 def test_email_without_password_is_soft(text):
     assert scan_draft(text) == ["email"]
+
+
+# safe_repr() and redact_words() also describe a value that matches one of the user's
+# PROMPT_EXTRA_PATTERNS once settings have loaded them (#32).
+def test_safe_repr_honours_user_patterns(monkeypatch):
+    from prompt_workflow import redaction
+    from prompt_workflow.config import Settings
+
+    assert safe_repr("PRJ-12345") == "'PRJ-12345'"
+    monkeypatch.setenv("PROMPT_EXTRA_PATTERNS", r"PRJ-\d+")
+    Settings.load()
+    assert safe_repr("PRJ-12345") == "<redacted, 9 chars>"
+    assert redaction.redact_words("got PRJ-12345") == "got <redacted, 9 chars>"
+    redaction.set_user_patterns(())
+    assert safe_repr("PRJ-12345") == "'PRJ-12345'"
