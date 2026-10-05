@@ -606,6 +606,15 @@ def test_run_command():
 # --- CLI ------------------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _terminal(monkeypatch):
+    """The CLI tests answer prompts through CliRunner's input, as a person at a terminal would;
+    without a terminal the commands refuse to ask (tests/test_commands.py)."""
+    from prompt_workflow.commands import common
+
+    monkeypatch.setattr(common, "stdin_is_tty", lambda: True)
+
+
 @pytest.fixture
 def fake_run(monkeypatch):
     fake = FakeRunner({"espanso restart": ""})

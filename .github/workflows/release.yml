@@ -148,8 +148,8 @@ jobs:
           uv venv --python $env:PYTHON_VERSION $venv
           uv pip install --python $venv $wheel -c $constraints
           $python = if ($IsWindows) { "$venv/Scripts/python.exe" } else { "$venv/bin/python" }
-          # TODO(#92): use `prompt-workflow --version` once that flag exists.
-          $installed = & $python -c "import prompt_workflow; print(prompt_workflow.__version__)"
+          $cli = if ($IsWindows) { "$venv/Scripts/prompt-workflow.exe" } else { "$venv/bin/prompt-workflow" }
+          $installed = & $cli --version
           if ($installed -ne $env:VERSION) { throw "installed $installed, expected $env:VERSION" }
           & $python "$env:GITHUB_WORKSPACE/scripts/check_wheel.py" --repo $env:GITHUB_WORKSPACE --wheel $wheel --constraints $constraints
 

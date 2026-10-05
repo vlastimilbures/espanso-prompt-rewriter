@@ -342,6 +342,17 @@ def safe_repr(raw: str) -> str:
     return f"<redacted, {len(raw)} chars{merged}>"
 
 
+_WORD = re.compile(r"[^\s'\"(),\[\]]+")
+
+
+def redact_words(text: str) -> str:
+    """``text`` with every word scan() flags described instead of repeated: for messages
+    that quote what was typed (a usage error naming a stray argument), which may be a key."""
+    return _WORD.sub(
+        lambda m: f"<redacted, {len(m.group())} chars>" if scan(m.group()) else m.group(), text
+    )
+
+
 # Single tokens that are not secrets: a URL, an email, a path, a UUID, a lower-case slug
 # (owner/model), host or file name (example.com:8080, notes2026.md), a version, a date or a
 # hex hash. Case-sensitive, so a mixed-case secret that merely contains '/' or '.' (half of

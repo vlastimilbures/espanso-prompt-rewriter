@@ -7,6 +7,25 @@ All notable changes to this project are documented here. The format follows
 ## Unreleased
 
 ### Added
+- Headless management commands (#92), each a thin wrapper over a service and safe to script:
+  `prompt-workflow --version`; `setup` (provider, default profile, API key, a deploy preview and
+  a smoke test that runs `improve` against a stub on 127.0.0.1, never a paid call; it offers a
+  `.env` migration and applies it only on a yes; `--non-interactive`, `--api-key-stdin`,
+  `--deploy`); `config show [--raw]|get|set|unset|validate|migrate|rollback` (show gives each
+  value's source and what it overrides; migrate and rollback need a confirmation, or
+  `--yes --preview-token` from the preview); `secrets set [--stdin]|status|remove`;
+  `profiles list|migrate`; `stats [--by trigger|provider|model|day] [--json]` with its caveats
+  (local observations, not billing; rendered is not pasted; triggers with an explicit provider
+  ignore `PROMPT_PROVIDER`); `history export|prune|reset`; and `doctor [--json]` (#25), which
+  reports each deployed match file (`prompts-template.yml: stale` in the drift case), launcher
+  drift, keys set or not, Espanso found and running, history health and the clipboard's length,
+  never a key, persona or clipboard text. `espanso deploy` gains `--dry-run`. A key is never a
+  command-line argument (stdin or a hidden prompt only; `--stdin` at a terminal asks hidden),
+  `config set` refuses one, and neither a usage error nor `config show|get` repeats one. These
+  commands use exit codes 0-4 (README, "CLI"), never prompt without a terminal (exit 3), run on
+  a broken `.env`/TOML in repair mode, and honour `NO_COLOR`. `setup` and `stats` disclose the
+  usage history and how to switch it off (`prompt-workflow config set PROMPT_HISTORY false`).
+  The commands load lazily, so the triggers import none of them.
 - The usage history records every `improve` and `persona` run (#89): one operation per run
   (origin, trigger, kind, profile, outcome, latency until the output was printed) and one
   attempt per HTTP attempt, a retry's two included, with its tokens and reported charge. The
@@ -166,6 +185,9 @@ All notable changes to this project are documented here. The format follows
   finding, and `scheme://:password@host` (no user name) counts as `url_credentials` (#21).
 
 ### Changed
+- `espanso deploy` and `detach` no longer read an answer from a non-terminal stdin: without
+  `--yes` there they stop with exit code 3. The release workflow checks the installed wheel with
+  `prompt-workflow --version`.
 - `.env.example` sets only `OPENROUTER_API_KEY` and `PROMPT_PERSONA`; every other setting is
   shown commented out with its default, so a copied file no longer pins the model, endpoint or
   effort, and later default changes reach you (#28). The README now recommends keeping the file

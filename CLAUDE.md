@@ -120,7 +120,7 @@ prompt-workflow espanso status  # missing / in sync / stale / modified / foreign
   recorder's call) then deletes up to `_PRUNE_BATCH` operations past the retention in a second
   short transaction, only after the record committed and only within the budget (an interrupt
   rolls back a whole SQLite transaction, so the two are never one), so a failed prune never
-  costs the record. `PROMPT_HISTORY` (default `true`) and
+  costs the record. `prompt-workflow history prune` prunes on demand. `PROMPT_HISTORY` (default `true`) and
   `PROMPT_HISTORY_RETENTION_DAYS` configure it; estimates come only from a user `prices.toml`
   in the config dir and are kept apart from reported costs. `sqlite3`, `tomllib`, `csv` and
   `decimal` are imported inside functions, and `recorder.py` imports the module only when a run is recorded.
@@ -202,6 +202,36 @@ prompt-workflow espanso status  # missing / in sync / stale / modified / foreign
   a quote, `$`, backtick or backslash; Windows converts to `/` and refuses `" % ^ & | < >`). Every external command
   (`espanso path config`, `espanso restart`/`start`, `uv tool dir`, `brew --prefix`) goes
   through `run_command`, which `tests/conftest.py` replaces with a refusal.
+- `commands/` — the management commands (#92): `setup`, `config show|get|set|unset|validate|
+  migrate|rollback`, `secrets set|status|remove`, `profiles list|migrate`, `stats`,
+  `history export|prune|reset`, `doctor` (plus `espanso` in `cli.py`, which gained
+  `deploy --dry-run`). `cli.py`'s `_LazyGroup` imports a command's module only when it runs or
+  `--help` lists it (`_LAZY_COMMANDS`), so improve/persona never load them; it also passes
+  every Click usage error through `redaction.redact_words()`, since Click quotes a stray argument;
+  `tests/test_trigger_contract.py` forbids `commands`, `doctor`, `smoke` and `config_store` on
+  the trigger path. `--version` is an eager callback on `_main`. Unlike the triggers they use
+  ordinary exit codes (`commands/common.py`: 0 ok, 1 failed, 2 usage, 3 needs a terminal, 4
+  doctor/validate found problems; README "CLI"), print errors to stderr via `@guard` (never a
+  traceback), load settings in repair mode (`load_layers()`), never prompt without a TTY
+  (`stdin_is_tty()`, which tests patch), colour only on a TTY without `NO_COLOR`, and take a key
+  only from stdin or `getpass` (`read_secret()`); `config set` refuses secret names and any
+  value `scan()` flags as a credential. `config set`/`secrets set` refuse in legacy
+  `PROMPT_WORKFLOW_ENV` mode, and `config set` refuses while a `.env` is in use without
+  `config.toml` (it would be orphaned): migrate first. `config migrate|rollback` apply only with
+  an interactive yes or `--yes --preview-token <token printed by the preview>`.
+  `tests/test_commands.py` walks the whole command tree: no option named like a secret, a key
+  given to any value is never saved, and every command on a broken `.env`/TOML/secrets exits
+  0-4 without a traceback (add a new command to `_commands()` there).
+- `doctor.py` — `run()` returns a `Report` of the fixed `CHECK_IDS` (JSON `schema_version` 1:
+  only add ids/keys). Read-only: `espanso path config`/`espanso status` and the launcher lookup
+  via `run_command`; keys as set/not set; the clipboard only as a length (never read when
+  concealed). Match files `stale`/`missing` or a deployed launcher that is gone fail (exit 4).
+- `smoke.py` — `setup`'s smoke test: a `ThreadingHTTPServer` on 127.0.0.1:0 answering the
+  OpenAI-compatible, Anthropic and Ollama shapes, and a child `python -m prompt_workflow.cli
+  improve --provider <p>` whose env points every `*_BASE_URL` at it with a placeholder key (the
+  real key is never sent). `setup` offers a `.env` migration (applies only on an interactive
+  yes), previews the deploy (`--deploy` applies, keeping edited files), and discloses the usage
+  history (D-HIST-0).
 
 ### Data-protection gate
 
