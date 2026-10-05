@@ -20,6 +20,10 @@ uv sync                  # the project plus its dev tools
 uv run pre-commit install
 ```
 
+To run your checkout from Espanso, install it as an editable tool with
+`./scripts/install_macos.sh` or `.\scripts\install_windows.ps1` (README, "Development"); users
+install the release wheel instead.
+
 ## Checks
 
 Run these before opening a pull request. CI runs the same.

@@ -79,8 +79,10 @@ step. A quick note to yourself would get "execute now" and a self-review checkli
 - ✨ [Features](#features)
 - ⚙️ [How it works](#how-it-works)
 - 📋 [Requirements](#requirements)
-- 🚀 [Quick start](#quick-start)
-- 🖥️ [Set up and manage](#set-up-and-manage)
+- 🚀 [Install](#install)
+- 🖥️ [First run](#first-run)
+- 🔄 [Updating](#updating)
+- 🗑️ [Uninstall](#uninstall)
 - ⌨️ [Usage](#usage)
 - 🔧 [Configuration](#configuration)
 - 🧩 [Profiles and persona](#profiles-and-persona)
@@ -136,57 +138,16 @@ and `secrets.toml` (see [Configuration](#configuration)).
 ## Requirements
 
 - macOS or Windows with [Espanso](https://espanso.org/install/) installed and running. Espanso
-  also runs on Linux, but the install scripts don't cover it yet (see [Quick start](#quick-start)).
+  also runs on Linux, where the CLI is tested but the triggers are not used day to day.
 - Python 3.12+ and [uv](https://docs.astral.sh/uv/getting-started/installation/)
 - For the default `-i-` trigger: an [OpenRouter API key](https://openrouter.ai/keys).
   For fully local use instead: [Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai).
 
-## Quick start
-
-```bash
-git clone https://github.com/vlastimilbures/espanso-prompt-rewriter.git
-cd espanso-prompt-rewriter
-mkdir -p ~/.config/prompt-workflow
-cp .env.example ~/.config/prompt-workflow/.env  # set OPENROUTER_API_KEY, optionally PROMPT_PERSONA
-chmod 600 ~/.config/prompt-workflow/.env        # the file holds your API key
-```
-
-On Windows, copy it to `%APPDATA%\prompt-workflow\.env` instead. Keep the file holding your key
-outside the repository folder, so the key never sits in the working tree where a careless
-`git add` or a shared folder could pick it up. A `.env` in the repository folder is still read
-(and wins over the one in your config folder), so move an existing one out. Then install the
-CLI and deploy the Espanso match files:
-
-```bash
-./scripts/install_macos.sh      # macOS
-.\scripts\install_windows.ps1   # Windows (PowerShell)
-```
-
-The installer runs `uv tool install` pinned to `uv.lock` (and checks the tool venv against it),
-then `prompt-workflow espanso deploy --yes`, which writes the match files with the CLI's absolute
-path and restarts Espanso. It never touches Espanso's `config/` folder (the old `--with-config` /
-`-WithConfig` option is gone). The Windows script runs on Windows PowerShell 5.1 and
-PowerShell 7; you may first need `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
-
-Now copy a rough draft, type `-i-` in any text field, and wait a couple of seconds.
-
-<details>
-<summary>Linux or manual install</summary>
-
-```bash
-uv tool install --editable .
-prompt-workflow espanso deploy
-```
-
-</details>
-
-<details>
-<summary>Install a release wheel with the locked dependencies</summary>
+## Install
 
 Each [GitHub Release](https://github.com/vlastimilbures/espanso-prompt-rewriter/releases) from
 0.16 on carries the wheel and `constraints.txt`, the exact dependency versions from `uv.lock`
-(a plain `uv tool install` resolves the version ranges afresh). Until a packaged channel exists,
-install a release with:
+(a plain `uv tool install` would resolve the version ranges afresh). Install a release with:
 
 ```bash
 uv tool install \
@@ -197,19 +158,45 @@ uv tool install \
 To check the files first, download them (`gh release download v<version> -R
 vlastimilbures/espanso-prompt-rewriter`), run `gh attestation verify <file> -R
 vlastimilbures/espanso-prompt-rewriter` on each, and install the local wheel with
-`-c constraints.txt`. This installs the CLI only: then run `prompt-workflow espanso deploy` to
-write the match files (see below). The CLI then reads `.env` from the user config directory, not
-from a checkout.
+`-c constraints.txt`. This installs the CLI only; [First run](#first-run) sets it up and writes
+the Espanso match files. Homebrew, Scoop and WinGet packages are planned (#95). To run from a
+checkout instead, see [Development](#development).
 
-</details>
+## First run
+
+Run `prompt-workflow` in a terminal (or `prompt-workflow ui`) for a full-screen interface with
+six tabs: Home (the `doctor` summary), Providers & keys, Profiles, Triggers, History and
+Diagnostics. It does what the [management commands](#management-commands) do, through the same
+code. Keys are shown only as set or not set, removing a key, deploying, detaching, migrating or
+deleting history asks first, and no provider is called except by the Test call button, which
+runs `improve` against a stub on `127.0.0.1` with a placeholder key.
+
+![The Home tab of the prompt-workflow interface](docs/interface.svg)
+
+`1`-`6` switch tabs, `r` reloads, `t` switches to a high-contrast theme and `q` quits;
+`NO_COLOR` turns colour off. Scripts and screen readers can use the headless commands instead.
+Without a terminal, a bare `prompt-workflow` prints the help.
+
+Or answer a few questions instead: `prompt-workflow setup` asks for the provider and default
+profile (saved in `config.toml`), the API key (hidden input, saved in `secrets.toml`), shows the
+match files it would deploy and writes them only if you agree, and ends with a smoke test that
+runs `improve` against a stub on `127.0.0.1` (never a paid call). In a script, pass the key on
+stdin and nothing is asked:
+
+```bash
+prompt-workflow setup --non-interactive --api-key-stdin --deploy < key.txt
+```
+
+Without `--deploy` the deploy stays a preview. Now copy a rough draft, type `-i-` in any text
+field, and wait a couple of seconds.
 
 ### Managing the deployed match files
 
 `prompt-workflow espanso` owns the match files it writes into Espanso's `match/` folder (found
-with `espanso path config`, else Espanso's default folder) and keeps a manifest of them in
-`~/.local/share/prompt-workflow/` (`$XDG_DATA_HOME`; `%LOCALAPPDATA%\prompt-workflow\` on
-Windows). Each deployed file starts with `# prompt-workflow <version> (managed; edit at your own
-risk)`.
+with `espanso path config`, else Espanso's default folder) and keeps a manifest of them,
+`espanso-manifest.json`, in `~/.local/share/prompt-workflow/` (`$XDG_DATA_HOME`;
+`%LOCALAPPDATA%\prompt-workflow\` on Windows). Each deployed file starts with
+`# prompt-workflow <version> (managed; edit at your own risk)`.
 
 | Command | What it does |
 |---------|--------------|
@@ -226,20 +213,48 @@ content is still what we wrote, and reports any you edited. The launcher written
 matches is the install channel's stable entry point (uv's tool bin, Homebrew's `bin/`, Scoop's
 shim), never a versioned path an upgrade would remove; `--launcher PATH` overrides it.
 
-## Set up and manage
+## Updating
 
-Run `prompt-workflow` in a terminal (or `prompt-workflow ui`) for a full-screen interface with
-six tabs: Home (the `doctor` summary), Providers & keys, Profiles, Triggers, History and
-Diagnostics. It does what the [management commands](#management-commands) do, through the same
-code. Keys are shown only as set or not set, removing a key, deploying, detaching, migrating or
-deleting history asks first, and no provider is called except by the Test call button, which
-runs `improve` against a stub on `127.0.0.1` with a placeholder key.
+Install the new release over the old one, with its own `constraints.txt` (`--force` replaces
+the installed tool, an editable one included), then check the result:
 
-![The Home tab of the prompt-workflow interface](docs/interface.svg)
+```bash
+uv tool install --force \
+  https://github.com/vlastimilbures/espanso-prompt-rewriter/releases/download/v<version>/espanso_prompt_rewriter-<version>-py3-none-any.whl \
+  -c https://github.com/vlastimilbures/espanso-prompt-rewriter/releases/download/v<version>/constraints.txt
+prompt-workflow doctor
+```
 
-`1`-`6` switch tabs, `r` reloads, `t` switches to a high-contrast theme and `q` quits;
-`NO_COLOR` turns colour off. Scripts and screen readers can use the headless commands instead.
-Without a terminal, a bare `prompt-workflow` prints the help, as it always did.
+Upgrading the CLI does not touch the match files Espanso holds. If `doctor` reports one as
+`stale` (for example `prompts-template.yml: stale`), run `prompt-workflow espanso deploy` to
+bring it up to date.
+
+**Coming from a checkout** (the install scripts, an editable install): the wheel never reads the
+checkout's `.env`. Before switching, run `prompt-workflow config migrate` from the editable
+install (0.16 or later) to move the settings to `config.toml` and the key to `secrets.toml`, or
+move the `.env` to the config folder (`~/.config/prompt-workflow/.env`,
+`%APPDATA%\prompt-workflow\.env` on Windows), where the wheel reads it too. A guided path is
+planned (#110).
+
+## Uninstall
+
+Detach before you uninstall: once the CLI is gone, every trigger that calls it fails with
+Espanso's rendering error.
+
+1. `prompt-workflow espanso detach` removes the matches that call the CLI and keeps `-prompt-`
+   and `-risk-` as static snippets (`--keep-static`, the default); `--remove-all` removes every
+   file it deployed. A file you edited is kept and reported, and the `.bak-…` backups are never
+   deleted.
+2. Optionally, and only if you want them gone: `prompt-workflow history reset` deletes the
+   usage history, and `prompt-workflow secrets remove OPENROUTER_API_KEY` (or
+   `ANTHROPIC_API_KEY`) deletes a saved key. The config folder (`config.toml`, `profiles/`,
+   `backups/`) and the data folder stay until you delete them.
+3. `uv tool uninstall espanso-prompt-rewriter`.
+
+If the CLI is already broken or gone, install it again (see [Install](#install)), then detach.
+Or clean up by hand: `espanso-manifest.json` in the data folder lists each deployed file as
+`target` and its `backups`; delete the targets in Espanso's `match/` folder, restore a backup
+if you want your earlier version back, and restart Espanso.
 
 ## Usage
 
@@ -324,7 +339,7 @@ at its max-tokens cap, the partial rewrite is pasted with
 | Command | What it does |
 |---------|--------------|
 | `prompt-workflow --version` | Prints the installed version |
-| `prompt-workflow` / `prompt-workflow ui` | Opens the [full-screen interface](#set-up-and-manage) when stdin and stdout are a terminal. Otherwise a bare `prompt-workflow` prints the help and exits 2, and `ui` exits 3 |
+| `prompt-workflow` / `prompt-workflow ui` | Opens the [full-screen interface](#first-run) when stdin and stdout are a terminal. Otherwise a bare `prompt-workflow` prints the help and exits 2, and `ui` exits 3 |
 | `prompt-workflow setup` | First run: provider and default profile (saved in `config.toml`), the API key (hidden prompt), a deploy preview it applies only if you agree, and a smoke test that runs `improve` against a stub on `127.0.0.1` (never a paid call, never your real key). If your settings are in a `.env`, it offers to migrate them and changes nothing unless you say yes. `--non-interactive` asks nothing (key with `--api-key-stdin`; the deploy stays a preview unless `--deploy`) |
 | `prompt-workflow config show [--raw]` | Every setting, its value and where it comes from (default, a file or the environment), and which lower files it overrides. Keys and the persona are shown only as set or not set |
 | `prompt-workflow config get NAME` / `set NAME VALUE` / `unset NAME` | Read one setting; save it in `config.toml` after checking it as the CLI reads it; remove it so the default applies. A key is refused here |
@@ -337,9 +352,16 @@ at its max-tokens cap, the partial rewrite is pasted with
 | `prompt-workflow history export [--format json\|csv] [-o FILE]` / `prune [--older-than DAYS]` / `reset` | Exports (metadata only), deletes old records (asking first when the age is shorter than `PROMPT_HISTORY_RETENTION_DAYS`), or deletes them all |
 | `prompt-workflow doctor [--json]` | Version, CLI path and install channel, config validity, keys set or not, Espanso found and running, each deployed match file (`in sync`, `stale`, `modified`, `missing`), launcher drift, history health, SQLite version, and a clipboard read test that reports only the length. Safe to paste into an issue: it never shows a key, your persona or clipboard text |
 
-`stats` reports local observations on this device, not provider billing. A call counts once the
-CLI rendered its output, which does not mean it was pasted. Triggers that name a provider (`-i-`,
-`-ip-`, `-if-`, `-iok-`, `-il-`, `-ilm-`) ignore `PROMPT_PROVIDER`.
+`stats` reports local observations on this device, not provider billing: check your provider's
+dashboard for what you were charged. Read it with these caveats:
+
+- Costs are summed per unit as the provider reported them. OpenRouter reports credits, which are
+  never converted to USD; a BYOK call's upstream cost (USD) is kept in the history and its
+  export but not added to the totals. Estimates from `prices.toml` are shown apart.
+- An unknown cost is counted as unknown (`N attempt(s) with an unknown cost`), never as 0.
+- A call counts once the CLI rendered its output, which does not mean it was pasted.
+- Triggers that name a provider (`-i-`, `-ip-`, `-if-`, `-iok-`, `-il-`, `-ilm-`) ignore
+  `PROMPT_PROVIDER`, so changing it does not move their calls to another provider.
 
 Unlike `improve` and `persona`, these commands print errors to stderr and use ordinary exit
 codes. None of them asks a question without a terminal (pass `--yes`, `--stdin` or
@@ -368,8 +390,8 @@ The CLI reads its settings from the first of these that exists:
 2. `config.toml` in the config folder: `~/.config/prompt-workflow/` (`%APPDATA%\prompt-workflow\`
    on Windows). Once it exists, it is the saved configuration and no `.env` is read, so an old
    `.env` can never override a saved value.
-3. the `.env` in the repository the CLI was installed from (the installers use an editable
-   install);
+3. the `.env` in the repository the CLI was installed from, for an editable install only
+   (the [Development](#development) scripts); a wheel install never reads a checkout;
 4. the `.env` in the config folder.
 
 Unless `PROMPT_WORKFLOW_ENV` is set, API keys are also read from `secrets.toml` in the config
@@ -382,8 +404,12 @@ folder, which wins over a key in a `.env`. Order of precedence: built-in default
 macOS/Linux, an access list for your account alone on Windows). An existing `.env` can be
 migrated to both after a preview and your confirmation: values equal to their default are
 left out, the `.env` is moved into `backups/` in the config folder rather than deleted, and a
-rollback restores it exactly. The commands that drive this are planned (#92). A keychain is not
-supported yet.
+rollback restores it exactly: `prompt-workflow config migrate` and `prompt-workflow config
+rollback` (both show a preview first). With `PROMPT_WORKFLOW_ENV` set (legacy mode), that `.env` stays
+the only settings file: nothing is migrated, and `config set` and `secrets` refuse to write, so
+edit the file itself. A keychain is
+not supported yet. [Your own profiles](#profiles-and-persona) live in `profiles/` in the same
+config folder.
 
 It never reads a settings file from the current directory, so running the CLI inside some
 other project cannot change its endpoint or switch off the gate. Only the settings in the table
@@ -614,6 +640,10 @@ request it made (a retried request counts twice, in the same run). It is on by d
   recorded run also deletes up to 100 of the oldest records past that age, so the history
   stays within it without a separate clean-up (after lowering the setting, a large backlog goes
   over the next few runs).
+- **Export, prune, reset:** `prompt-workflow history export [--format json|csv] [-o FILE]`
+  writes every record (the same metadata, nothing more), `history prune [--older-than DAYS]`
+  deletes older records now, and `history reset` deletes them all. Uninstalling does not delete
+  the history (see [Uninstall](#uninstall)).
 - **Off:** `prompt-workflow config set PROMPT_HISTORY false` (or `PROMPT_HISTORY=false` in your
   `.env`), then `prompt-workflow history reset` to delete what is there. `setup` and `stats`
   say that the history is on, what it stores and where.
@@ -737,7 +767,9 @@ uv run python scripts/bench_models.py --profile general --suite all       # the 
 |---------|-----|
 | Trigger does not expand right after a letter, digit, `-` or `=`, or in a field you emptied with the keyboard | Triggers only fire at the start of a word, judged by what you last typed. Type a space first, or click into the field. |
 | Trigger does not expand | Run `espanso status`, then `prompt-workflow espanso status`, then `prompt-workflow espanso deploy`. |
-| `[Espanso]: An error occurred during rendering` | Run `prompt-workflow doctor`. It usually reports a match file as `stale` (an older deploy, for example `prompts-template.yml: stale` after an upgrade) or a deployed launcher that is gone; `prompt-workflow espanso deploy` fixes both. |
+| `[Espanso]: An error occurred during rendering` | The CLI the matches call is gone or broken: the checkout of an editable install was moved or deleted, or the tool was uninstalled without `espanso detach`. `prompt-workflow doctor` (once a CLI runs again) reports `launcher: the deployed matches call …, which is gone`. Install it again (see [Install](#install)), then run `prompt-workflow espanso deploy`, or `espanso detach` to remove the triggers. |
+| `doctor` reports `launcher: the deployed matches call …, this install is …` | Launcher drift: the matches call another install of the CLI than the one you just ran (say, an old checkout after switching to a release wheel). Run `prompt-workflow espanso deploy` from the install you want the triggers to use. |
+| `doctor` reports `prompts-template.yml: stale` (or another match file) | The deployed match files are from an older version, so `-p-` and the `-if-` lists differ from the CLI. Run `prompt-workflow espanso deploy`. |
 | Not sure what is wrong | `prompt-workflow doctor` checks the install, settings, keys, Espanso, the match files and the history; `prompt-workflow config validate` checks the settings alone. |
 | `[prompt-workflow: OPENROUTER_API_KEY is not configured]` | The key is missing from `.env` (or `secrets.toml`), or the file is not in one of the [places the CLI looks](#configuration). Once `config.toml` exists, a `.env` is no longer read. |
 | `[prompt-workflow: config.toml is not valid TOML (at line …)]` | Fix that line of `config.toml` in the config folder (`secrets.toml` likewise). |
@@ -772,6 +804,24 @@ its local server, then check it answers: `curl http://localhost:11434/api/tags` 
 uv sync                  # installs the dev tools too
 uv run pytest            # unit tests, no network
 ```
+
+To use a checkout with Espanso, install it as an editable tool instead of a release wheel:
+
+```bash
+./scripts/install_macos.sh      # macOS
+.\scripts\install_windows.ps1   # Windows (PowerShell)
+```
+
+The script runs `uv tool install --editable` pinned to `uv.lock` (and checks the tool venv
+against it), then `prompt-workflow espanso deploy --yes`, which writes the match files with the
+CLI's absolute path and restarts Espanso. It never touches Espanso's `config/` folder (the old
+`--with-config` / `-WithConfig` option is gone). The Windows script runs on Windows PowerShell
+5.1 and PowerShell 7; you may first need `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
+On Linux, run `uv tool install --editable .` and `prompt-workflow espanso deploy`. An editable
+install runs the code and profiles straight from the checkout, so a `git pull` or a branch
+switch changes `-i-` at once, while the match files change only on the next deploy. It also
+reads a `.env` in the checkout; keep the one holding your key in the config folder instead
+(`chmod 600` it), where a careless `git add` cannot pick it up.
 
 [CONTRIBUTING.md](CONTRIBUTING.md) has the full checks, the project layout and how to add a
 profile, trigger, setting or provider. CI runs lint and type checks once, and the tests on macOS,

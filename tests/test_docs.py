@@ -46,3 +46,58 @@ def test_documented_bench_outdirs_are_ignored():
         probe = f"{outdir.rstrip('/')}/results.json"
         ignored = subprocess.run([git, "check-ignore", "-q", probe], cwd=REPO, check=False)
         assert ignored.returncode == 0, outdir
+
+
+_FENCE = re.compile(r"^```[^\n]*\n(.*?)^```", re.MULTILINE | re.DOTALL)
+_INVOCATION = re.compile(r"(?<![\w/\\-])prompt-workflow(?![\w:-])([^`\n#]*)")
+_FLAG = re.compile(r"(?<![\w-])(--?[a-zA-Z][\w-]*)")
+
+
+def _documented_invocations(text: str) -> list[str]:
+    """What follows `prompt-workflow` in each code block line and inline code span (a
+    comment cut off), e.g. ` history export [--format json|csv] [-o FILE]`."""
+    blocks = _FENCE.findall(text)
+    spans = [
+        *(line for b in blocks for line in b.splitlines()),
+        *re.findall(r"`([^`\n]+)`", _FENCE.sub("", text)),
+    ]
+    return [m for span in spans for m in _INVOCATION.findall(span)]
+
+
+def _changelog_unreleased() -> str:
+    changelog = (REPO / "CHANGELOG.md").read_text("utf-8")
+    return changelog.split("## Unreleased", 1)[1].split("\n## ", 1)[0]
+
+
+# Every `prompt-workflow <command> [<subcommand>] --flag` the README (and the CHANGELOG's
+# Unreleased notes) names exists in the CLI, so a renamed command or option cannot leave the
+# docs behind. Walks the Click tree; the lazy commands load their modules, never textual.
+@pytest.mark.parametrize("doc", ["README.md", "CHANGELOG.md"])
+def test_documented_commands_and_flags_exist(doc):
+    import typer
+
+    from prompt_workflow import cli
+
+    root = typer.main.get_command(cli.app)
+    ctx = root.make_context("prompt-workflow", ["--help"], resilient_parsing=True)
+    text = (REPO / doc).read_text("utf-8")
+    invocations = _documented_invocations(text if doc == "README.md" else _changelog_unreleased())
+    assert invocations, f"{doc} names no prompt-workflow command; drop or adapt this test"
+    for rest in invocations:
+        command, words = root, rest.split()
+        while words and isinstance(command, typer.core.TyperGroup):
+            word = words[0]
+            if not re.fullmatch(r"[a-z]+", word):
+                break
+            sub = command.get_command(ctx, word)
+            assert sub is not None, f"{doc}: `prompt-workflow{rest}`: no command {word!r}"
+            command, words = sub, words[1:]
+        known = {"--help", *(o for p in command.params for o in (*p.opts, *p.secondary_opts))}
+        for flag in _FLAG.findall(" ".join(words)):
+            assert flag in known, f"{doc}: `prompt-workflow{rest}`: no option {flag}"
+
+
+def test_readme_has_no_package_placeholders():
+    readme = (REPO / "README.md").read_text("utf-8")
+    for placeholder in ("<owner>/<tap>", "<bucket>", "<Publisher.Package>"):
+        assert placeholder not in readme
