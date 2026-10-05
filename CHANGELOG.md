@@ -19,6 +19,11 @@ All notable changes to this project are documented here. The format follows
   tier's latency is quoted from the 2026-10-04 bench (median 5.6 s, p95 9.2 s) everywhere;
   CONTRIBUTING says CI runs the tests with `--cov` and a 95 % floor, and its project tree lists
   `previous_install.py` (a test now checks the tree names every module).
+- The benchmark's method and result tables moved from README to `docs/benchmark.md` (#40);
+  README keeps a short "Model benchmark" summary (the default models, their pass counts and
+  latency) and links there. Each results heading now names the release whose prompt it scored
+  (the current table: the prompt of v0.14.0, unchanged since), and the README's
+  example output says it came from v0.7.0 on `google/gemini-3.5-flash-lite`.
 
 ### Removed
 - The unshipped candidate prompts `docs/prompt-candidates/B.md` to `I2.md` (#41). They stay in

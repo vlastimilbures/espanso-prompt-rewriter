@@ -174,3 +174,48 @@ def test_readme_has_no_package_placeholders():
     readme = (REPO / "README.md").read_text("utf-8")
     for placeholder in ("<owner>/<tap>", "<bucket>", "<Publisher.Package>"):
         assert placeholder not in readme
+
+
+# The release whose default prompt the benchmark's newest results score, pinned to the prompt's
+# digest: a change to prompts/default.md fails here until both are updated (set the version to
+# the release that ships the change) and docs/benchmark.md gets results for the new prompt.
+_PROMPT_CHANGED_IN = (0, 14, 0)
+_PROMPT_DIGEST = "700477404c98fb3514632657156246af792711a9a81403c24781dbd0b3dbece9"
+
+
+def _result_headings() -> list[str]:
+    text = (REPO / "docs" / "benchmark.md").read_text("utf-8")
+    results = re.search(r"^## Results\n(.*?)(?=^## |\Z)", text, re.MULTILINE | re.DOTALL)
+    assert results, "docs/benchmark.md has no '## Results' section"
+    return re.findall(r"^### (.+)$", results.group(1), re.MULTILINE)
+
+
+def test_benchmark_prompt_pin_is_current():
+    import hashlib
+
+    prompt = (REPO / "src" / "prompt_workflow" / "prompts" / "default.md").read_bytes()
+    assert hashlib.sha256(prompt).hexdigest() == _PROMPT_DIGEST, (
+        "prompts/default.md changed: update _PROMPT_DIGEST and _PROMPT_CHANGED_IN, and add "
+        "benchmark results for the new prompt to docs/benchmark.md"
+    )
+
+
+# Every results table names the prompt version it scored, newest first, and the newest scores
+# the current prompt, so a table cannot pass for the current prompt's after a prompt change.
+def test_benchmark_results_name_their_prompt_version():
+    headings = _result_headings()
+    assert headings, "docs/benchmark.md lists no results"
+    versions = []
+    for heading in headings:
+        found = re.search(r"prompt of v(\d+)\.(\d+)\.(\d+)", heading, re.IGNORECASE)
+        assert found, f"docs/benchmark.md: {heading!r} names no prompt version"
+        versions.append(tuple(map(int, found.groups())))
+    assert versions[0] >= _PROMPT_CHANGED_IN, f"{headings[0]!r} predates the current prompt"
+    assert versions == sorted(versions, reverse=True), "results are not newest first"
+
+
+def test_readme_benchmark_summary_links_the_details():
+    readme = (REPO / "README.md").read_text("utf-8")
+    section = re.search(r"^## Model benchmark\n(.*?)(?=^## )", readme, re.MULTILINE | re.DOTALL)
+    assert section, "README lost its '## Model benchmark' section (#model-benchmark links)"
+    assert "](docs/benchmark.md)" in section.group(1)
