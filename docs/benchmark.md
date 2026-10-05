@@ -34,7 +34,7 @@ keep those outputs to yourself.
 Each heading names the release whose `default` prompt was scored. The prompt is unchanged
 between releases a heading spans; a release that changes it gets new results.
 
-### Current: prompt of v0.14.0 (unchanged through 0.17.0)
+### Current: prompt of v0.14.0 (unchanged since)
 
 Run on 2026-10-04 with `--persona example` and `--max-tokens 2400`:
 

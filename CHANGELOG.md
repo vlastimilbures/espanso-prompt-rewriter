@@ -22,7 +22,7 @@ All notable changes to this project are documented here. The format follows
 - The benchmark's method and result tables moved from README to `docs/benchmark.md` (#40);
   README keeps a short "Model benchmark" summary (the default models, their pass counts and
   latency) and links there. Each results heading now names the release whose prompt it scored
-  (the current table: the prompt of v0.14.0, unchanged through 0.17.0), and the README's
+  (the current table: the prompt of v0.14.0, unchanged since), and the README's
   example output says it came from v0.7.0 on `google/gemini-3.5-flash-lite`.
 
 ### Removed

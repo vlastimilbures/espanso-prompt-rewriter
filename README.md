@@ -752,7 +752,7 @@ An estimate is stored with the table's `version` and always shown apart from rep
 The default models and prompt were chosen with a benchmark
 ([`scripts/bench_models.py`](scripts/bench_models.py)) that scores every rewrite mechanically
 for template fidelity, prompt injection and language edge cases, latency and real cost. With the
-prompt of v0.14.0 (unchanged through 0.17.0):
+prompt of v0.14.0 (unchanged since):
 
 - `-i-` (standard tier): `google/gemini-3.5-flash-lite` on `google-ai-studio/flex`, effort
   `minimal`: 30/30 core and 102/120 edge runs passed, 2.0 s median and 3.2 s p95.
