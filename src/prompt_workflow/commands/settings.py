@@ -307,7 +307,7 @@ def config_rollback(
     if not _consent(plan.describe(), plan.token, dry_run=dry_run, yes=yes, given=preview_token):
         return
     config_store.apply_rollback(consent=plan.token)
-    typer.echo("Rolled back: the .env is read again.")
+    typer.echo("Rolled back: the .env is read again." if plan.read_again else "Rolled back.")
 
 
 @config_app.command("retire")

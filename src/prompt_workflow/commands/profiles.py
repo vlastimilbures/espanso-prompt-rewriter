@@ -71,7 +71,11 @@ def profiles_migrate(
     pristine = service.git_pristine_profiles(root, rev)
     changed = service.changed_profiles(source, pristine)
     if not changed:
-        typer.echo("No added or edited profiles; nothing to copy.")
+        typer.echo(
+            service.NOTHING_CHANGED
+            if rev is None
+            else f"No added or edited profiles since {rev}; nothing to copy."
+        )
         return
     dest = user_profiles_dir()
     for name, change in changed.items():
@@ -82,8 +86,6 @@ def profiles_migrate(
     common.confirm("Copy these profiles?", yes=yes)
     for item in service.migrate_profiles(source, pristine, dest):
         typer.echo(f"  {item.name}: {item.status}")
-    if "default" in changed:
-        typer.echo(
-            "A copied default.md is used only once PROMPT_PROFILE_OVERRIDES includes default: "
-            "`prompt-workflow config set PROMPT_PROFILE_OVERRIDES default`."
-        )
+    hint = service.overrides_hint(changed, common.load_layers()[1].profile_overrides)
+    if hint:
+        typer.echo(hint)

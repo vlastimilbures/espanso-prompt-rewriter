@@ -7,14 +7,22 @@ user file is never overwritten.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from .prompt_builder import PROFILE_NAME, user_profiles_dir
+from .prompt_builder import PROFILE_NAME, PROFILES, user_profiles_dir
 
 # Where a checkout keeps the built-in profiles, relative to its root.
 PROMPTS_PATH = "src/prompt_workflow/prompts"
+
+# What `profiles migrate` and the interface say when the comparison with git finds nothing:
+# without --rev a profile committed on a branch with no upstream counts as pristine.
+NOTHING_CHANGED = (
+    "No added or edited profiles; nothing to copy. Compared with the commit the branch shares "
+    "with its upstream (HEAD without one); to compare with an older commit: "
+    "`prompt-workflow profiles migrate --rev <commit>`."
+)
 
 # Migration.status values.
 COPIED = "copied"
@@ -85,6 +93,21 @@ def git_pristine_profiles(checkout: Path, rev: str | None = None) -> dict[str, s
         return pristine
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, UnicodeDecodeError) as exc:
         raise ValueError(f"git could not read {PROMPTS_PATH} at {rev}") from exc
+
+
+def overrides_hint(names: Iterable[str], current: Collection[str] = ()) -> str | None:
+    """How to use the copied files named like a built-in: each is read only once
+    PROMPT_PROFILE_OVERRIDES lists it (never a silent swap). None when there is none, or
+    ``current`` (the setting's value now) already lists them all."""
+    builtins = [name for name in names if name in PROFILES and name not in current]
+    if not builtins:
+        return None
+    value = ",".join(dict.fromkeys([*current, *builtins]))
+    files = ", ".join(f"{name}.md" for name in builtins)
+    return (
+        f"Your {files} replaces the built-in only once PROMPT_PROFILE_OVERRIDES lists it: "
+        f"`prompt-workflow config set PROMPT_PROFILE_OVERRIDES {value}`."
+    )
 
 
 def migrate_profiles(

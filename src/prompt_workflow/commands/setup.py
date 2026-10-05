@@ -113,17 +113,18 @@ def _settings_writable(
         command += f" --from {root}"
         typer.echo(
             f"  Your settings are in {root}'s .env. Copying them to config.toml and the "
-            "secret store:"
+            "secret store would do this:"
         )
     else:
         typer.echo(
-            "  Your settings are in a .env. Moving them to config.toml and the secret store:"
+            "  Your settings are in a .env. Moving them to config.toml and the secret store "
+            "would do this:"
         )
     for line in plan.describe():
         typer.echo(f"    {line}")
-    verb = "copy" if plan.copy is not None else "move"
+    what = f"copy the settings of {root}" if plan.copy is not None else "move the .env settings"
     if not interactive:
-        steps.later(f"run `{command}` to {verb} them (setup changed nothing)")
+        steps.later(f"{what}: `{command}` (setup changed nothing)")
         return False
     question = "Copy" if plan.copy is not None else "Migrate"
     if not typer.confirm(
@@ -152,14 +153,18 @@ def _profiles_step(steps: _Steps, root: Path, interactive: bool) -> None:
     typer.echo(f"  Profiles added or edited in {root}:")
     for name, change in changed.items():
         typer.echo(f"    {name}.md ({change})")
+    what = f"copy the profiles added or edited in {root}"
     if not interactive:
-        steps.later(f"copy them: `{command}`")
+        steps.later(f"{what}: `{command}`")
         return
     if not typer.confirm("  Copy them to your profile folder (never overwrites)?", default=False):
-        steps.later(f"copy them later: `{command}`")
+        steps.later(f"{what} later: `{command}`")
         return
     for item in profiles.migrate_profiles(source, pristine):
         typer.echo(f"    {item.name}.md: {item.status}")
+    hint = profiles.overrides_hint(changed, common.load_layers()[1].profile_overrides)
+    if hint:
+        typer.echo(f"  {hint}")
 
 
 def _retire_step(steps: _Steps, espanso_dir: str | None, interactive: bool) -> None:

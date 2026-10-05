@@ -297,7 +297,11 @@ def test_profiles_check(monkeypatch):
     folder.mkdir(parents=True)
     (folder / "general.md").write_text("x", "utf-8")
     check = doctor._profiles_check(Settings())
-    assert (check.status, check.message) == ("warn", "general: shadowed")
+    hint = (
+        "Your general.md replaces the built-in only once PROMPT_PROFILE_OVERRIDES lists it: "
+        "`prompt-workflow config set PROMPT_PROFILE_OVERRIDES general`."
+    )
+    assert (check.status, check.message) == ("warn", f"general: shadowed; {hint}")
     assert {"name": "general", "status": "shadowed"} in check.data["user"]
 
 
@@ -310,3 +314,14 @@ def test_a_check_that_raises_is_reported(no_clipboard, espanso, monkeypatch):
     check = _status("cli", report)
     assert (check.status, check.message) == ("fail", "check failed: RuntimeError: boom")
     assert report.status == "fail"
+
+
+def test_overrides_hint_keeps_the_names_already_listed():
+    from prompt_workflow.profiles import overrides_hint
+
+    assert overrides_hint(["mine", "default-pro"]) is None  # not a built-in
+    assert overrides_hint(["general"], ("general",)) is None
+    hint = overrides_hint(["mine", "general"], ("default",))
+    assert hint is not None
+    assert hint.startswith("Your general.md replaces")
+    assert hint.endswith("`prompt-workflow config set PROMPT_PROFILE_OVERRIDES default,general`.")

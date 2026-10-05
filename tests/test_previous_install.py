@@ -809,6 +809,10 @@ def test_rollback_of_a_copy_leaves_the_old_env_alone(tmp_path, espanso, env):
     active.write_text("OLLAMA_MODEL=mine\n", "utf-8")
     deploy_old(espanso, str(venv_launcher(root)))
     _copy(root)
+    plan = config_store.plan_rollback()
+    # The moved user-config .env is read again; the copied checkout's never is.
+    assert (plan.unread, plan.read_again) == ((root.resolve(),), True)
+    assert f"This install does not read {root.resolve() / '.env'}" in plan.describe()[-1]
     _rollback()
     assert active.read_text("utf-8") == "OLLAMA_MODEL=mine\n"
     assert (root / ".env").read_bytes() == original
@@ -829,6 +833,7 @@ def test_rollback_after_a_retire_puts_the_old_env_back(tmp_path, espanso, env):
     assert [(s.name, o) for s, o in rollback.restores] == [
         ("1-checkout.env.inactive", root.resolve() / ".env")
     ]
+    assert not rollback.read_again
     _rollback()
     assert (root / ".env").read_bytes() == original
     assert not config.settings_file().exists()
@@ -942,7 +947,8 @@ def test_setup_non_interactive_offers_the_copy_and_writes_nothing(
     )
     assert result.exit_code == 0, result.output
     assert f"Previous install: {root.resolve()} (launcher)" in result.stdout
-    assert f"to do: run `prompt-workflow config migrate --from {root.resolve()}`" in result.stdout
+    todo = f"to do: copy the settings of {root.resolve()}: `prompt-workflow config migrate --from"
+    assert todo in result.stdout
     assert "Taken from" in result.stdout
     assert COPIED_KEY not in result.output
     assert not config.settings_file().exists()
@@ -1025,3 +1031,18 @@ def test_setup_copies_with_consent_then_offers_retire_after_the_deploy(
     assert not (root / ".env").exists()
     assert Settings.load().openrouter_api_key == COPIED_KEY
     assert COPIED_KEY not in result.output
+
+
+def test_rollback_of_a_retired_copy_never_says_the_env_is_read_again(tmp_path, espanso, env):
+    root = old_checkout(tmp_path)
+    _copy(root)
+    plan = config_store.plan_retire(root, espanso_dir=espanso)
+    config_store.apply_retire(root, espanso_dir=espanso, consent=plan.token)
+    preview = _cli("config", "rollback", "--dry-run").stdout
+    assert f"This install does not read {root.resolve() / '.env'}" in preview
+    assert f"`prompt-workflow config migrate --from {root.resolve()}`" in preview
+    token = preview.split("Preview token: ")[1].split()[0]
+    result = _cli("config", "rollback", "--yes", "--preview-token", token)
+    assert result.exit_code == 0, result.output
+    assert result.stdout.endswith("Rolled back.\n")
+    assert (root / ".env").is_file()

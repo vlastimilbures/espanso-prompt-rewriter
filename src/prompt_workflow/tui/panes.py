@@ -538,7 +538,7 @@ def copy_profiles(owner: Reporter, root: Path | None) -> None:
         owner.report(f"error: {exc}", error=True)
         return
     if not changed:
-        owner.report("No added or edited profiles; nothing to copy.")
+        owner.report(profile_service.NOTHING_CHANGED)
         return
     dest = user_profiles_dir()
     preview = "\n".join(
@@ -548,22 +548,21 @@ def copy_profiles(owner: Reporter, root: Path | None) -> None:
 
     def done(yes: bool | None) -> None:
         if yes:
-            owner.attempt(lambda: _copy(source, pristine, dest, "default" in changed))
+            owner.attempt(lambda: _copy(source, pristine, dest, list(changed)))
 
     cast("Widget", owner).app.push_screen(
         ConfirmModal("Copy these profiles? (copies only, never overwrites)", preview), done
     )
 
 
-def _copy(source: Path, pristine: dict[str, str], dest: Path, default: bool) -> str:
+def _copy(source: Path, pristine: dict[str, str], dest: Path, names: list[str]) -> str:
     lines = [
         f"{item.name}: {item.status}"
         for item in profile_service.migrate_profiles(source, pristine, dest)
     ]
-    if default:
-        lines.append(
-            "A copied default.md is used only once PROMPT_PROFILE_OVERRIDES includes default."
-        )
+    hint = profile_service.overrides_hint(names, common.load_layers()[1].profile_overrides)
+    if hint:
+        lines.append(hint)
     return "\n".join(lines)
 
 

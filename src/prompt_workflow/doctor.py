@@ -349,7 +349,7 @@ def _clipboard_check(read: bool) -> Check:
 
 
 def _profiles_check(settings: config.Settings) -> Check:
-    from .prompt_builder import ADDED, OVERRIDES, system_prompt, user_profiles
+    from .prompt_builder import ADDED, OVERRIDES, SHADOWED, system_prompt, user_profiles
 
     found = user_profiles(settings.profile_overrides)
     data: dict[str, Any] = {
@@ -364,7 +364,11 @@ def _profiles_check(settings: config.Settings) -> Check:
             return Check("profiles", FAIL, str(exc), data)
     odd = [f"{p.name}: {p.status}" for p in found if p.status not in (ADDED, OVERRIDES)]
     if odd:
-        return Check("profiles", WARN, "; ".join(odd), data)
+        from .profiles import overrides_hint
+
+        shadowed = [p.name for p in found if p.status == SHADOWED]
+        hint = overrides_hint(shadowed, settings.profile_overrides)
+        return Check("profiles", WARN, "; ".join(odd + ([hint] if hint else [])), data)
     return Check("profiles", OK, f"PROMPT_PROFILE {settings.profile} resolves", data)
 
 
