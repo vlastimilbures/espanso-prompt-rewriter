@@ -278,6 +278,11 @@ then `uv tool install --force <wheel> -c constraints.txt`, `prompt-workflow doct
   symlink to it) is never replaced; set `toggle_key` or `search_shortcut` there yourself if
   you want them. The scripts now refuse the old option with a message.
 
+### Fixed
+- `setup`'s smoke test and the interface's Test call no longer add a row to the usage history
+  (#116): the `improve` they run against the stub on 127.0.0.1 runs with
+  `PROMPT_HISTORY=false`, so `stats` shows only real use.
+
 ## 0.15.0 - 2026-10-04
 
 Upgrading: `OPENROUTER_REASONING_EFFORT` and `OPENROUTER_PRO_REASONING_EFFORT` are now checked

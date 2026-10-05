@@ -435,6 +435,26 @@ def test_providers_test_call_uses_the_stub_service(espanso, monkeypatch):
     assert called == ["ollama"]
 
 
+def test_providers_test_call_adds_no_history_row(espanso, monkeypatch):
+    """#116: the real Test call (a child improve against the stub) is not usage."""
+    monkeypatch.setenv("PROMPT_HISTORY", "true")
+    store = HistoryStore(history.history_path())
+
+    async def scenario(app, pilot):
+        await pilot.press("2")
+        await press(app, pilot, "#smoke")
+        await fill(app, pilot, provider="ollama")
+        for _ in range(100):  # the child process runs in a worker
+            if pane(app, "providers").last_message.startswith("ok: "):
+                break
+            await asyncio.sleep(0.1)
+            await settle(pilot)
+        assert pane(app, "providers").last_message.startswith("ok: improve reached the stub")
+
+    drive(scenario)
+    assert store.health().operations in (None, 0)
+
+
 # --- Profiles -----------------------------------------------------------------------------
 
 

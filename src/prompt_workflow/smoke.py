@@ -5,6 +5,7 @@ a paid call or a key leaving the machine.
 A child process runs `python -m prompt_workflow.cli improve --provider <name> ...` (the same
 code a trigger runs) with every provider base URL pointed at the stub and a placeholder key
 in place of the real one, set as environment variables, which outrank every settings file.
+The usage history is switched off the same way: a health check is not usage (#116).
 """
 
 from __future__ import annotations
@@ -77,7 +78,7 @@ class SmokeResult:
 
 
 def stub_env(port: int, environ: Mapping[str, str]) -> dict[str, str]:
-    """``environ`` with every provider pointed at the stub and placeholder keys."""
+    """``environ`` with every provider pointed at the stub, placeholder keys and no history."""
     base = f"http://127.0.0.1:{port}"
     return {
         **environ,
@@ -87,6 +88,7 @@ def stub_env(port: int, environ: Mapping[str, str]) -> dict[str, str]:
         "LMSTUDIO_BASE_URL": f"{base}/v1",
         "OPENROUTER_API_KEY": PLACEHOLDER_KEY,
         "ANTHROPIC_API_KEY": PLACEHOLDER_KEY,
+        "PROMPT_HISTORY": "false",
     }
 
 
