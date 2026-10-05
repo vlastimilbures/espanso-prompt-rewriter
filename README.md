@@ -17,9 +17,10 @@ rewritten by a local or cloud model.
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://github.com/pre-commit/pre-commit)
 
 One small Python CLI sits behind every trigger. It reads your clipboard, checks the draft for
-sensitive content before anything leaves your machine, asks the model to rewrite it into a fixed
-template, and pastes the result back — or a readable `[prompt-workflow: …]` message if something
-went wrong. It works the same way on macOS and Windows, with
+sensitive content before anything leaves your machine, sends it with the rewrite instructions
+(including your persona, if you set one, which is not checked) to the model, and pastes the
+result back — or a readable `[prompt-workflow: …]` message if something went wrong. See
+[What is sent, and to whom](#what-is-sent-and-to-whom). It works the same way on macOS and Windows, with
 [OpenRouter](https://openrouter.ai), [Anthropic](https://www.anthropic.com),
 [Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai).
 
@@ -632,6 +633,40 @@ survive. One selector or joiner can still follow each non-ASCII character, so a 
 a few bits per character remains in non-Latin text, but none in English prose. The same
 characters are removed from the draft before it is sent. Still read a rewrite before running
 anything it contains.
+
+### What is sent, and to whom
+
+Each call is one HTTP request (two when a rate limit or an unavailable upstream is retried)
+carrying:
+
+- **the draft**, after the gate above and the clean-up of invisible characters;
+- **the system prompt**: the profile's instructions, and with the `default` profile (or your
+  own profile using `{{PERSONA_RULE}}`) your `PROMPT_PERSONA` sentence, word for word. It goes
+  with every call and is **not** scanned by the gate: an email, a company name or one of your
+  `PROMPT_EXTRA_PATTERNS` in the persona is sent even where the same text in the draft would be
+  blocked. Keep the persona to what you are happy to send to every recipient below;
+- the model name and request settings (temperature, maximum tokens; for OpenRouter also the
+  reasoning effort and the endpoint preference);
+- the API key, only as the authentication header (`Authorization: Bearer …` for OpenRouter,
+  `x-api-key` for Anthropic; none for Ollama or LM Studio).
+
+Who receives it:
+
+| Provider | Recipients |
+|---|---|
+| OpenRouter (`-i-`, `-iok-`, `-ip-`, `-if-`) | OpenRouter, and the upstream endpoint that serves the model: the one pinned by `OPENROUTER_PROVIDER` (`OPENROUTER_PRO_PROVIDER` for `-ip-`, the form's pick for `-if-`), or another endpoint serving the same model when OpenRouter falls back, which `OPENROUTER_ALLOW_FALLBACKS` allows by default (`false` makes the pin binding). An empty pin leaves the choice to OpenRouter. The request also carries an `X-Title: espanso-prompt-rewriter` header, which attributes the calls to this app in OpenRouter's dashboard (the benchmark script sends `espanso-prompt-rewriter-bench`). |
+| Anthropic (`-ic-`, commented out) | Anthropic (`ANTHROPIC_BASE_URL`). |
+| Ollama / LM Studio on `localhost` (`-il-`, `-ilm-`) | Nobody else: the model runs on this machine. These triggers use the `general` profile, which has no persona. |
+| Ollama / LM Studio at another address, or an Ollama `cloud` model | That server, or ollama.com for a cloud model; the gate applies as for the cloud providers. |
+
+How long each recipient keeps the request and whether it may train on it is set by them, not by
+this tool: see OpenRouter's privacy and data settings for your account (they cover which
+upstream endpoints it may route to) and the privacy terms of the upstream provider or of
+Anthropic.
+
+What never leaves this machine: the usage history (below), your settings files and keys (a key
+only as the authentication header of its own provider), and anything else on the clipboard
+before or after the trigger.
 
 ### Usage history
 

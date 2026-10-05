@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Changed
+- README "Privacy and data protection" has a new "What is sent, and to whom" section (#29): the
+  system prompt, including your `PROMPT_PERSONA`, goes with every call and is not scanned by the
+  data-protection gate; OpenRouter calls reach OpenRouter and an upstream endpoint (the pinned
+  one, or another while `OPENROUTER_ALLOW_FALLBACKS` is `true`, the default) and carry an
+  `X-Title` header naming this app; keys travel only as the authentication header. The
+  introduction no longer suggests that only the draft is sent.
+
 ## 0.17.0 - 2026-10-05
 
 Upgrading from the install scripts (an editable checkout install) to the release wheel: you no
