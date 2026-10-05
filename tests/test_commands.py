@@ -1012,11 +1012,11 @@ def test_setup_option_errors(saved, espanso, tty, monkeypatch):
     assert _setup(espanso, "--api-key-stdin").exit_code == 2
     assert _setup(espanso, "--non-interactive", "--profile", "nosuch").exit_code == 2
     monkeypatch.setenv("PROMPT_PROVIDER", "nope")
+    # The error panel wraps at the terminal width, which differs on CI runners.
+    monkeypatch.setenv("COLUMNS", "400")
     result = _setup(espanso, "--non-interactive")
     assert result.exit_code == 2
-    # The error panel wraps at the runner's terminal width, so compare without line breaks.
-    flat = " ".join(re.sub(r"\x1b\[[0-9;]*m|[│╭╮╰╯─]", " ", result.output).split())
-    assert "pass --provider" in flat
+    assert "pass --provider" in re.sub(r"\x1b\[[0-9;]*m", "", result.output)
 
 
 def test_setup_in_legacy_mode_lists_what_to_set(espanso, fake_run, smoke_ok):
