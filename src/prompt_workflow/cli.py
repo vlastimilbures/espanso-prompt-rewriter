@@ -5,12 +5,13 @@ import io
 import re
 import sys
 import unicodedata
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pyperclip
 import typer
+from typer.core import TyperGroup
 
 from . import recorder
 from .clipboard_guard import is_concealed
@@ -26,12 +27,64 @@ from .prompt_builder import (
     system_prompt,
 )
 from .providers.base import ProviderError
-from .redaction import DEFAULT_IGNORABLE
+from .redaction import DEFAULT_IGNORABLE, redact_words
 
 if TYPE_CHECKING:
+    from typer._click import Command, Context
+
     from .deploy import Plan
 
-app = typer.Typer(add_completion=False, no_args_is_help=True)
+# The management commands (#92), each in a module under commands/: command name -> (module,
+# its Typer app). Loaded only when that command runs or --help lists it, so improve and
+# persona never import them.
+_LAZY_COMMANDS = {
+    "setup": ("setup", "app"),
+    "config": ("settings", "config_app"),
+    "secrets": ("settings", "secrets_app"),
+    "profiles": ("profiles", "app"),
+    "stats": ("usage", "stats_app"),
+    "history": ("usage", "history_app"),
+    "doctor": ("doctor", "app"),
+}
+
+
+class _LazyGroup(TyperGroup):
+    """Mounts the management commands lazily, and keeps a key typed in the wrong place (a
+    stray argument, an unknown command) out of Click's usage errors, which quote it."""
+
+    def make_context(self, *args: Any, **kwargs: Any) -> Context:
+        with _redacted_usage_errors():
+            return super().make_context(*args, **kwargs)
+
+    def invoke(self, ctx: Context) -> Any:
+        with _redacted_usage_errors():
+            return super().invoke(ctx)
+
+    def list_commands(self, ctx: Context) -> list[str]:
+        return [*super().list_commands(ctx), *_LAZY_COMMANDS]
+
+    def get_command(self, ctx: Context, cmd_name: str) -> Command | None:
+        if cmd_name not in _LAZY_COMMANDS:
+            return super().get_command(ctx, cmd_name)
+        import importlib
+
+        module_name, attr = _LAZY_COMMANDS[cmd_name]
+        module = importlib.import_module(f".commands.{module_name}", __package__)
+        return typer.main.get_command(getattr(module, attr))
+
+
+@contextlib.contextmanager
+def _redacted_usage_errors() -> Iterator[None]:
+    from typer._click.exceptions import ClickException
+
+    try:
+        yield
+    except ClickException as exc:
+        exc.message = redact_words(exc.message)
+        raise
+
+
+app = typer.Typer(add_completion=False, no_args_is_help=True, cls=_LazyGroup)
 
 # A rough draft is a few hundred words; anything far larger is an accidental copy (a log,
 # a whole document) that should neither go to the cloud nor stall the gate's scan.
@@ -92,8 +145,24 @@ def _emit(text: str) -> None:
     typer.echo(_clean(text), nl=False)
 
 
+def _show_version(value: bool) -> None:
+    if value:
+        from . import __version__
+
+        typer.echo(__version__)
+        raise typer.Exit()
+
+
 @app.callback()
-def _main() -> None:
+def _main(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        is_eager=True,
+        callback=_show_version,
+        help="Print the installed version and exit",
+    ),
+) -> None:
     """Espanso-invoked prompt rewriter. Keeps ``improve`` as an explicit subcommand
     so the Espanso match files and docs (``prompt-workflow improve ...``) resolve."""
     # A piped stdout uses the ANSI code page on Windows, which lacks many letters (Czech ř,
@@ -303,13 +372,18 @@ def _fail(exc: Exception) -> typer.Exit:
 def _espanso_root(espanso_dir: str | None) -> Path:
     """Espanso's config folder, absolute, so the manifest records one spelling of each path."""
     from . import deploy
+    from .commands.common import no_key
 
+    no_key(espanso_dir, "--espanso-dir")
     found = deploy.espanso_dir() if espanso_dir is None else Path(espanso_dir).expanduser()
     return found.resolve()
 
 
 def _make_plan(espanso_dir: str | None, launcher: str | None) -> Plan:
     from . import deploy
+    from .commands.common import no_key
+
+    no_key(launcher, "--launcher")
 
     if launcher is None:
         found = deploy.resolve_launcher()
@@ -355,7 +429,9 @@ def espanso_status(
 
 def _ask_choice(name: str, state: str) -> str:
     from . import deploy
+    from .commands.common import require_terminal
 
+    require_terminal(f"{name} is {state}: the choice", "pass --on-conflict keep|ours|side")
     while True:
         answer = str(
             typer.prompt(
@@ -382,9 +458,13 @@ def espanso_deploy(
         "with a backup) or side (write ours next to it)",
     ),
     no_restart: bool = _NO_RESTART,
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Show the plan and the diff, then stop without writing"
+    ),
 ) -> None:
     """Show the plan and a diff, then write the match files (asks first unless --yes)."""
     from . import deploy
+    from .commands.common import confirm
 
     try:
         if on_conflict is not None and on_conflict not in deploy.CHOICES:
@@ -399,14 +479,16 @@ def espanso_deploy(
                 typer.echo(step.diff(), nl=False)
         if the_plan.legacy is not None:
             typer.echo(f"  legacy    {the_plan.legacy.name} will be retired, with a backup")
+        if dry_run:
+            typer.echo("Dry run: nothing was written.")
+            return
         choices = {}
         for step in the_plan.conflicts:
             if on_conflict is not None or yes:
                 choices[step.name] = on_conflict or deploy.KEEP
             else:
                 choices[step.name] = _ask_choice(step.name, step.state)
-        if not yes:
-            typer.confirm("Apply this plan?", abort=True)
+        confirm("Apply this plan?", yes=yes)
         outcome = deploy.apply(the_plan, choices)
     except (deploy.DeployError, ValueError, OSError) as exc:
         raise _fail(exc) from None
@@ -441,6 +523,7 @@ def espanso_detach(
 ) -> None:
     """Remove the match files prompt-workflow deployed. Files you edited are kept."""
     from . import deploy
+    from .commands.common import confirm
 
     try:
         manifest = deploy.Manifest.load()
@@ -451,8 +534,7 @@ def espanso_detach(
         typer.echo(f"Detach removes {mode} that you have not edited:")
         for target in sorted(manifest.entries):
             typer.echo(f"  {target}")
-        if not yes:
-            typer.confirm("Detach?", abort=True)
+        confirm("Detach?", yes=yes)
         outcome = deploy.detach(manifest, _espanso_root(espanso_dir), remove_all=not keep_static)
     except (deploy.DeployError, OSError) as exc:
         raise _fail(exc) from None

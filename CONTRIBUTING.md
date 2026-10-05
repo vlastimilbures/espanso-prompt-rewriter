@@ -162,7 +162,12 @@ espanso-prompt-rewriter/
 │   │   ├── prompts-core.yml      -prompt- -risk-: static snippets and forms
 │   │   └── prompts-template.yml  -p-: the empty golden template, opens with your persona
 ├── src/prompt_workflow/          the prompt-workflow CLI
-│   ├── cli.py                    improve and persona commands, the single output sink
+│   ├── cli.py                    improve and persona commands, the single output sink;
+│   │                             mounts the management commands lazily
+│   ├── commands/                 setup, config, secrets, profiles, stats, history, doctor:
+│   │                             thin Typer wrappers over the services (common.py: exit codes)
+│   ├── doctor.py                 the doctor report (stable JSON, never a key or persona)
+│   ├── smoke.py                  setup's smoke test: improve against a stub on 127.0.0.1
 │   ├── config.py                 Settings from the environment, config.toml or .env
 │   ├── config_files.py           reads config.toml/secrets.toml; atomic, private writes
 │   ├── config_store.py           saves settings and secrets; .env migration and rollback

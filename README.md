@@ -213,7 +213,7 @@ risk)`.
 | Command | What it does |
 |---------|--------------|
 | `prompt-workflow espanso status [--diff]` | Each file: `missing`, `in sync`, `stale` (an older deploy of ours, such as after an upgrade), `modified` (you edited it) or `foreign` (not ours) |
-| `prompt-workflow espanso deploy` | Shows the plan and a diff, asks, then writes and restarts Espanso. `--yes` skips the question; a second run with nothing to change does nothing |
+| `prompt-workflow espanso deploy` | Shows the plan and a diff, asks, then writes and restarts Espanso. `--yes` skips the question, `--dry-run` stops after the diff; a second run with nothing to change does nothing |
 | `prompt-workflow espanso detach` | Removes the matches that call the CLI and keeps `-prompt-`/`-risk-` as static snippets (`--keep-static`, the default); `--remove-all` removes every file we deployed |
 
 A file you edited is never overwritten silently: `deploy` asks whether to keep yours, take ours
@@ -302,6 +302,41 @@ with exit code 0, so Espanso always has something to paste. Drafts over 50,000 c
 refused (an accidental copy of a log or document should not go to the cloud). If the model stops
 at its max-tokens cap, the partial rewrite is pasted with
 `[prompt-workflow: output truncated at max tokens]` at the end.
+
+#### Management commands
+
+| Command | What it does |
+|---------|--------------|
+| `prompt-workflow --version` | Prints the installed version |
+| `prompt-workflow setup` | First run: provider and default profile (saved in `config.toml`), the API key (hidden prompt), a deploy preview it applies only if you agree, and a smoke test that runs `improve` against a stub on `127.0.0.1` (never a paid call, never your real key). If your settings are in a `.env`, it offers to migrate them and changes nothing unless you say yes. `--non-interactive` asks nothing (key with `--api-key-stdin`; the deploy stays a preview unless `--deploy`) |
+| `prompt-workflow config show [--raw]` | Every setting, its value and where it comes from (default, a file or the environment), and which lower files it overrides. Keys and the persona are shown only as set or not set |
+| `prompt-workflow config get NAME` / `set NAME VALUE` / `unset NAME` | Read one setting; save it in `config.toml` after checking it as the CLI reads it; remove it so the default applies. A key is refused here |
+| `prompt-workflow config validate` | Checks the settings as `improve` reads them, and the profiles they name |
+| `prompt-workflow config migrate` / `rollback` | Moves the `.env` in use to `config.toml` and its keys to the secret store, with a backup, or undoes that. Shows a preview first and applies only once you confirm it; in a script, pass `--yes --preview-token <token>` from that preview |
+| `prompt-workflow secrets set NAME [--stdin]` / `status` / `remove NAME` | Saves a key from a hidden prompt or stdin (never an argument); shows whether each key is set and where from, never the value; deletes one |
+| `prompt-workflow profiles list` / `migrate` | Lists built-in and your own profiles and their state; copies profiles you added or edited in a checkout to your profile folder (copies only, never overwrites) |
+| `prompt-workflow espanso deploy [--dry-run]` / `status` / `detach` | See [Managing the deployed match files](#managing-the-deployed-match-files) |
+| `prompt-workflow stats [--by trigger\|provider\|model\|day] [--json]` | Calls, latency, tokens and costs from the [usage history](#usage-history) |
+| `prompt-workflow history export [--format json\|csv] [-o FILE]` / `prune [--older-than DAYS]` / `reset` | Exports (metadata only), deletes old records (asking first when the age is shorter than `PROMPT_HISTORY_RETENTION_DAYS`), or deletes them all |
+| `prompt-workflow doctor [--json]` | Version, CLI path and install channel, config validity, keys set or not, Espanso found and running, each deployed match file (`in sync`, `stale`, `modified`, `missing`), launcher drift, history health, SQLite version, and a clipboard read test that reports only the length. Safe to paste into an issue: it never shows a key, your persona or clipboard text |
+
+`stats` reports local observations on this device, not provider billing. A call counts once the
+CLI rendered its output, which does not mean it was pasted. Triggers that name a provider (`-i-`,
+`-ip-`, `-if-`, `-iok-`, `-il-`, `-ilm-`) ignore `PROMPT_PROVIDER`.
+
+Unlike `improve` and `persona`, these commands print errors to stderr and use ordinary exit
+codes. None of them asks a question without a terminal (pass `--yes`, `--stdin` or
+`--non-interactive` instead), each runs on a broken `.env` or `config.toml` and reports what is
+wrong, and colour is off when `NO_COLOR` is set or output is not a terminal. An option or a
+mistyped argument that looks like a key is refused and never repeated in an error.
+
+| Exit code | Meaning |
+|-----------|---------|
+| 0 | Done |
+| 1 | Failed or refused, or you declined a confirmation |
+| 2 | Usage error: an unknown option, setting or value |
+| 3 | An answer was needed but stdin is not a terminal |
+| 4 | `doctor` or `config validate` found a problem |
 
 ## Configuration
 
@@ -562,7 +597,9 @@ request it made (a retried request counts twice, in the same run). It is on by d
   recorded run also deletes up to 100 of the oldest records past that age, so the history
   stays within it without a separate clean-up (after lowering the setting, a large backlog goes
   over the next few runs).
-- **Off:** set `PROMPT_HISTORY=false` in `.env`, then delete the file to remove what is there.
+- **Off:** `prompt-workflow config set PROMPT_HISTORY false` (or `PROMPT_HISTORY=false` in your
+  `.env`), then `prompt-workflow history reset` to delete what is there. `setup` and `stats`
+  say that the history is on, what it stores and where.
   Nothing is recorded either when the settings fail to load, since whether you turned it off
   is then unknown.
 
@@ -683,6 +720,8 @@ uv run python scripts/bench_models.py --profile general --suite all       # the 
 |---------|-----|
 | Trigger does not expand right after a letter, digit, `-` or `=`, or in a field you emptied with the keyboard | Triggers only fire at the start of a word, judged by what you last typed. Type a space first, or click into the field. |
 | Trigger does not expand | Run `espanso status`, then `prompt-workflow espanso status`, then `prompt-workflow espanso deploy`. |
+| `[Espanso]: An error occurred during rendering` | Run `prompt-workflow doctor`. It usually reports a match file as `stale` (an older deploy, for example `prompts-template.yml: stale` after an upgrade) or a deployed launcher that is gone; `prompt-workflow espanso deploy` fixes both. |
+| Not sure what is wrong | `prompt-workflow doctor` checks the install, settings, keys, Espanso, the match files and the history; `prompt-workflow config validate` checks the settings alone. |
 | `[prompt-workflow: OPENROUTER_API_KEY is not configured]` | The key is missing from `.env` (or `secrets.toml`), or the file is not in one of the [places the CLI looks](#configuration). Once `config.toml` exists, a `.env` is no longer read. |
 | `[prompt-workflow: config.toml is not valid TOML (at line …)]` | Fix that line of `config.toml` in the config folder (`secrets.toml` likewise). |
 | `[prompt-workflow: OpenRouter returned HTTP 401: check the API key…]` | Wrong key. Replace it in `.env`. |

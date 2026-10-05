@@ -192,8 +192,9 @@ Path(sys.argv[1]).write_text(json.dumps(result), encoding="utf-8")
 """
 
 # Never on the trigger path: the Textual interface (#93), config writers (#84), the keyring
-# and the Espanso deploy service (#86). rich is installed with Typer but not loaded today:
-# Typer imports it only for help and usage errors.
+# and the Espanso deploy service (#86), the management commands and their services (#92).
+# rich is installed with Typer but not loaded today: Typer imports it only for help and usage
+# errors.
 FORBIDDEN = (
     "textual",
     "rich.console",
@@ -201,6 +202,10 @@ FORBIDDEN = (
     "tomlkit",
     "keyring",
     "prompt_workflow.deploy",
+    "prompt_workflow.commands",
+    "prompt_workflow.doctor",
+    "prompt_workflow.smoke",
+    "prompt_workflow.config_store",
 )
 # The usage history (#89) writes each run after its output, so sqlite3 loads on the trigger
 # path when tracking is on (PROMPT_HISTORY, the default), and never when it is off.
