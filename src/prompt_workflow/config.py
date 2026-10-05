@@ -350,6 +350,17 @@ def _temperature(raw: str) -> float | None:
         raise ValueError("empty or a number of 0 or more") from None
 
 
+def _optional_positive_int(raw: str) -> int | None:
+    """An optional cap such as OPENROUTER_PRO_MAX_TOKENS: empty (the default) means none of
+    its own, so the caller falls back to another setting."""
+    if raw == "":
+        return None
+    try:
+        return int(_positive_int(raw))
+    except ValueError:
+        raise ValueError("empty or a whole number above 0") from None
+
+
 # Longest usage-history retention, 100 years: a longer one overflows the date arithmetic.
 MAX_RETENTION_DAYS = 36500
 _retention_days = _number(
@@ -484,6 +495,11 @@ class Settings:
     openrouter_pro_model: str = _env("OPENROUTER_PRO_MODEL", "openai/gpt-6-luna")
     openrouter_pro_provider: str = _env("OPENROUTER_PRO_PROVIDER", "openai")
     openrouter_pro_reasoning_effort: str = _env("OPENROUTER_PRO_REASONING_EFFORT", "low", _effort)
+    # Output cap for the pro tier, whose reasoning counts against it; empty (the default)
+    # uses OPENROUTER_MAX_TOKENS, so both tiers share one cap.
+    openrouter_pro_max_tokens: int | None = _env(
+        "OPENROUTER_PRO_MAX_TOKENS", "", _optional_positive_int
+    )
     pro_timeout: float = _env("PROMPT_PRO_TIMEOUT_SECONDS", "60", _positive_float)
     # Profile for the pro tier; empty (the default) uses PROMPT_PROFILE, so both tiers send
     # the same prompt. An escape hatch for a prompt tuned to OPENROUTER_PRO_MODEL.
@@ -527,8 +543,8 @@ class Settings:
 
     def for_tier(self, tier: str) -> Settings:
         """Settings for a quality tier: `standard` as-is, `pro` with the OPENROUTER_PRO_*
-        model, endpoint and effort, and PROMPT_PRO_PROFILE if set. Only OpenRouter has a
-        pro tier."""
+        model, endpoint, effort and output cap (if set), and PROMPT_PRO_PROFILE if set. Only
+        OpenRouter has a pro tier."""
         if tier == "standard":
             return self
         if tier == "pro":
@@ -537,6 +553,7 @@ class Settings:
                 openrouter_model=self.openrouter_pro_model,
                 openrouter_provider=self.openrouter_pro_provider,
                 openrouter_reasoning_effort=self.openrouter_pro_reasoning_effort,
+                openrouter_max_tokens=self.openrouter_pro_max_tokens or self.openrouter_max_tokens,
                 timeout=self.pro_timeout,
                 profile=self.pro_profile or self.profile,
             )

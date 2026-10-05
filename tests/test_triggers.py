@@ -104,6 +104,19 @@ def test_trigger_request(stub_provider, trigger):
         assert cfg.timeout == base.timeout
 
 
+# OPENROUTER_PRO_MAX_TOKENS reaches the pro triggers only; the -if- popup's max tokens pick
+# beats it and its `default` keeps it (#31).
+def test_pro_max_tokens_reach_triggers(monkeypatch, stub_provider):
+    monkeypatch.setenv("OPENROUTER_PRO_MAX_TOKENS", "4000")
+    for trigger, (_, _, tier) in EXPECTED.items():
+        _, cfg, _ = _replay(stub_provider, trigger)
+        assert cfg.openrouter_max_tokens == (4000 if tier == "pro" else 2400), trigger
+        assert (cfg.anthropic_max_tokens, cfg.call_max_tokens) == (2400, None), trigger
+    for pick, cap in (("default", 4000), ("2400", 2400), ("16000", 16000)):
+        _, cfg, _ = _replay(stub_provider, "-if-", maxtokens=pick)
+        assert cfg.openrouter_max_tokens == cap
+
+
 # -if- model choice -> profile with the shipped settings: one prompt for every model. A set
 # PROMPT_PRO_PROFILE applies to the pro model only (test_profile_settings_reach_triggers).
 IF_MODEL_PROFILES = {

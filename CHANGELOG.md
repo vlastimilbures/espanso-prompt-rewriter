@@ -54,6 +54,10 @@ All notable changes to this project are documented here. The format follows
 
 - The interface's header now shows the installed version next to the name
   (`prompt-workflow 0.17.0 — set up and manage`) on every screen (#112).
+- `OPENROUTER_PRO_MAX_TOKENS` (default empty) (#31): the output cap for the pro tier (`-ip-`,
+  `-if-`, `--tier pro`), whose reasoning counts against it. Empty keeps today's behaviour, the
+  pro tier sharing `OPENROUTER_MAX_TOKENS` (`2400`) with the standard tier. `--max-tokens` and
+  a max-tokens pick in `-if-` still win; the popup's `default` now keeps this setting.
 
 
 ### Changed

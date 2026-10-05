@@ -811,6 +811,43 @@ def test_empty_temperature_is_omitted(monkeypatch, fake_http):
     assert "temperature" not in _local_body(fake_http, "lmstudio")
 
 
+def _openrouter_max_tokens(monkeypatch, fake_http, *args):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    fake_http.requests.clear()
+    fake_http.reply({"choices": [{"message": {"content": "ok"}}]})
+    result = improve("--provider", "openrouter", *args, "--source", "argument", "--text", "d")
+    assert (result.exit_code, result.stdout) == (0, "ok")
+    return fake_http.calls[-1]["json"]["max_tokens"]
+
+
+# OPENROUTER_PRO_MAX_TOKENS caps the pro tier's request; unset, the pro tier sends
+# OPENROUTER_MAX_TOKENS as before, and --max-tokens beats both (#31).
+def test_pro_max_tokens_request(monkeypatch, fake_http):
+    assert _openrouter_max_tokens(monkeypatch, fake_http, "--tier", "pro") == 2400
+    monkeypatch.setenv("OPENROUTER_PRO_MAX_TOKENS", "4000")
+    assert _openrouter_max_tokens(monkeypatch, fake_http, "--tier", "pro") == 4000
+    assert _openrouter_max_tokens(monkeypatch, fake_http) == 2400
+    for keep in ([], ["--max-tokens", "default"]):
+        assert _openrouter_max_tokens(monkeypatch, fake_http, "--tier", "pro", *keep) == 4000
+    pick = ["--tier", "pro", "--max-tokens", "16000"]
+    assert _openrouter_max_tokens(monkeypatch, fake_http, *pick) == 16000
+
+
+# The pro cap is OpenRouter's: Anthropic keeps ANTHROPIC_MAX_TOKENS and the local bodies stay
+# uncapped.
+def test_pro_max_tokens_leaves_other_providers(monkeypatch, fake_http):
+    monkeypatch.setenv("OPENROUTER_PRO_MAX_TOKENS", "4000")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    fake_http.reply({"content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn"})
+    result = improve("--provider", "anthropic", "--source", "argument", "--text", "d")
+    assert (result.exit_code, result.stdout) == (0, "ok")
+    assert fake_http.calls[-1]["json"]["max_tokens"] == 2400
+    fake_http.requests.clear()
+    assert "num_predict" not in _local_body(fake_http, "ollama")["options"]
+    fake_http.requests.clear()
+    assert "max_tokens" not in _local_body(fake_http, "lmstudio")
+
+
 # An unknown provider is reported as such, not as an OpenRouter-only option.
 def test_unknown_provider_beats_openrouter_only(fake_http):
     result = improve("--provider", "foo", "--tier", "pro", "--source", "argument", "--text", "d")
