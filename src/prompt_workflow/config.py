@@ -389,7 +389,8 @@ def _regexes(raw: str) -> str:
         compile_extra(raw)
     except InvalidExtraPattern as exc:
         raise ValueError(
-            f"valid ';'-separated regexes; entry {exc.entry} is not a valid regex"
+            f"valid ';'-separated regexes; entry {exc.entry} (custom_{exc.entry}) is not a "
+            "valid regex"
         ) from None
     return raw
 

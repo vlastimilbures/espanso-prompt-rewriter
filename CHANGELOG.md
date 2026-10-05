@@ -65,6 +65,16 @@ All notable changes to this project are documented here. The format follows
   a max-tokens pick in `-if-` still win; the popup's `default` now keeps this setting.
 
 ### Changed
+- `config set` and `config unset` (and the interface's settings and profile forms) warns, naming the findings
+  only, when a saved change leaves a `PROMPT_PERSONA` that the gate's patterns match and that
+  the profiles send, as `config validate` would flag it. The value is still saved (exit 0).
+- With `PROMPT_GATE_LOCAL=true`, a blocked cloud call no longer suggests a local trigger
+  (`-il-`) or a local model, which the gate would block too. The message without it is
+  unchanged.
+- An invalid `PROMPT_EXTRA_PATTERNS` regex is now named as `entry N (custom_N)`, the name a
+  finding of that entry gets (both count the non-empty entries from 1).
+- `config show` prints `(empty)` for a setting set to an empty value on purpose (such as
+  `PROMPT_TEMPERATURE=`), instead of a blank; `config get` still prints the raw value.
 - README Triggers: a tip to use `-ip-` for a draft that pastes an email or thread, since `-i-`'s
   faster model often summarises short pasted material instead of copying it (#42).
 - Match files (#38, #23, #41): every match, the commented-out `-ic-` too, has a `label:`

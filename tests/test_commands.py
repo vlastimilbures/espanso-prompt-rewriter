@@ -250,7 +250,7 @@ def test_config_validate(monkeypatch):
 def test_config_validate_and_set_reject_an_invalid_extra_pattern(monkeypatch, saved):
     result = _run("config", "set", "PROMPT_EXTRA_PATTERNS", "falcon;(")
     assert result.exit_code == 1
-    assert "entry 2 is not a valid regex" in result.stderr
+    assert "entry 2 (custom_2) is not a valid regex" in result.stderr
     assert not (saved / "config.toml").exists()
     monkeypatch.setenv("PROMPT_EXTRA_PATTERNS", "falcon;(")
     result = _run("config", "validate")
@@ -1398,3 +1398,42 @@ def test_profiles_migrate_nothing_changed_and_default(monkeypatch, tmp_path):
     result = _run(*args)
     assert result.exit_code == 0
     assert "PROMPT_PROFILE_OVERRIDES" in result.stdout
+
+
+# config set saves a persona the gate's patterns match (exit 0) and warns on stderr with the
+# finding names only, as validate would (#29 follow-up). The same exemptions apply.
+def test_config_set_warns_about_a_flagged_persona(saved, monkeypatch):
+    address = "jane.doe" + "@" + "example.com"
+    result = _run("config", "set", "PROMPT_PERSONA", f"I am an analyst, mail {address}.")
+    assert result.exit_code == 0, result.output
+    assert "PROMPT_PERSONA saved in" in result.stdout
+    assert (
+        "warning: PROMPT_PERSONA matches the data-protection patterns: email; it is sent "
+        "unscanned with every cloud call"
+    ) in result.stderr
+    assert address not in result.output
+    assert address in (saved / "config.toml").read_text("utf-8")
+    # A setting that makes the persona go out warns as well (the interface sets these).
+    assert _run("config", "set", "PROMPT_PROFILE", "general").stderr == ""
+    assert "PROMPT_PERSONA matches" in _run("config", "set", "PROMPT_PROFILE", "default").stderr
+    assert _run("config", "set", "PROMPT_TIMEOUT_SECONDS", "30").stderr == ""
+    monkeypatch.setenv("PROMPT_LOCAL_ONLY", "true")  # nothing leaves the machine
+    result = _run("config", "set", "PROMPT_PERSONA", f"I am an analyst, mail {address}.")
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    monkeypatch.delenv("PROMPT_LOCAL_ONLY")
+    assert _run("config", "set", "PROMPT_PERSONA", "I am a data engineer.").stderr == ""
+
+
+# An empty value set on purpose reads "(empty)" in config show; one left at an empty default
+# stays blank, and config get prints the raw value for scripts.
+def test_config_show_marks_an_empty_value(saved, monkeypatch):
+    assert _run("config", "set", "PROMPT_TEMPERATURE", "").exit_code == 0
+    monkeypatch.setenv("OPENROUTER_PRO_MAX_TOKENS", "")
+    lines = _run("config", "show").stdout.splitlines()
+    for name in ("PROMPT_TEMPERATURE", "OPENROUTER_PRO_MAX_TOKENS"):
+        line = next(x for x in lines if x.startswith(f"{name} "))
+        assert line.split()[1:2] == ["(empty)"], line
+    line = next(x for x in lines if x.startswith("OPENROUTER_PROVIDER "))
+    assert "(empty)" not in line
+    assert _run("config", "get", "PROMPT_TEMPERATURE").stdout == "\n"

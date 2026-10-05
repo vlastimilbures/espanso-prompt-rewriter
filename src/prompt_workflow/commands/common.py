@@ -195,9 +195,13 @@ def source_label(source: str) -> str:
 
 
 def shown_value(name: str, entry: Entry) -> str:
-    """A setting's value as a command may print it: never a secret, never the persona."""
+    """A setting's value as a command may print it: never a secret, never the persona. An
+    empty value set on purpose (PROMPT_TEMPERATURE= sends no temperature) reads "(empty)"
+    rather than a blank; one left at an empty default stays blank."""
     if name in secret_names() or name in PRIVATE or looks_like_a_key(entry.value):
         return f"<set, {len(entry.value)} chars>" if entry.value else "<not set>"
+    if not entry.value and entry.source != DEFAULT_SOURCE:
+        return "(empty)"
     if entry.value.isprintable() and "\n" not in entry.value:
         return entry.value
     # The user's patterns would hide the pattern setting itself when it matches its own text.

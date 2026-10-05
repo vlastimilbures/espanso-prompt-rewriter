@@ -148,6 +148,7 @@ def _gate(
         allow_flagged=allow_flagged,
         name=name,
         relay=not remote,
+        gate_local=cfg.gate_local,
     )
 
 

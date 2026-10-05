@@ -82,9 +82,38 @@ def env_override(name: str) -> str | None:
     return None
 
 
-def _env_overrides(name: str) -> None:
-    note = env_override(name)
-    if note:
+# The settings doctor.persona_problem() reads: saving one can make the persona go out.
+_PERSONA_INPUTS = frozenset(
+    {
+        "PROMPT_PERSONA",
+        "PROMPT_PROFILE",
+        "PROMPT_PRO_PROFILE",
+        "PROMPT_PROFILE_OVERRIDES",
+        "PROMPT_EXTRA_PATTERNS",
+        "PROMPT_LOCAL_ONLY",
+        "PROMPT_GATE_LOCAL",
+    }
+)
+
+
+def persona_warning(name: str) -> str | None:
+    """The warning to show after saving ``name`` when the effective persona now matches the
+    data-protection patterns and is sent (`config validate`'s problem: finding names only,
+    never the text), or None. The value stays saved: a persona never blocks a call."""
+    if name not in _PERSONA_INPUTS:
+        return None
+    from ..doctor import persona_problem
+
+    return persona_problem(common.load_layers()[1])
+
+
+def after_save(name: str) -> list[str]:
+    """The warnings to show after saving or removing ``name``; the interface shows them too."""
+    return [note for note in (env_override(name), persona_warning(name)) if note]
+
+
+def _warn_after_save(name: str) -> None:
+    for note in after_save(name):
         common.warn(note)
 
 
@@ -178,7 +207,7 @@ def config_set(
     _setting(name)
     saved = save_setting(name, value)
     typer.echo(f"{name} saved in {saved.path}")
-    _env_overrides(name)
+    _warn_after_save(name)
 
 
 @config_app.command("unset")
@@ -194,7 +223,7 @@ def config_unset(name: str = _NAME) -> None:
         return
     config_store.save_settings(snapshot, {name: None})
     typer.echo(f"{name} removed from {snapshot.path}; its default applies.")
-    _env_overrides(name)
+    _warn_after_save(name)
 
 
 @config_app.command("validate")
@@ -357,7 +386,7 @@ def secrets_set(
     value = common.read_secret(name, from_stdin=stdin)
     config_store.save_secret(name, value)
     typer.echo(f"{name} saved in the secret store ({config_store.config_dir()})")
-    _env_overrides(name)
+    _warn_after_save(name)
 
 
 @secrets_app.command("status")

@@ -156,3 +156,34 @@ def test_sent_despite_resets_per_call():
     provider.generate("Output is CONFIDENTIAL", "system")
     provider.generate("plain text", "system")
     assert provider.sent_despite == ()
+
+
+# The default cloud block message, byte for byte (README quotes it).
+def test_block_message_default_wording():
+    with pytest.raises(ProviderError) as exc:
+        GatedProvider(_Stub(), allow_override=False).generate("card 4111 1111 1111 1111", "s")
+    assert str(exc.value) == (
+        "Blocked cloud call. Sensitive content detected: payment_card. Remove it, or use a local "
+        "trigger (-il-)."
+    )
+
+
+# With PROMPT_GATE_LOCAL=true the local triggers are gated too, so the cloud message does not
+# send the user to them (or to a local model).
+@pytest.mark.parametrize("name", ["openrouter", "anthropic", "ollama"])
+@pytest.mark.parametrize(
+    ("draft", "tail"),
+    [
+        ("Output is CONFIDENTIAL", "If it may leave this machine, send it once with {once}."),
+        ("card 4111 1111 1111 1111", "Remove it."),
+    ],
+    ids=["soft", "hard"],
+)
+def test_block_message_with_gate_local(name, draft, tail):
+    provider = GatedProvider(_Stub(), allow_override=False, name=name, gate_local=True)
+    with pytest.raises(ProviderError) as exc:
+        provider.generate(draft, "system")
+    once = "-iok-" if name == "openrouter" else "--allow-flagged"
+    assert str(exc.value).endswith(tail.format(once=once))
+    assert "-il-" not in str(exc.value)
+    assert "local model" not in str(exc.value)

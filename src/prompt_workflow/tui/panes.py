@@ -337,8 +337,8 @@ class ProvidersPane(Pane):
 
         def save() -> str:
             saved = settings_cmd.save_setting(name, value)
-            note = settings_cmd.env_override(name)
-            return f"{name} saved in {saved.path}" + (f"; {note}" if note else "")
+            notes = settings_cmd.after_save(name)
+            return "; ".join([f"{name} saved in {saved.path}", *notes])
 
         self.attempt(save)
 
@@ -466,12 +466,13 @@ class ProfilesPane(Pane):
     def _save_profile(self, values: dict[str, str] | None) -> None:
         if values is not None:
             name = values["profile"]
-            self.attempt(
-                lambda: (
-                    f"PROMPT_PROFILE saved in "
-                    f"{settings_cmd.save_setting('PROMPT_PROFILE', name).path}"
-                )
-            )
+
+            def save() -> str:
+                saved = settings_cmd.save_setting("PROMPT_PROFILE", name)
+                notes = settings_cmd.after_save("PROMPT_PROFILE")
+                return "; ".join([f"PROMPT_PROFILE saved in {saved.path}", *notes])
+
+            self.attempt(save)
 
     def selected(self) -> Path | None:
         table = self.query_one("#profiles", DataTable)

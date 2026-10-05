@@ -307,10 +307,13 @@ EXTRA_SEPARATOR = ";"
 
 class InvalidExtraPattern(ValueError):
     """A PROMPT_EXTRA_PATTERNS entry that is not a valid regex. It names the position, never
-    the pattern, which may itself describe sensitive data."""
+    the pattern, which may itself describe sensitive data: counted from 1 over the non-empty
+    entries, as scan() numbers the custom_N findings."""
 
     def __init__(self, entry: int) -> None:
-        super().__init__(f"PROMPT_EXTRA_PATTERNS entry {entry} is not a valid regex")
+        super().__init__(
+            f"PROMPT_EXTRA_PATTERNS entry {entry} (custom_{entry}) is not a valid regex"
+        )
         self.entry = entry
 
 

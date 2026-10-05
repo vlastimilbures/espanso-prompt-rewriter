@@ -501,9 +501,10 @@ def test_invalid_extra_pattern_is_rejected(monkeypatch, raw, entry):
     with pytest.raises(ValueError, match=r"^PROMPT_EXTRA_PATTERNS must be") as caught:
         Settings()
     message = str(caught.value)
-    assert f"entry {entry} is not" in message
+    assert f"entry {entry} (custom_{entry}) is not" in message
+    shown = message.replace(f"(custom_{entry})", "")  # the label's own parenthesis
     for text in (raw, "falcon", "secret"):
-        assert text not in message
+        assert text not in shown
 
 
 @pytest.mark.parametrize(
