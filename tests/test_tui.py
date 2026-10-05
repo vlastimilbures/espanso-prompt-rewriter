@@ -98,7 +98,9 @@ def table_rows(app: ManageApp, tab: str, selector: str) -> dict[str, list[str]]:
 
     table = pane(app, tab).query_one(selector, DataTable)
     rows = (table.get_row_at(i) for i in range(table.row_count))
-    return {row[0].plain: [cell.plain for cell in row] for row in rows}
+    found = {row[0].plain: [cell.plain for cell in row] for row in rows}
+    assert len(found) == table.row_count, "two rows share a first cell"
+    return found
 
 
 async def press(app: ManageApp, pilot, selector: str) -> None:
