@@ -386,8 +386,13 @@ def _espanso_root(espanso_dir: str | None) -> Path:
     from .commands.common import no_key
 
     no_key(espanso_dir, "--espanso-dir")
-    found = deploy.espanso_dir() if espanso_dir is None else Path(espanso_dir).expanduser()
-    return found.resolve()
+    if espanso_dir is not None:
+        return Path(espanso_dir).expanduser().resolve()
+    found = deploy.locate_espanso_dir()
+    if found.fallback:
+        # Never silently: the default folder may not be the one Espanso reads (#115).
+        typer.echo(f"{found.fallback}; using the default Espanso folder {found.path}", err=True)
+    return found.path.resolve()
 
 
 def _make_plan(espanso_dir: str | None, launcher: str | None) -> Plan:

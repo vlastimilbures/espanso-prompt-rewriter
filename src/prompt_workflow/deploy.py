@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -59,19 +60,76 @@ class DeployError(Exception):
     """A deployment that cannot go ahead; the message says why."""
 
 
-# Runs a command and returns its stdout, or None when it is missing, fails or times out.
-# Every function that runs one looks run_command up when called, so tests can replace it.
-Runner = Callable[[Sequence[str]], str | None]
+@dataclass(frozen=True)
+class CommandFailure:
+    """Why a command gave no output: not found, timed out, or its exit code and the first
+    stderr line that says something (#115)."""
+
+    found: bool = False
+    path: str | None = None
+    returncode: int | None = None
+    error: str | None = None
+    timed_out: bool = False
+
+    def describe(self, argv: Sequence[str]) -> str:
+        name, command = argv[0], " ".join(argv)
+        if not self.found:
+            return f"{name} was not found on PATH"
+        if self.timed_out:
+            return f"`{command}` timed out after {COMMAND_TIMEOUT} s"
+        detail = f": {self.error}" if self.error else ""
+        return f"`{command}` failed (exit {self.returncode}){detail}"
 
 
-def run_command(argv: Sequence[str]) -> str | None:
+# Runs a command and returns its stdout, or a CommandFailure. A fake may answer None, read as
+# not found. Every function that runs one looks run_command up when called, so tests can
+# replace it.
+Runner = Callable[[Sequence[str]], str | CommandFailure | None]
+# A Rust panic's first line names only the source location; the message follows it. Newer
+# Rust puts the thread id after the name: `thread 'main' (3545792) panicked at src/main.rs:1:2:`.
+_PANIC_HEADER = re.compile(r"thread '[^']*'( \(\d+\))? panicked at ")
+_ERROR_LINE_MAX = 200
+
+
+def _error_line(stderr: str) -> str | None:
+    """The first stderr line worth showing, cut to length, with only printable characters
+    (no control, bidi or other format characters reach a terminal or a bug report)."""
+    for raw in stderr.splitlines():
+        line = "".join(c for c in raw if c.isprintable()).strip()
+        if line and not _PANIC_HEADER.match(line):
+            return line if len(line) <= _ERROR_LINE_MAX else line[: _ERROR_LINE_MAX - 1] + "…"
+    return None
+
+
+def run_command(argv: Sequence[str]) -> str | CommandFailure:
     try:
         proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
             list(argv), capture_output=True, text=True, timeout=COMMAND_TIMEOUT, check=False
         )
+    except subprocess.TimeoutExpired:
+        return CommandFailure(found=True, path=shutil.which(argv[0]), timed_out=True)
     except (OSError, subprocess.SubprocessError):
+        return CommandFailure()
+    if proc.returncode == 0:
+        return proc.stdout
+    return CommandFailure(
+        found=True,
+        path=shutil.which(argv[0]),
+        returncode=proc.returncode,
+        error=_error_line(proc.stderr or ""),
+    )
+
+
+def output(answer: str | CommandFailure | None) -> str | None:
+    """A runner's answer as stdout, or None when the command gave none."""
+    return answer if isinstance(answer, str) else None
+
+
+def failure(answer: str | CommandFailure | None) -> CommandFailure | None:
+    """Why a runner's answer is not stdout, or None when it is."""
+    if isinstance(answer, str):
         return None
-    return proc.stdout if proc.returncode == 0 else None
+    return answer or CommandFailure()
 
 
 def _digest(text: str) -> str:
@@ -126,14 +184,14 @@ def resolve_launcher(
     script = Path(sys.argv[0]) if script is None else script
     exe = "prompt-workflow.exe" if windows else "prompt-workflow"
 
-    tool_dir = runner(["uv", "tool", "dir"])
+    tool_dir = output(runner(["uv", "tool", "dir"]))
     if tool_dir and _inside(prefix, Path(tool_dir.strip())):
-        bin_dir = runner(["uv", "tool", "dir", "--bin"])
+        bin_dir = output(runner(["uv", "tool", "dir", "--bin"]))
         if bin_dir and (Path(bin_dir.strip()) / exe).is_file():
             return Launcher(Path(bin_dir.strip()) / exe, "uv")
 
     if "Cellar" in prefix.parts:
-        brew = runner(["brew", "--prefix"])
+        brew = output(runner(["brew", "--prefix"]))
         if brew:
             formula = prefix.parts[prefix.parts.index("Cellar") + 1]
             root = Path(brew.strip())
@@ -173,19 +231,36 @@ def default_espanso_dir(
     return Path(environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "espanso"
 
 
-def espanso_dir(runner: Runner | None = None) -> Path:
-    runner = runner or run_command
-    # 'espanso path config' prints just the config dir (read-only), unlike 'espanso path'.
-    out = runner(["espanso", "path", "config"])
+# 'espanso path config' prints just the config dir (read-only), unlike 'espanso path'.
+PATH_CONFIG = ("espanso", "path", "config")
+
+
+@dataclass(frozen=True)
+class EspansoDir:
+    """Espanso's config folder, and why it is the default one when Espanso could not say."""
+
+    path: Path
+    fallback: str | None = None
+
+
+def locate_espanso_dir(runner: Runner | None = None) -> EspansoDir:
+    answer = (runner or run_command)(PATH_CONFIG)
+    out = output(answer)
     if out and out.strip():
-        return Path(out.strip())
-    return default_espanso_dir()
+        return EspansoDir(Path(out.strip()))
+    why = failure(answer)
+    reason = why.describe(PATH_CONFIG) if why else "`espanso path config` printed nothing"
+    return EspansoDir(default_espanso_dir(), reason)
+
+
+def espanso_dir(runner: Runner | None = None) -> Path:
+    return locate_espanso_dir(runner).path
 
 
 def restart_espanso(runner: Runner | None = None) -> bool:
     """`espanso restart`, else `espanso start` (restart fails when Espanso is not running)."""
     runner = runner or run_command
-    return runner(["espanso", "restart"]) is not None or runner(["espanso", "start"]) is not None
+    return any(output(runner(["espanso", verb])) is not None for verb in ("restart", "start"))
 
 
 # --- Manifest -----------------------------------------------------------------------------

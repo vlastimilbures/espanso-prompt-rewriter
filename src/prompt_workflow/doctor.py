@@ -48,7 +48,15 @@ DATA_KEYS = {
     "install": ("channel", "launcher", "editable"),
     "config": ("mode", "files", "valid", "findings"),
     "keys": ("keys", "provider"),
-    "espanso": ("found", "config_dir", "running"),
+    "espanso": (
+        "found",
+        "config_dir",
+        "running",
+        "query_failed",
+        "exit_code",
+        "timed_out",
+        "error",
+    ),
     "match_files": ("espanso_dir", "files", "legacy"),
     "launcher": ("current", "deployed", "drift", "missing"),
     "history": (
@@ -184,17 +192,35 @@ def _keys_check(layers: ConfigLayers, provider: str, local_only: bool) -> Check:
 
 
 def _espanso_check(runner: deploy.Runner, espanso_dir: Path | None) -> tuple[Check, Path]:
-    found = runner(["espanso", "path", "config"])
-    located = Path(found.strip()) if found and found.strip() else None
+    answer = runner(deploy.PATH_CONFIG)
+    out, why = deploy.output(answer), deploy.failure(answer)
+    located = Path(out.strip()) if out and out.strip() else None
+    # Found means on PATH: an installed Espanso that cannot answer is not a PATH problem (#115).
+    found = why is None or why.found
     running = None
-    if located or espanso_dir:
+    if found:
         # `espanso status` exits non-zero when Espanso is not running (no output then).
-        status = runner(["espanso", "status"])
+        status = deploy.output(runner(["espanso", "status"]))
         running = status is not None and "not running" not in status.lower()
     target = espanso_dir or located or deploy.default_espanso_dir()
-    data = {"found": located is not None, "config_dir": str(target), "running": running}
-    if located is None and espanso_dir is None:
+    data = {
+        "found": found,
+        "config_dir": str(target),
+        "running": running,
+        "query_failed": why is not None and why.found,
+        "exit_code": why.returncode if why else None,
+        "timed_out": why is not None and why.timed_out,
+        "error": why.error if why else None,
+    }
+    if why is not None and not why.found:
         return Check("espanso", WARN, "espanso was not found on PATH", data), target
+    if why is not None:
+        where = f" at {why.path}" if why.path else ""
+        hint = "" if why.timed_out else "; start Espanso once (`espanso start`) or check its config"
+        message = f"espanso found{where}, but {why.describe(deploy.PATH_CONFIG)}{hint}"
+        if espanso_dir is None:
+            message += f" (using the default folder {target})"
+        return Check("espanso", WARN, message, data), target
     if not running:
         return Check("espanso", WARN, f"Espanso is not running (config: {target})", data), target
     return Check("espanso", OK, f"running (config: {target})", data), target

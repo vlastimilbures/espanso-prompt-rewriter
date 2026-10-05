@@ -599,8 +599,72 @@ def test_restart(answers, ok, calls):
 def test_run_command():
     py = sys.executable
     assert REAL_RUN_COMMAND([py, "-c", "print('hi')"]).strip() == "hi"
-    assert REAL_RUN_COMMAND([py, "-c", "raise SystemExit(3)"]) is None
-    assert REAL_RUN_COMMAND([str(Path(py).parent / "no-such-binary")]) is None
+    failed = REAL_RUN_COMMAND([py, "-c", "raise SystemExit(3)"])
+    assert failed == deploy.CommandFailure(found=True, path=failed.path, returncode=3)
+    assert REAL_RUN_COMMAND([str(Path(py).parent / "no-such-binary")]) == deploy.CommandFailure()
+
+
+def test_run_command_keeps_the_first_useful_stderr_line():
+    """#115: Espanso panics with a location line first; the message comes after it."""
+    script = (
+        "import sys; sys.stderr.write("
+        "\"thread 'main' panicked at espanso/src/main.rs:611:64:\\n\\n"
+        'unable to load config: \\x1b[31mmissing\\u202e dir\\nCaused by: x\\n"); '
+        "sys.exit(101)"
+    )
+    failed = REAL_RUN_COMMAND([sys.executable, "-c", script])
+    assert (failed.returncode, failed.error) == (101, "unable to load config: [31mmissing dir")
+    argv = deploy.PATH_CONFIG
+    assert failed.describe(argv) == (
+        "`espanso path config` failed (exit 101): unable to load config: [31mmissing dir"
+    )
+
+
+def test_run_command_times_out(monkeypatch):
+    monkeypatch.setattr(deploy, "COMMAND_TIMEOUT", 0.2)
+    failed = REAL_RUN_COMMAND([sys.executable, "-c", "import time; time.sleep(10)"])
+    assert (failed.found, failed.timed_out) == (True, True)
+    assert failed.describe(deploy.PATH_CONFIG) == "`espanso path config` timed out after 0.2 s"
+
+
+@pytest.mark.parametrize(
+    ("stderr", "expected"),
+    [
+        ("", None),
+        ("\n  \n", None),
+        ("thread 'main' panicked at x.rs:1:2:\n", None),
+        ("thread 'main' (3545792) panicked at x.rs:1:2:\nunable to load\n", "unable to load"),
+        ("thread 'main' (x) panicked at\n", "thread 'main' (x) panicked at"),
+        ("plain error\nsecond\n", "plain error"),
+        ("\x07bell\u2066 and bidi\r\n", "bell and bidi"),
+        ("x" * 500, "x" * 199 + "\u2026"),
+    ],
+)
+def test_error_line(stderr, expected):
+    assert deploy._error_line(stderr) == expected
+
+
+@pytest.mark.parametrize(
+    ("answer", "fallback"),
+    [
+        (None, "espanso was not found on PATH"),
+        (deploy.CommandFailure(), "espanso was not found on PATH"),
+        (deploy.CommandFailure(found=True, timed_out=True), "`espanso path config` timed out"),
+        (
+            deploy.CommandFailure(found=True, returncode=101, error="unable to load config"),
+            "`espanso path config` failed (exit 101): unable to load config",
+        ),
+        ("\n", "`espanso path config` printed nothing"),
+    ],
+)
+def test_locate_espanso_dir_says_why_it_falls_back(answer, fallback, monkeypatch, tmp_path):
+    monkeypatch.setattr(deploy, "default_espanso_dir", lambda: tmp_path / "default")
+    found = deploy.locate_espanso_dir(lambda argv: answer)
+    assert found.path == tmp_path / "default"
+    assert found.fallback.startswith(fallback)
+    assert deploy.locate_espanso_dir(lambda argv: "/x/espanso\n") == deploy.EspansoDir(
+        Path("/x/espanso")
+    )
 
 
 # --- CLI ------------------------------------------------------------------------------------

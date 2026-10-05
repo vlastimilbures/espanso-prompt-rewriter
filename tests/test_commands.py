@@ -485,7 +485,15 @@ def test_doctor_json_schema_is_stable(espanso, clipboard, monkeypatch):
     for check_id, check in checks.items():
         assert tuple(check["data"]) == doctor.DATA_KEYS[check_id]
     assert set(checks["keys"]["data"]) == {"keys", "provider"}
-    assert set(checks["espanso"]["data"]) == {"found", "config_dir", "running"}
+    assert set(checks["espanso"]["data"]) == {
+        "found",
+        "config_dir",
+        "running",
+        "query_failed",
+        "exit_code",
+        "timed_out",
+        "error",
+    }
     assert set(checks["match_files"]["data"]) == {"espanso_dir", "files", "legacy"}
     assert set(checks["launcher"]["data"]) == {"current", "deployed", "drift", "missing"}
     assert set(checks["clipboard"]["data"]) == {"read", "length", "concealed", "error"}
@@ -499,6 +507,83 @@ def test_doctor_json_schema_is_stable(espanso, clipboard, monkeypatch):
         ("espanso", "path", "config"),
         ("espanso", "status"),
     }
+
+
+# #115: each way `espanso path config` can fail, as text and as JSON.
+_PANIC = deploy.CommandFailure(
+    found=True, path="/opt/bin/espanso", returncode=101, error="unable to load config"
+)
+_ESPANSO_CASES = [
+    (
+        None,
+        "espanso was not found on PATH",
+        {"found": False, "query_failed": False, "exit_code": None, "timed_out": False},
+    ),
+    (
+        _PANIC,
+        "espanso found at /opt/bin/espanso, but `espanso path config` failed (exit 101): "
+        "unable to load config; start Espanso once (`espanso start`) or check its config "
+        "(using the default folder ",
+        {"found": True, "query_failed": True, "exit_code": 101, "timed_out": False},
+    ),
+    (
+        deploy.CommandFailure(found=True, timed_out=True),
+        "espanso found, but `espanso path config` timed out after 30 s (using the default ",
+        {"found": True, "query_failed": True, "exit_code": None, "timed_out": True},
+    ),
+]
+
+
+@pytest.mark.parametrize(("answer", "message", "data"), _ESPANSO_CASES)
+def test_doctor_tells_espanso_failures_apart(answer, message, data, clipboard, monkeypatch):
+    fake = FakeRunner({"espanso status": "espanso is running"})
+    fake.answers["espanso path config"] = answer
+    monkeypatch.setattr(deploy, "run_command", fake)
+    text = _doctor().stdout
+    assert f"espanso: {message}" in " ".join(text.split())
+    espanso = json.loads(_doctor("--json").stdout)["checks"]["espanso"]
+    assert espanso["status"] == "warn"
+    assert espanso["message"].startswith(message)
+    assert {k: espanso["data"][k] for k in data} == data
+    assert espanso["data"]["error"] == (answer.error if answer else None)
+    assert espanso["data"]["config_dir"] == str(deploy.default_espanso_dir())
+    # Status is asked only when espanso is on PATH; both commands stay read-only.
+    assert (["espanso", "status"] in fake.calls) is data["found"]
+    assert {tuple(c) for c in fake.calls if c[0] == "espanso"} <= {
+        ("espanso", "path", "config"),
+        ("espanso", "status"),
+    }
+
+
+@pytest.mark.parametrize(("answer", "message", "data"), _ESPANSO_CASES)
+def test_deploy_and_setup_say_when_they_use_the_default_folder(
+    answer, message, data, saved, monkeypatch, tmp_path
+):
+    default = tmp_path / "default-espanso"
+    (default / "match").mkdir(parents=True)
+    monkeypatch.setattr(deploy, "default_espanso_dir", lambda: default)
+    monkeypatch.setattr(deploy, "run_command", FakeRunner({"espanso path config": answer}))
+    reason = deploy.locate_espanso_dir().fallback
+    notice = f"{reason}; using the default Espanso folder {default.resolve()}"
+    result = _run("espanso", "deploy", "--dry-run", "--launcher", LAUNCHER)
+    assert result.exit_code == 0, result.output
+    assert notice in " ".join(result.stderr.split())
+    assert f"Espanso match folder: {default.resolve() / 'match'}" in result.stdout
+    result = _run(
+        "setup",
+        "--non-interactive",
+        "--no-smoke-test",
+        "--provider",
+        "ollama",
+        "--launcher",
+        LAUNCHER,
+    )
+    assert result.exit_code == 0, result.output
+    assert notice in " ".join(result.stderr.split())
+    # Found by Espanso: no notice.
+    monkeypatch.setattr(deploy, "run_command", FakeRunner({"espanso path config": f"{default}\n"}))
+    result = _run("espanso", "deploy", "--dry-run", "--launcher", LAUNCHER)
+    assert "default Espanso folder" not in result.stderr
 
 
 def test_doctor_drift_case_reports_stale_and_no_secret(saved, espanso, clipboard, monkeypatch):
