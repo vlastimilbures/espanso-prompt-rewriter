@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## 0.16.1 - 2026-10-05
+
 ### Fixed
 - The comments at the top of the deployed `prompts-template.yml` and `prompts-llm.yml` no
   longer say the persona and settings come from the repository's `.env`. A wheel install has
