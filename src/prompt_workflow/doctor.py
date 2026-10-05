@@ -39,6 +39,7 @@ CHECK_IDS = (
     "sqlite",
     "clipboard",
     "profiles",
+    "previous_install",
 )
 # Every key of each check's data, in every report: a check that could not run has them all
 # as None, so a consumer never meets a missing key.
@@ -75,6 +76,7 @@ DATA_KEYS = {
     "sqlite": ("version", "wal_reset_bug"),
     "clipboard": ("read", "length", "concealed", "error"),
     "profiles": ("profile", "pro_profile", "user"),
+    "previous_install": ("gated", "roots", "signals", "env_file", "retire_pending", "shadow"),
 }
 # The keys each check needs, by provider; -i-, -ip-, -if- and -iok- always use OpenRouter.
 _PROVIDER_KEYS = {"openrouter": "OPENROUTER_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
@@ -366,6 +368,50 @@ def _profiles_check(settings: config.Settings) -> Check:
     return Check("profiles", OK, f"PROMPT_PROFILE {settings.profile} resolves", data)
 
 
+def _previous_install_check(
+    runner: deploy.Runner, espanso_dir: Path, launcher: str | None
+) -> Check:
+    from . import previous_install
+
+    try:
+        found = previous_install.detect(
+            runner=runner,
+            espanso_dir=espanso_dir,
+            launcher=Path(launcher) if launcher else None,
+            look_up_launcher=False,  # run() already looked: ``launcher`` is its answer
+        )
+    except Exception as exc:
+        # Information only: a folder it cannot look at never fails the report.
+        message = f"could not look for a previous install: {type(exc).__name__}"
+        return Check("previous_install", WARN, message)
+    first = found.candidates[0] if found.candidates else None
+    data = {
+        "gated": found.gated,
+        "roots": [str(c.root) for c in found.candidates],
+        "signals": sorted(first.signals) if first else [],
+        "env_file": str(first.env_file) if first and first.env_file else None,
+        "retire_pending": None,
+        "shadow": found.shadow.path if found.shadow else None,
+    }
+    found_at = (
+        f"a previous install was found at {', '.join(str(c.root) for c in found.candidates)} "
+        "and is not migrated"
+    )
+    if found.shadow:
+        message = (
+            f"`prompt-workflow` on PATH is {found.shadow.path}, not the installed launcher "
+            f"{found.shadow.launcher}: {found.shadow.hint}"
+        )
+        if first:
+            message = f"{found_at}; {message}"
+        return Check("previous_install", WARN, message, data)
+    if first:
+        return Check("previous_install", INFO, found_at, data)
+    if found.gated:
+        return Check("previous_install", OK, "settings are in place; nothing to look for", data)
+    return Check("previous_install", OK, "no previous install found", data)
+
+
 def _safely(check_id: str, build: Callable[[], Check]) -> Check:
     """One check that fails on its own never stops the report."""
     try:
@@ -431,6 +477,9 @@ def run(
         checks.append(Check("sqlite", WARN, "unknown"))
     checks.append(_safely("clipboard", lambda: _clipboard_check(clipboard)))
     checks.append(_safely("profiles", lambda: _profiles_check(settings)))
+    checks.append(
+        _safely("previous_install", lambda: _previous_install_check(run_command, target, current))
+    )
     return Report(tuple(checks))
 
 
@@ -444,6 +493,7 @@ HEAVY_MODULES = (
     "prompt_workflow.commands",
     "prompt_workflow.doctor",
     "prompt_workflow.config_store",
+    "prompt_workflow.previous_install",
 )
 IMPORT_TIMEOUT = 30
 _IMPORT_PROBE = """

@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Added
+- `prompt-workflow doctor` has a new `previous_install` check (#110). Before any setting is
+  saved (no `config.toml`, no secret store, not in `PROMPT_WORKFLOW_ENV` mode) it looks for an
+  earlier checkout install whose `.env` a wheel install does not read: the launcher in the
+  deployed match files or the deploy manifest (`<checkout>/.venv/bin/prompt-workflow`, or
+  `.venv\Scripts\prompt-workflow.exe` on Windows) and the uv tool receipt of an editable
+  install. It never scans the disk and never reads that `.env`, and only a folder whose
+  `pyproject.toml` names this project counts. It also warns when the `prompt-workflow` that
+  `PATH` finds first is not the installed launcher, for example while a checkout's `.venv` is
+  active. `doctor --json` adds the check with the data `gated`, `roots`, `signals`,
+  `env_file`, `retire_pending` and `shadow`.
+
 ## 0.16.1 - 2026-10-05
 
 ### Fixed

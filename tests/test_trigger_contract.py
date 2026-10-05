@@ -206,6 +206,7 @@ FORBIDDEN = (
     "prompt_workflow.doctor",
     "prompt_workflow.smoke",
     "prompt_workflow.config_store",
+    "prompt_workflow.previous_install",
 )
 # The usage history (#89) writes each run after its output, so sqlite3 loads on the trigger
 # path when tracking is on (PROMPT_HISTORY, the default), and never when it is off.

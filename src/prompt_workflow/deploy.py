@@ -487,6 +487,25 @@ class Plan:
         return [s for s in self.steps if s.state in (MODIFIED, FOREIGN)]
 
 
+def launchers_in(text: str) -> set[str]:
+    """The launcher paths a match file's cmd lines quote. Every release quoted the launcher
+    the same way; Windows paths have forward slashes."""
+    return set(_QUOTED_LAUNCHER.findall(text))
+
+
+def deployed_launchers(espanso: Path) -> set[str]:
+    """The launchers the packaged match files in ``espanso``'s match folder call, whoever
+    deployed them (an install script, a deploy, a hand copy). Reads only; an unreadable or
+    missing file adds nothing."""
+    found: set[str] = set()
+    for name in assets.match_names():
+        try:
+            found |= launchers_in((espanso / "match" / name).read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError):
+            continue
+    return found
+
+
 def _released_rendering(name: str, current: str, launchers: Sequence[str]) -> bool:
     """True when ``current`` is exactly what an install script or an earlier deploy wrote from
     a source some release shipped (match_history): its stamp, if any, dropped and the
@@ -495,8 +514,7 @@ def _released_rendering(name: str, current: str, launchers: Sequence[str]) -> bo
     # Before v0.11 (.gitattributes eol=lf) a Windows checkout held CRLF sources, which the
     # Windows script copied byte for byte; the digests are of the LF sources.
     body = _STAMP_LINE.sub("", current.removeprefix("\ufeff").replace("\r\n", "\n"), count=1)
-    # Every release quoted the launcher the same way; Windows paths have forward slashes.
-    candidates = {*_QUOTED_LAUNCHER.findall(body), *launchers}
+    candidates = {*launchers_in(body), *launchers}
     for launcher in [None, *sorted(candidates)]:
         source = body if launcher is None else body.replace(launcher, PLACEHOLDER)
         if hashlib.sha256(source.encode("utf-8")).hexdigest() in known:
