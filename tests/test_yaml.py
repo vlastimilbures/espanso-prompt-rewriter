@@ -232,7 +232,9 @@ def test_form_fields_used_in_shell_commands_exist():
 # error marker (or inject shell text: no free-text field ever reaches a command).
 def test_form_choices_are_valid_cli_values():
     checks = {
-        "--model": lambda v: split_model_spec(v)[0] and re.fullmatch(r"[\w.\-/:@]+", v),
+        "--model": lambda v: (
+            v == KEEP or (split_model_spec(v)[0] and re.fullmatch(r"[\w.\-/:@]+", v))
+        ),
         "--effort": lambda v: v in (KEEP, *EFFORTS),
         "--max-tokens": lambda v: v == KEEP or v.isdigit(),
         "--timeout": lambda v: v == KEEP or v.isdigit(),
@@ -247,6 +249,32 @@ def test_form_choices_are_valid_cli_values():
                 assert str(field["default"]) in values, f"{match['trigger']}: {name} default"
                 for value in values:
                     assert checks[option](value), f"{match['trigger']}: {option} {value!r}"
+
+
+# Every -if- list starts with, and defaults to, `default` (keep the pro-tier setting), as the
+# comment above the match and README say, so the popup changes nothing unless a value is picked.
+# The timeout list stops at 120 s: Espanso blocks every other trigger while a call runs.
+def test_if_form_lists_default_to_the_tier_setting():
+    (forms,) = [f for path in MATCH_FILES for m, f in _form_vars(path) if m["trigger"] == "-if-"]
+    fields = forms["form1"]["fields"]
+    assert set(fields) == {"model", "effort", "maxtokens", "timeout"}
+    for name, field in fields.items():
+        values = [str(v) for v in field["values"]]
+        assert values[0] == KEEP, f"-if-: {name} must list {KEEP} first"
+        assert str(field["default"]) == KEEP, f"-if-: {name} must default to {KEEP}"
+    assert max(int(v) for v in fields["timeout"]["values"] if str(v) != KEEP) <= 120
+
+
+# Every match, the commented-out ones included, has its own label: Espanso's search bar shows
+# it instead of the replacement text, which for the CLI triggers is only `{{output}}`.
+def test_every_match_has_a_distinct_label():
+    matches = [m for path in MATCH_FILES for m in _load(path)["matches"]]
+    matches += [m for path in MATCH_FILES for m in _commented_matches(path)]
+    labels = [match.get("label") for match in matches]
+    for match, label in zip(matches, labels, strict=True):
+        assert isinstance(label, str), f"{match['trigger']} has no label"
+        assert label.strip(), f"{match['trigger']} has an empty label"
+    assert len(set(labels)) == len(labels), "two matches share a label"
 
 
 # Match files are UTF-8 without a BOM: the installers read and write them as such, and

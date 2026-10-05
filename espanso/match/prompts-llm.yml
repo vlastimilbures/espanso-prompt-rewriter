@@ -11,6 +11,7 @@ matches:
   # unless ALLOW_CLOUD_OVERRIDE=true, but that gate is a heuristic, not a
   # guarantee — only use this trigger where company policy permits.
   - trigger: "-i-"
+    label: "prompt-workflow: rewrite the clipboard (OpenRouter)"
     left_word: true
     replace: "{{output}}"
     force_mode: clipboard
@@ -25,6 +26,7 @@ matches:
   # private keys stay blocked. The paste starts with a "[prompt-workflow: sent despite: …]"
   # line. Use it only for a draft whose flagged content may leave the machine.
   - trigger: "-iok-"
+    label: "prompt-workflow: rewrite, allow a flagged label, ID, email or IBAN (OpenRouter)"
     left_word: true
     replace: "{{output}}"
     force_mode: clipboard
@@ -35,8 +37,10 @@ matches:
           cmd: "\"__PROMPT_WORKFLOW__\" improve --trigger-id iok --provider openrouter --allow-flagged --source clipboard"
 
   # Same rewrite on the pro tier: a reasoning model (OPENROUTER_PRO_MODEL) for hard,
-  # multi-part drafts. Slower (~5-8 s) but more rigorous. Same cloud caveats as above.
+  # multi-part drafts. Slower (about 6 s median, 9 s p95) but more rigorous. Same cloud
+  # caveats as above.
   - trigger: "-ip-"
+    label: "prompt-workflow: rewrite on the pro tier (OpenRouter)"
     left_word: true
     replace: "{{output}}"
     force_mode: clipboard
@@ -47,13 +51,15 @@ matches:
           cmd: "\"__PROMPT_WORKFLOW__\" improve --trigger-id ip --provider openrouter --tier pro --source clipboard"
 
   # Same rewrite, but a popup picks the model and its settings for this one call.
-  # Built on the pro tier, so "default" in each list means the OPENROUTER_PRO_* setting.
+  # Built on the pro tier, so "default" in each list means the OPENROUTER_PRO_* setting
+  # (for the model: OPENROUTER_PRO_MODEL with its OPENROUTER_PRO_PROVIDER pin).
   # Each model carries its OpenRouter endpoint pin as model@endpoint (@auto = OpenRouter's
   # own routing), since one pin only serves one vendor's models. Every field is a fixed
   # choice, never free text, which is what makes {{form1.*}} safe to put unquoted in cmd.
   # Many reasoning models count thinking tokens against the max tokens cap, so pair high
   # effort with 8000+ or the rewrite can come back cut short. Same cloud caveats as above.
   - trigger: "-if-"
+    label: "prompt-workflow: rewrite, pick model and settings (OpenRouter)"
     left_word: true
     replace: "{{output}}"
     force_mode: clipboard
@@ -70,11 +76,12 @@ matches:
             model:
               type: choice
               values:
+                - default
                 - openai/gpt-6-luna@openai
                 - openai/gpt-6-luna@auto
                 - google/gemini-3.8-flash@google-ai-studio
                 - google/gemini-3.5-flash-lite@google-ai-studio/flex
-              default: openai/gpt-6-luna@openai
+              default: "default"
             effort:
               type: choice
               values: ["default", "none", "minimal", "low", "medium", "high"]
@@ -85,7 +92,7 @@ matches:
               default: "default"
             timeout:
               type: choice
-              values: ["default", "30", "60", "120", "180"]
+              values: ["default", "30", "60", "120"]
               default: "default"
       - name: output
         type: shell
@@ -93,6 +100,7 @@ matches:
           cmd: "\"__PROMPT_WORKFLOW__\" improve --trigger-id if --provider openrouter --tier pro --source clipboard --model {{form1.model}} --effort {{form1.effort}} --max-tokens {{form1.maxtokens}} --timeout {{form1.timeout}}"
 
   - trigger: "-il-"
+    label: "prompt-workflow: rewrite locally (Ollama)"
     left_word: true
     replace: "{{output}}"
     force_mode: clipboard
@@ -103,6 +111,7 @@ matches:
           cmd: "\"__PROMPT_WORKFLOW__\" improve --trigger-id il --provider ollama --profile general --source clipboard"
 
   - trigger: "-ilm-"
+    label: "prompt-workflow: rewrite locally (LM Studio)"
     left_word: true
     replace: "{{output}}"
     force_mode: clipboard
@@ -116,6 +125,7 @@ matches:
   # to the Anthropic API. Uncomment only if company policy permits, and note
   # that the CLI still blocks sensitive content unless ALLOW_CLOUD_OVERRIDE=true.
   # - trigger: "-ic-"
+  #   label: "prompt-workflow: rewrite (Anthropic)"
   #   left_word: true
   #   replace: "{{output}}"
   #   force_mode: clipboard
