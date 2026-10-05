@@ -24,6 +24,27 @@ and detach-before-uninstall. `tests/test_docs.py` checks every `prompt-workflow 
 in README and in the CHANGELOG's Unreleased and newest release notes, and every standalone
 `--flag` span in README, against the Click tree.
 
+Checks (CONTRIBUTING "Checks"; CI runs `uv sync --locked`, then these, with `pytest --cov`
+held to `fail_under = 95`):
+
+```bash
+uv run pytest --cov                             # unit tests, offline
+uv run ruff check . && uv run ruff format --check .
+uv run mypy                                     # strict, src and scripts
+uv run pre-commit run --all-files               # also YAML checks, gitleaks and zizmor
+UPDATE_SNAPSHOTS=1 uv run pytest tests/test_tui_snapshots.py  # after a tui/ screen change
+```
+
+Rules for agents:
+
+- `scripts/bench_models.py` and `uv run pytest -m live` (`tests/test_live.py`) call the paid
+  OpenRouter API: run them only when asked.
+- Never run the installers, `prompt-workflow espanso …` (`deploy`, `status`, `detach`),
+  `setup --deploy` or `espanso` itself: they read or rewrite the user's live Espanso match
+  files, and a deploy restarts Espanso.
+- Tests stay offline: no external API calls; mock HTTP (`fake_http`).
+- Every user-visible change gets a CHANGELOG `## Unreleased` entry and a README update.
+
 ## Architecture
 
 - `cli.py` — main Typer command, `improve`. Reads a draft (`clipboard`/`stdin`/`argument`),
