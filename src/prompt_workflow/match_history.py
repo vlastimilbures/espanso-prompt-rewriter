@@ -32,6 +32,7 @@ KNOWN_SOURCES: dict[str, frozenset[str]] = {
         {
             "1b967f502089e307a885ba7b3eb3a85782629c443bc4bc50ac864364b1c0e0ad",
             "1d271379279e787f18b1515d1c13990e718efad3ea562f78dd8a14d8640a3a4e",
+            "38045846defcbbcf355e4fcf0db551516a141a02f7a483fba6876e417b8e15cc",
             "53292b9f1d1c24e3771606b69c7c6bff9feacca9395b9668e36d6762752ad1b1",
             "5b3b9f2541e3dafebd033c724febb77b8e9a4478d17f3deaad364a5195e85153",
             "a064a91c8e05437d00e3b708434d492d1e6903eba912b9bf19488b97d46a648b",
