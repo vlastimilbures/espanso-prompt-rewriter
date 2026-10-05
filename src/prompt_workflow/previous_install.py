@@ -153,24 +153,35 @@ def skip_file(environ: Mapping[str, str] | None = None) -> Path:
     return config.user_data_dir(os.environ if environ is None else environ) / SKIP_FILE
 
 
-def skipped_roots(environ: Mapping[str, str] | None = None) -> set[str]:
-    """The roots the user chose to skip. A missing or damaged marker counts as empty, so the
-    offer comes back rather than any command failing."""
+def _skipped(environ: Mapping[str, str] | None) -> dict[str, str]:
+    """Each skipped root and when it was skipped; a missing or damaged marker counts as empty,
+    so the offer comes back rather than any command failing."""
     try:
         raw = json.loads(skip_file(environ).read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return set()
+        return {}
     items = raw.get("skipped") if isinstance(raw, dict) else None
     if not isinstance(items, list):
-        return set()
-    return {i["root"] for i in items if isinstance(i, dict) and isinstance(i.get("root"), str)}
+        return {}
+    return {
+        i["root"]: i["at"] if isinstance(i.get("at"), str) else ""
+        for i in items
+        if isinstance(i, dict) and isinstance(i.get("root"), str)
+    }
+
+
+def skipped_roots(environ: Mapping[str, str] | None = None) -> set[str]:
+    """The roots the user chose to skip, as detect() names them (resolved)."""
+    return set(_skipped(environ))
 
 
 def skip(root: Path, environ: Mapping[str, str] | None = None) -> None:
     """Remember that the user skipped ``root``; a different checkout found later is offered."""
-    roots = skipped_roots(environ) | {str(root)}
-    at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    record = {"version": SKIP_VERSION, "skipped": [{"root": r, "at": at} for r in sorted(roots)]}
+    skipped = _skipped(environ)
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    skipped.setdefault(str(_resolved(root.expanduser())), now)
+    items = [{"root": r, "at": at} for r, at in sorted(skipped.items())]
+    record = {"version": SKIP_VERSION, "skipped": items}
     path = skip_file(environ)
     path.parent.mkdir(parents=True, exist_ok=True)
     data = (json.dumps(record, indent=2) + "\n").encode("utf-8")
@@ -184,16 +195,27 @@ def _inside(path: Path, parent: Path) -> bool:
     return _resolved(path).is_relative_to(_resolved(parent))
 
 
-def shadow(environ: Mapping[str, str], runner: deploy.Runner) -> Shadow | None:
+def shadow(
+    environ: Mapping[str, str],
+    runner: deploy.Runner,
+    launcher: Path | None = None,
+    *,
+    look_up: bool = True,
+) -> Shadow | None:
     """The `prompt-workflow` first on PATH, when it is not this install's launcher: the shell
-    (and anything started from it) then runs another CLI with other settings."""
+    (and anything started from it) then runs another CLI with other settings. ``launcher``
+    is the one to compare with; without it, it is looked up unless ``look_up`` is False (the
+    caller already found none)."""
     found = shutil.which("prompt-workflow", path=environ.get("PATH"))
     if not found:
         return None
-    try:
-        launcher = deploy.resolve_launcher(runner=runner).path
-    except deploy.DeployError:
-        return None
+    if launcher is None:
+        if not look_up:
+            return None
+        try:
+            launcher = deploy.resolve_launcher(runner=runner).path
+        except deploy.DeployError:
+            return None
     try:
         if os.path.samefile(found, launcher):
             return None
@@ -201,7 +223,7 @@ def shadow(environ: Mapping[str, str], runner: deploy.Runner) -> Shadow | None:
         pass
     venv = environ.get("VIRTUAL_ENV")
     if venv and _inside(Path(found), Path(venv)):
-        hint = "a virtual environment is active: run `deactivate` (or `env -u VIRTUAL_ENV`)"
+        hint = "a virtual environment is active: run `deactivate`"
     elif ".venv" in Path(found).parts:
         hint = f"remove {Path(found).parent} from PATH"
     else:
@@ -226,13 +248,17 @@ def detect(
     runner: deploy.Runner | None = None,
     espanso_dir: Path | None = None,
     entered: Path | None = None,
+    launcher: Path | None = None,
+    look_up_launcher: bool = True,
 ) -> Detection:
     """Every earlier checkout install the signals name, unless the gate is closed. A root the
-    user skipped is left out unless they entered it. Reads files; runs only `espanso path
-    config` (when ``espanso_dir`` is not given) and `uv tool dir`, through ``runner``."""
+    user skipped is left out unless they entered it. ``launcher`` (and ``look_up_launcher``)
+    go to shadow(). Reads files; runs only commands doctor runs too, through ``runner``:
+    `espanso path config` (when ``espanso_dir`` is not given), `uv tool dir`, and the
+    launcher lookup (`uv tool dir --bin`, `brew --prefix`) when no ``launcher`` is given."""
     env = os.environ if environ is None else environ
     run = runner or deploy.run_command
-    found_shadow = shadow(env, run)
+    found_shadow = shadow(env, run, launcher, look_up=look_up_launcher)
     why = gate(env)
     if why:
         return Detection(gated=why, shadow=found_shadow)
@@ -247,10 +273,10 @@ def detect(
         if root is not None:
             signals.setdefault(_resolved(Path(root)), set()).add(signal)
 
-    for launcher in sorted(in_files):
-        add(checkout_root_of(launcher), LAUNCHER)
-    for launcher in sorted(in_manifest):
-        add(checkout_root_of(launcher), MANIFEST)
+    for deployed in sorted(in_files):
+        add(checkout_root_of(deployed), LAUNCHER)
+    for deployed in sorted(in_manifest):
+        add(checkout_root_of(deployed), MANIFEST)
     add(receipt_root(run), RECEIPT)
     if entered is not None:
         add(entered.expanduser(), ENTERED)
@@ -264,9 +290,9 @@ def detect(
             continue
         inside = tuple(
             sorted(
-                launcher
-                for launcher in launchers
-                if (owner := checkout_root_of(launcher)) is not None
+                deployed
+                for deployed in launchers
+                if (owner := checkout_root_of(deployed)) is not None
                 and _resolved(Path(owner)) == root
             )
         )
@@ -278,7 +304,8 @@ def detect(
                 signals=frozenset(kinds),
                 env_file=env_file if config_files.is_file(env_file) else None,
                 launchers_in_root=inside,
-                profiles_dir=profiles if profiles.is_dir() else None,
+                # os.path.isdir never raises (Path.is_dir does on EACCES before 3.14).
+                profiles_dir=profiles if os.path.isdir(profiles) else None,
             )
         )
     return Detection(candidates=tuple(candidates), shadow=found_shadow)

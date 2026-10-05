@@ -3,6 +3,9 @@ faked, and every checkout, receipt and match folder is built under tmp_path."""
 
 from __future__ import annotations
 
+import builtins
+import io
+import json
 import os
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
@@ -209,15 +212,54 @@ def test_the_running_checkout_gives_nothing(tmp_path, espanso, env, monkeypatch)
 
 def test_detection_never_reads_the_env_file(tmp_path, espanso, env, monkeypatch):
     root = checkout(tmp_path)
-    read = Path.read_text
+    opened = []
+    real_open = io.open
 
-    def guarded(self, *args, **kwargs):
-        assert self.name != ".env", "detection read the .env"
-        return read(self, *args, **kwargs)
+    def guarded(file, *args, **kwargs):
+        opened.append(Path(os.fspath(file)).name if not isinstance(file, int) else "")
+        return real_open(file, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "read_text", guarded)
+    # Path.read_text/read_bytes and open() all go through io.open.
+    monkeypatch.setattr(io, "open", guarded)
+    monkeypatch.setattr(builtins, "open", guarded)
     found = previous_install.detect(runner=FakeRunner(), espanso_dir=espanso, entered=root)
     assert found.candidates[0].env_file is not None
+    assert opened, "the guard saw no file at all"
+    assert ".env" not in opened
+
+
+@pytest.mark.skipif(WINDOWS, reason="POSIX permissions")
+def test_an_unreadable_env_file_is_still_reported(tmp_path, espanso, env):
+    root = checkout(tmp_path)
+    (root / ".env").chmod(0)
+    try:
+        found = previous_install.detect(runner=FakeRunner(), espanso_dir=espanso, entered=root)
+    finally:
+        (root / ".env").chmod(0o600)
+    assert found.candidates[0].env_file == root.resolve() / ".env"
+
+
+@pytest.mark.skipif(WINDOWS, reason="POSIX permissions")
+def test_an_unreadable_checkout_folder_never_fails_doctor(tmp_path, espanso, env, no_clipboard):
+    root = checkout(tmp_path)
+    deploy_old(espanso, str(venv_launcher(root)))
+    (root / "src").chmod(0)
+    try:
+        report = doctor.run(espanso_dir=espanso, launcher=UV_BIN, runner=FakeRunner())
+    finally:
+        (root / "src").chmod(0o700)
+    check = _check(report)
+    assert check.status == "info"
+    assert check.data["roots"] == [str(root.resolve())]
+
+
+def test_a_check_that_raises_is_a_warning_not_a_failure(espanso, env, no_clipboard, monkeypatch):
+    def broken(**_):
+        raise PermissionError("no")
+
+    monkeypatch.setattr(previous_install, "detect", broken)
+    report = doctor.run(espanso_dir=espanso, launcher=UV_BIN, runner=FakeRunner())
+    assert _check(report).status == "warn"
 
 
 def test_without_espanso_dir_it_asks_espanso(tmp_path, espanso, env):
@@ -286,6 +328,28 @@ def test_a_skipped_root_is_offered_only_when_entered(tmp_path, espanso, env):
     assert previous_install.detect(runner=FakeRunner(), espanso_dir=espanso).candidates == ()
     found = previous_install.detect(runner=FakeRunner(), espanso_dir=espanso, entered=root)
     assert _roots(found) == {root.resolve(): {LAUNCHER, ENTERED}}
+
+
+@pytest.mark.skipif(WINDOWS, reason="symlinks need privileges on Windows")
+def test_a_root_skipped_through_a_link_is_skipped(tmp_path, espanso, env):
+    root = checkout(tmp_path)
+    link = tmp_path / "link"
+    link.symlink_to(root, target_is_directory=True)
+    deploy_old(espanso, str(venv_launcher(root)))
+    previous_install.skip(link)
+    assert previous_install.detect(runner=FakeRunner(), espanso_dir=espanso).candidates == ()
+
+
+def test_a_skip_keeps_earlier_times(tmp_path, env):
+    path = previous_install.skip_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    first = str((tmp_path / "a").resolve())
+    record = {"version": 1, "skipped": [{"root": first, "at": "2026-01-01T00:00:00Z"}]}
+    path.write_text(json.dumps(record), "utf-8")
+    previous_install.skip(tmp_path / "b")
+    items = json.loads(path.read_text("utf-8"))["skipped"]
+    assert {"root": first, "at": "2026-01-01T00:00:00Z"} in items
+    assert len(items) == 2
 
 
 def test_another_checkout_is_offered_after_a_skip(tmp_path, espanso, env):
@@ -372,6 +436,20 @@ def test_no_shadow_without_a_launcher(tmp_path, monkeypatch):
     assert previous_install.shadow({}, FakeRunner()) is None
 
 
+def test_a_given_launcher_is_not_looked_up(tmp_path, monkeypatch):
+    def unexpected(**_):
+        raise AssertionError("looked up")
+
+    monkeypatch.setattr(deploy, "resolve_launcher", unexpected)
+    other = tmp_path / "other" / "prompt-workflow"
+    _which(monkeypatch, other)
+    given = tmp_path / "given" / "prompt-workflow"
+    found = previous_install.shadow({}, FakeRunner(), given)
+    assert found is not None
+    assert found.launcher == str(given)
+    assert previous_install.shadow({}, FakeRunner(), look_up=False) is None
+
+
 # --- doctor -------------------------------------------------------------------------------
 
 
@@ -430,7 +508,8 @@ def test_doctor_warns_about_a_shadowed_cli(
     old.parent.mkdir(parents=True)
     old.write_text("", "utf-8")
     _which(monkeypatch, old)
-    report = doctor.run(espanso_dir=espanso, launcher=UV_BIN, runner=FakeRunner())
+    # doctor compares PATH with its --launcher, not a lookup of its own.
+    report = doctor.run(espanso_dir=espanso, launcher=str(installed), runner=FakeRunner())
     check = _check(report)
     assert check.status == "warn"
     assert str(old) in check.message

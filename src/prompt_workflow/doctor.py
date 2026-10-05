@@ -368,10 +368,22 @@ def _profiles_check(settings: config.Settings) -> Check:
     return Check("profiles", OK, f"PROMPT_PROFILE {settings.profile} resolves", data)
 
 
-def _previous_install_check(runner: deploy.Runner, espanso_dir: Path) -> Check:
+def _previous_install_check(
+    runner: deploy.Runner, espanso_dir: Path, launcher: str | None
+) -> Check:
     from . import previous_install
 
-    found = previous_install.detect(runner=runner, espanso_dir=espanso_dir)
+    try:
+        found = previous_install.detect(
+            runner=runner,
+            espanso_dir=espanso_dir,
+            launcher=Path(launcher) if launcher else None,
+            look_up_launcher=False,  # run() already looked: ``launcher`` is its answer
+        )
+    except Exception as exc:
+        # Information only: a folder it cannot look at never fails the report.
+        message = f"could not look for a previous install: {type(exc).__name__}"
+        return Check("previous_install", WARN, message)
     first = found.candidates[0] if found.candidates else None
     data = {
         "gated": found.gated,
@@ -465,7 +477,9 @@ def run(
         checks.append(Check("sqlite", WARN, "unknown"))
     checks.append(_safely("clipboard", lambda: _clipboard_check(clipboard)))
     checks.append(_safely("profiles", lambda: _profiles_check(settings)))
-    checks.append(_safely("previous_install", lambda: _previous_install_check(run_command, target)))
+    checks.append(
+        _safely("previous_install", lambda: _previous_install_check(run_command, target, current))
+    )
     return Report(tuple(checks))
 
 
