@@ -540,7 +540,11 @@ def test_profiles_migrate_copies_after_confirming(espanso, tmp_path, monkeypatch
         await press(app, pilot, "#migrate-profiles")
         assert "extra.md (added)" in app.screen.preview
         await press(app, pilot, "#confirm")
-        assert pane(app, "profiles").last_message == "extra: copied\ngeneral: copied"
+        assert pane(app, "profiles").last_message == (
+            "extra: copied\ngeneral: copied\nYour general.md replaces the built-in only once "
+            "PROMPT_PROFILE_OVERRIDES lists it: "
+            "`prompt-workflow config set PROMPT_PROFILE_OVERRIDES general`."
+        )
 
     drive(scenario)
     from prompt_workflow.prompt_builder import user_profiles_dir
@@ -562,12 +566,10 @@ def test_profiles_migrate_default_and_nothing_to_copy(espanso, tmp_path, monkeyp
         assert pane(app, "profiles").last_message == ""
         await press(app, pilot, "#migrate-profiles")
         await press(app, pilot, "#confirm")
-        assert "PROMPT_PROFILE_OVERRIDES includes default" in pane(app, "profiles").last_message
+        assert "PROMPT_PROFILE_OVERRIDES default`" in pane(app, "profiles").last_message
         pristine["default"] = "Edited."
         await press(app, pilot, "#migrate-profiles")
-        assert pane(app, "profiles").last_message == (
-            "No added or edited profiles; nothing to copy."
-        )
+        assert pane(app, "profiles").last_message == profile_service.NOTHING_CHANGED
 
     drive(scenario)
 

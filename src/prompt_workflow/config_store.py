@@ -666,12 +666,27 @@ class RollbackPlan:
     backup: Path
     restores: tuple[tuple[Path, Path], ...]
     token: str
+    # Checkouts whose .env copy mode copied: this install never reads it, so the settings
+    # that came only from there are gone after the rollback, whether or not it was retired.
+    unread: tuple[Path, ...] = ()
+
+    @property
+    def read_again(self) -> bool:
+        """A restored .env is one this install reads (not only a copied checkout's)."""
+        return any(original.parent not in self.unread for _, original in self.restores)
 
     def describe(self) -> list[str]:
         lines = [f"{original}: restored from {stored}" for stored, original in self.restores]
         lines.append(
             f"{config_files.SETTINGS_FILE} and {config_files.SECRETS_FILE} as they are now: "
             f"moved into {self.backup}"
+        )
+        lines.extend(
+            f"This install does not read {root / '.env'}: the settings copied from it are "
+            "gone, and the match files still call this install. To use that checkout again, "
+            "run its install script; to copy again, "
+            f"`prompt-workflow config migrate --from {root}`."
+            for root in self.unread
         )
         return lines
 
@@ -698,8 +713,11 @@ def plan_rollback(environ: Mapping[str, str] | None = None) -> RollbackPlan:
     directory = config_dir(env)
     record, data = _read_marker(directory)
     restores: list[tuple[Path, Path]] = []
+    unread: list[Path] = []
     for entry in record["sources"]:
         original = Path(entry["from"])
+        if entry.get("copied"):  # never the running checkout: plan_migration refuses it
+            unread.append(original.parent)
         keys = ("retired_to", "retired_in_place") if entry.get("copied") else ("to", "in_place")
         places = [Path(entry[key]) for key in keys if entry.get(key)]
         if entry.get("copied") and not places:
@@ -718,7 +736,7 @@ def plan_rollback(environ: Mapping[str, str] | None = None) -> RollbackPlan:
         _file_digest(config.settings_file(env)),
         _file_digest(directory / config_files.SECRETS_FILE),
     )
-    return RollbackPlan(Path(record["backup"]), tuple(restores), token)
+    return RollbackPlan(Path(record["backup"]), tuple(restores), token, tuple(unread))
 
 
 def apply_rollback(environ: Mapping[str, str] | None = None, *, consent: str) -> None:

@@ -18,6 +18,7 @@ from textual.widgets import Button, Footer, Header, Static
 
 from .. import config_store, deploy, previous_install
 from ..commands import common
+from ..profiles import PROMPTS_PATH
 from .modals import ConfirmModal, Field, FormModal
 from .panes import EXPECTED, TriggersPane, _error, copy_profiles, previous_root
 from .state import State
@@ -28,7 +29,8 @@ if TYPE_CHECKING:
 INTRO = (
     "An earlier install ran from a checkout of this project. This install never reads that "
     "checkout's .env or profiles, so copy what you need, in this order. Each step shows a "
-    "preview first; nothing is deleted, and `prompt-workflow config rollback` undoes the copy."
+    "preview first; nothing is deleted, and `prompt-workflow config rollback` undoes the copy "
+    "(the match files stay deployed)."
 )
 GATED = {
     previous_install.LEGACY: "PROMPT_WORKFLOW_ENV is set, so that file holds the settings",
@@ -158,6 +160,7 @@ class PreviousInstallScreen(Screen[None]):
             pending.launchers_in_root if pending else ()
         )
         copied = pending is not None
+        root = previous_root(found)
         steps = {
             "previous-copy": (
                 (False, "done: the settings were copied")
@@ -167,8 +170,9 @@ class PreviousInstallScreen(Screen[None]):
                 else (False, "nothing to copy: no .env")
             ),
             "previous-profiles": (
-                (True, f"from {best.profiles_dir if best else previous_root(found)}")
-                if (best and best.profiles_dir) or (best is None and pending is not None)
+                (True, f"from {root / PROMPTS_PATH}; the preview lists the added or edited ones")
+                if root is not None
+                and ((best and best.profiles_dir) or (best is None and pending is not None))
                 else (False, "no profiles folder")
             ),
             "previous-deploy": (

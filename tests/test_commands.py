@@ -272,6 +272,7 @@ def test_config_migrate_and_rollback_with_the_token(saved):
     token = preview.split("Preview token: ")[1].split()[0]
     result = _run("config", "rollback", "--yes", "--preview-token", token)
     assert result.exit_code == 0, result.output
+    assert "Rolled back: the .env is read again." in result.stdout
     assert env.is_file()
     assert not (saved / "config.toml").exists()
 
@@ -1311,7 +1312,8 @@ def test_profiles_migrate_nothing_changed_and_default(monkeypatch, tmp_path):
     monkeypatch.setattr(
         profiles, "git_pristine_profiles", lambda root, rev=None: {"default": "same"}
     )
-    assert "nothing to copy" in _run(*args).stdout
+    assert "--rev <commit>" in _run(*args).stdout
+    assert "nothing to copy" in _run(*args, "--rev", "v0.16.1").stdout
     monkeypatch.setattr(
         profiles, "git_pristine_profiles", lambda root, rev=None: {"default": "old"}
     )

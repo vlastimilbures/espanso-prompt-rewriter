@@ -44,6 +44,24 @@ place until `prompt-workflow config retire --from PATH`.
   `previous_install` check, and the Profiles tab's "Migrate from checkout" uses the checkout
   found.
 
+### Changed
+- `prompt-workflow profiles migrate`, the interface's profile copy and setup now say how to use
+  every copied file named like a built-in profile, not only `default.md`: it replaces the
+  built-in only once `PROMPT_PROFILE_OVERRIDES` lists it, and the message gives the
+  `prompt-workflow config set PROMPT_PROFILE_OVERRIDES ...` command (keeping the names already
+  listed). `doctor`'s `profiles` warning for such a file gives the same command.
+- When `profiles migrate` finds nothing to copy, it says what it compared with (the commit the
+  branch shares with its upstream, or HEAD without one) and how to compare with an older
+  commit (`--rev <commit>`), since a profile committed on a branch without an upstream counts
+  as unchanged.
+- `prompt-workflow config rollback` after `config migrate --from` (#110) no longer says "the
+  .env is read again" when only the earlier checkout's `.env` comes back: this install never
+  reads it. The preview says so, notes that the match files still call this install, and names
+  the way back (that checkout's install script) or `config migrate --from` to copy again.
+- Setup's to-do lines name what they are about ("copy the settings of PATH", "copy the profiles
+  added or edited in PATH"), and its migration preview no longer reads as if the copy ran. The
+  interface's "Previous install" screen notes that rollback leaves the match files deployed.
+
 ## 0.16.1 - 2026-10-05
 
 ### Fixed
