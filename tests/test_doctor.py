@@ -140,6 +140,36 @@ def test_launcher_checks(tmp_path, espanso):
     assert (check.status, check.data["drift"]) == ("ok", False)
 
 
+def test_launcher_check_skips_entries_whose_file_is_gone(tmp_path, espanso):
+    """A deleted folder (or another Espanso config folder) leaves manifest entries behind:
+    their launcher calls nothing, so a gone one is no FAIL; a live file's gone launcher is."""
+    exe = tmp_path / "prompt-workflow"
+    exe.write_text("", "utf-8")
+    old = tmp_path / "old-espanso"
+    (old / "match").mkdir(parents=True)
+    deploy.apply(
+        deploy.plan(old, str(tmp_path / "gone" / "prompt-workflow"), deploy.Manifest.load())
+    )
+    deploy.apply(deploy.plan(espanso, str(exe), deploy.Manifest.load()))
+    for path in (old / "match").iterdir():
+        path.unlink()
+    (old / "match").rmdir()
+    check = doctor._launcher_check(str(exe), deploy.Manifest.load())
+    assert check.status == "ok"
+    assert check.data["missing"] == []
+    assert check.data["deployed"] == [str(exe)]
+    assert check.data["orphans"] == sorted(
+        str(old / "match" / n) for n in deploy.assets.match_names()
+    )
+    assert "no longer exist" in check.message
+    exe.unlink()  # a live file's launcher gone still fails
+    check = doctor._launcher_check(str(exe), deploy.Manifest.load())
+    assert (check.status, check.data["missing"]) == ("fail", [str(exe)])
+    for path in (espanso / "match").iterdir():
+        path.unlink()
+    assert doctor._launcher_check(None, deploy.Manifest.load()).status == "info"
+
+
 def test_run_compares_with_the_deployed_launcher(espanso, no_clipboard):
     """With no launcher found or given, the files are compared with what was deployed."""
     deploy.apply(deploy.plan(espanso, LAUNCHER, deploy.Manifest.load()))
@@ -147,6 +177,20 @@ def test_run_compares_with_the_deployed_launcher(espanso, no_clipboard):
     files = _status("match_files", report).data["files"]
     assert {f["state"] for f in files} == {deploy.IN_SYNC}
     assert _status("launcher", report).data["missing"] == [LAUNCHER]
+
+
+def test_run_compares_with_a_live_entry_not_an_orphan(tmp_path, espanso, no_clipboard):
+    """With no launcher found, a gone file's launcher (here sorting first) is not the one the
+    live files are compared with."""
+    old = tmp_path / "old-espanso"
+    (old / "match").mkdir(parents=True)
+    deploy.apply(deploy.plan(espanso, LAUNCHER, deploy.Manifest.load()))
+    deploy.apply(deploy.plan(old, "/A/gone/prompt-workflow", deploy.Manifest.load()))
+    for path in (old / "match").iterdir():
+        path.unlink()
+    report = doctor.run(espanso_dir=espanso, runner=_runner())
+    files = _status("match_files", report).data["files"]
+    assert {f["state"] for f in files} == {deploy.IN_SYNC}
 
 
 def test_run_with_a_damaged_manifest(espanso, no_clipboard):

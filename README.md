@@ -211,7 +211,10 @@ keeps yours unless you pass `--on-conflict ours|side`, and ends with a `WARNING`
 it kept. A file an older release's installer wrote, unedited, is recognised as ours and updated. `detach` likewise removes only files whose
 content is still what we wrote, and reports any you edited. The launcher written into the
 matches is the install channel's stable entry point (uv's tool bin, Homebrew's `bin/`, Scoop's
-shim), never a versioned path an upgrade would remove; `--launcher PATH` overrides it.
+shim), never a versioned path an upgrade would remove; `--launcher PATH` overrides it. A manifest
+entry for a file that no longer exists (its folder was deleted, or Espanso now uses another
+config folder) is forgotten by the next `deploy`; until then `doctor` mentions it but does not
+judge its launcher.
 
 ## Updating
 

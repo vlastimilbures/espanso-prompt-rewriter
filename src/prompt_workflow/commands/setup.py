@@ -154,7 +154,15 @@ def _deploy_step(
         return
     for step in the_plan.steps:
         typer.echo(f"  {step.state:<9} {step.name}")
-    if the_plan.is_noop:
+    if the_plan.is_noop or the_plan.only_forgets:
+        if the_plan.only_forgets:
+            try:
+                forgot = deploy.apply(the_plan, {})  # the manifest only: no file is written
+            except (deploy.DeployError, OSError) as exc:
+                steps.fail("deploy", str(exc))
+                return
+            for line in forgot.lines:
+                typer.echo(f"  {line}")
         typer.echo("  Every match file is in sync.")
         return
     if apply is None and interactive:

@@ -247,29 +247,45 @@ def _match_check(target: Path, launcher: str | None, manifest: deploy.Manifest |
 
 
 def _launcher_check(current: str | None, manifest: deploy.Manifest | None) -> Check:
-    deployed = sorted({e.launcher for e in manifest.entries.values()}) if manifest else []
+    # An entry whose file is gone (a deleted folder, another Espanso config folder) calls
+    # nothing, so only live entries are judged; the next deploy forgets the others.
+    entries = list(manifest.entries.values()) if manifest else []
+    orphans = sorted(e.target for e in entries if deploy.is_gone(e))
+    deployed = sorted({e.launcher for e in entries if not deploy.is_gone(e)})
     missing = [p for p in deployed if not Path(p).is_file()]
     drift = bool(current) and any(p != current for p in deployed)
-    data = {"current": current, "deployed": deployed, "drift": drift, "missing": missing}
+    data = {
+        "current": current,
+        "deployed": deployed,
+        "drift": drift,
+        "missing": missing,
+        "orphans": orphans,
+    }
+    note = (
+        f"; {len(orphans)} manifest entries for files that no longer exist "
+        "(`prompt-workflow espanso deploy` forgets them)"
+        if orphans
+        else ""
+    )
     if manifest is None:
         return Check("launcher", WARN, "the deploy manifest cannot be read", data)
     if not deployed:
-        return Check("launcher", INFO, "nothing deployed by prompt-workflow on record", data)
+        return Check("launcher", INFO, f"nothing deployed by prompt-workflow on record{note}", data)
     if missing:
         return Check(
             "launcher",
             FAIL,
-            f"the deployed matches call {', '.join(missing)}, which is gone",
+            f"the deployed matches call {', '.join(missing)}, which is gone{note}",
             data,
         )
     if drift:
         return Check(
             "launcher",
             WARN,
-            f"the deployed matches call {', '.join(deployed)}, this install is {current}",
+            f"the deployed matches call {', '.join(deployed)}, this install is {current}{note}",
             data,
         )
-    return Check("launcher", OK, f"the deployed matches call {', '.join(deployed)}", data)
+    return Check("launcher", OK, f"the deployed matches call {', '.join(deployed)}{note}", data)
 
 
 def _history_checks(settings: config.Settings) -> tuple[Check, Check]:
@@ -388,8 +404,10 @@ def run(
         manifest = None
     compare = current
     if compare is None and manifest and manifest.entries:
-        # Compare with what was deployed, so a missing launcher still shows each file's state.
-        compare = min(e.launcher for e in manifest.entries.values())
+        # Compare with what was deployed, so a missing launcher still shows each file's state;
+        # an entry whose file is gone says nothing about the files there now.
+        live = [e for e in manifest.entries.values() if not deploy.is_gone(e)]
+        compare = min(e.launcher for e in live or manifest.entries.values())
 
     checks: list[Check] = [
         _version_check(),

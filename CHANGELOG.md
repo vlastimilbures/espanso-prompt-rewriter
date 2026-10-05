@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Fixed
+- `prompt-workflow doctor` no longer fails on `launcher: the deployed matches call …, which is
+  gone` because of a deploy-manifest entry for a match file that no longer exists (its folder
+  was deleted, or Espanso moved to another config folder). Only entries whose file still exists
+  are judged; the others are listed in the check's new `orphans` data and mentioned in its
+  message. `prompt-workflow espanso deploy` now forgets such entries (`forgot … (already
+  gone)`), even when every match file is in sync; `setup` and the TUI do so without asking,
+  since no file is written. An entry for a file that exists, or that cannot be looked at (an
+  unreadable folder), is never dropped.
+
 ## 0.16.0 - 2026-10-05
 
 Upgrading from the install scripts to the release wheel: the wheel never reads the
