@@ -16,6 +16,8 @@ class OllamaProvider:
     # Off by default: disables reasoning for thinking-capable models such as qwen3.
     think: bool = False
     temperature: float | None = None
+    # options.num_predict, sent only when set (--max-tokens): Ollama's own default otherwise.
+    max_tokens: int | None = None
     # Receives one AttemptUsage per HTTP attempt; see providers/usage.py. ``local`` says the
     # model runs on this machine (loopback, not a cloud model), so it has no cost to report.
     observer: UsageObserver | None = field(default=None, repr=False, compare=False)
@@ -31,8 +33,13 @@ class OllamaProvider:
             "stream": False,
             "think": self.think,
         }
+        options: dict[str, object] = {}
         if self.temperature is not None:
-            payload["options"] = {"temperature": self.temperature}
+            options["temperature"] = self.temperature
+        if self.max_tokens:
+            options["num_predict"] = self.max_tokens
+        if options:
+            payload["options"] = options
         meter = (
             Meter(self.observer, "ollama", self.model, ollama_usage, self.local)
             if self.observer is not None
@@ -47,4 +54,6 @@ class OllamaProvider:
         except (KeyError, TypeError) as exc:
             raise ProviderError("Ollama response was malformed") from exc
 
-        return finalize_content(content, "Ollama", stop_reason=data.get("done_reason"))
+        return finalize_content(
+            content, "Ollama", stop_reason=data.get("done_reason"), capped=bool(self.max_tokens)
+        )

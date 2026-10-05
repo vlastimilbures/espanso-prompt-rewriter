@@ -382,13 +382,17 @@ prompt-workflow persona          # prints PROMPT_PERSONA (used by -p-)
 | `--provider` | `PROMPT_PROVIDER`           | `ollama`, `lmstudio`, `openrouter`, `anthropic` |
 | `--profile`  | `PROMPT_PROFILE` (`PROMPT_PRO_PROFILE`, if set, with `--tier pro` on `OPENROUTER_PRO_MODEL`) | `default`, `general`, or one of [your own profiles](#profiles-and-persona) |
 | `--model`    | provider's configured model | Override the model of whichever provider runs; `model@endpoint` also pins the OpenRouter endpoint (`@auto` unpins) |
-| `--tier`     | `standard`                  | `pro` uses the `OPENROUTER_PRO_*` settings      |
-| `--effort`   | tier's setting              | `none`, `minimal`, `low`, `medium`, `high`      |
-| `--max-tokens` | tier's setting            | Output cap for this call                        |
-| `--timeout`  | tier's setting              | Time limit in seconds for this call, retry included |
+| `--tier`     | `standard`                  | OpenRouter only: `pro` uses the `OPENROUTER_PRO_*` settings |
+| `--effort`   | `OPENROUTER_REASONING_EFFORT` (`OPENROUTER_PRO_REASONING_EFFORT` with `--tier pro`) | OpenRouter only: `none`, `minimal`, `low`, `medium`, `high` |
+| `--max-tokens` | `OPENROUTER_MAX_TOKENS` or `ANTHROPIC_MAX_TOKENS`; no cap for Ollama and LM Studio | Output cap for this call (Ollama: `num_predict`) |
+| `--timeout`  | `PROMPT_TIMEOUT_SECONDS` (`PROMPT_PRO_TIMEOUT_SECONDS` with `--tier pro`) | Time limit in seconds for this call, retry included |
 | `--source`   | `clipboard`                 | `clipboard`, `stdin` or `argument`              |
 | `--text`     | —                           | The draft, with `--source argument`             |
 | `--copy`     | off                         | Also copy the result to the clipboard           |
+
+`--tier pro` and `--effort` (other than `default`) with any provider but OpenRouter are
+refused with a `[prompt-workflow: …]` marker, and no call is made: no other provider has a pro
+tier or a reasoning-effort control.
 
 Output is UTF-8 with no trailing newline, and every failure is printed as `[prompt-workflow: …]`
 with exit code 0, so Espanso always has something to paste. Drafts over 50,000 characters are
@@ -491,7 +495,7 @@ part of the text, `config validate`, `doctor` and `config migrate` report a valu
 (migrate refuses until it is quoted), and a cut `PROMPT_EXTRA_PATTERNS` also stops every
 trigger with a marker, so the gate never runs on part of your patterns. A `.env` must be UTF-8 (a byte order mark is fine); any other encoding is
 an error. Booleans are
-`true` or `false`, timeouts and token caps are numbers above 0 (temperature may be 0); anything
+`true` or `false`, timeouts and token caps are numbers above 0 (temperature may be 0, or empty to send none); anything
 else is reported inline rather than silently ignored. An error repeats the bad value only when it is
 short, does not look like a key and matches none of your `PROMPT_EXTRA_PATTERNS`.
 
@@ -501,7 +505,7 @@ short, does not look like a key and matches none of your `PROMPT_EXTRA_PATTERNS`
 | `PROMPT_PROFILE`             | `default`                      | Profile when `--profile` is not given (`-i-`, and `-if-` on a non-pro model) |
 | `PROMPT_PERSONA`             | *(empty)*                      | Your first-person role, see [persona](#profiles-and-persona) |
 | `PROMPT_TIMEOUT_SECONDS`     | `30`                           | Time limit for one call, retry included                   |
-| `PROMPT_TEMPERATURE`         | `0.2`                          | Kept low so fixed template wording survives               |
+| `PROMPT_TEMPERATURE`         | `0.2`                          | Kept low so fixed template wording survives; empty (`PROMPT_TEMPERATURE=`, or `config set PROMPT_TEMPERATURE ""`) sends no temperature, for models that reject it, while unset keeps `0.2` |
 | `OPENROUTER_API_KEY`         | —                              | Required for OpenRouter                                   |
 | `OPENROUTER_MODEL`           | `google/gemini-3.5-flash-lite` | See [benchmark](#model-benchmark)                         |
 | `OPENROUTER_PROVIDER`        | `google-ai-studio/flex`        | Pin a serving endpoint; empty = OpenRouter's own routing  |

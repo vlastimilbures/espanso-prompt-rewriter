@@ -63,9 +63,13 @@ Rules for agents:
   UTF-8 because Windows pipes default to the ANSI code page. `--tier pro` swaps in the
   `OPENROUTER_PRO_*` settings and `PROMPT_PRO_PROFILE` (if set) via `Settings.for_tier()`; `--model`/`--effort`/`--max-tokens`/
   `--timeout` are applied by `Settings.with_overrides()` (`--model` sets every provider's model),
-  so `make_provider()` always sees the effective settings. `Settings.for_call()` chains the two
+  so `make_provider()` always sees the effective settings (`--max-tokens` for Ollama/LM Studio
+  goes in `call_max_tokens`, a per-call field that is not a setting: `setting_fields()` skips
+  it). `Settings.for_call()` chains the two, applies the tier only for `provider="openrouter"`,
   and drops back to `PROMPT_PROFILE` when a pro call runs a model other than
-  `OPENROUTER_PRO_MODEL`. An explicit `--profile` beats both, so the OpenRouter triggers pass none.
+  `OPENROUTER_PRO_MODEL`. `config.openrouter_only()` then refuses `--tier pro` and a non-`default`
+  `--effort` for any other provider (a ValueError marker, `error_marker` in the history). An
+  explicit `--profile` beats both, so the OpenRouter triggers pass none.
 - `clipboard_guard.py` — `is_concealed()` asks the clipboard (ctypes: NSPasteboard types on
   macOS, user32 formats on Windows) whether a password manager marked the item, without reading
   it. `cli._read_input()` refuses such an item before `pyperclip.paste` and clears the clipboard

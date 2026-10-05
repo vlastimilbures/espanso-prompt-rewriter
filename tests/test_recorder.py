@@ -162,6 +162,14 @@ def test_override_error_is_recorded(stub_provider, history_rows):
     assert _outcome(history_rows) == "error_marker"
 
 
+# --tier pro on a local provider is refused before any call: an error marker, no attempt.
+def test_openrouter_only_refusal_is_recorded(fake_http, history_rows):
+    assert _run([*LOCAL, "--tier", "pro"]).startswith("[prompt-workflow: --tier pro applies")
+    assert _outcome(history_rows) == "error_marker"
+    assert history_rows("attempts") == []
+    assert fake_http.requests == []
+
+
 def test_empty_input_is_an_error_marker(stub_provider, history_rows):
     _run(["improve", "--provider", "ollama", "--source", "argument", "--text", "  "])
     assert _outcome(history_rows) == "error_marker"

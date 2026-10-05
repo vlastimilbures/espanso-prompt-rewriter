@@ -729,3 +729,90 @@ def test_error_hides_a_value_matching_a_user_pattern(monkeypatch):
     result = improve("--source", "argument", "--text", "d")
     assert result.stdout.startswith("[prompt-workflow: Unknown provider <redacted, 9 chars>")
     assert "PRJ-12345" not in result.stdout
+
+
+# --- Per-call options and the local providers (#31) ---------------------------------------
+
+_LOCAL_BODIES = {
+    "ollama": {"message": {"content": "ok"}},
+    "lmstudio": {"choices": [{"message": {"content": "ok"}}]},
+}
+
+
+def _local_body(fake_http, provider, *args):
+    fake_http.reply(_LOCAL_BODIES[provider])
+    result = improve("--provider", provider, *args, "--source", "argument", "--text", "d")
+    assert (result.exit_code, result.stdout) == (0, "ok")
+    ((call),) = fake_http.calls
+    return {k: v for k, v in call["json"].items() if k != "messages"}
+
+
+# Without --max-tokens the local bodies are what they always were: no output cap.
+def test_local_bodies_unchanged_without_max_tokens(fake_http):
+    assert _local_body(fake_http, "ollama") == {
+        "model": "qwen3:8b", "stream": False, "think": False, "options": {"temperature": 0.2},
+    }  # fmt: skip
+    fake_http.requests.clear()
+    assert _local_body(fake_http, "lmstudio") == {"model": "local-model", "temperature": 0.2}
+
+
+# --max-tokens reaches Ollama as options.num_predict and LM Studio as max_tokens.
+def test_max_tokens_reaches_local_providers(fake_http):
+    body = _local_body(fake_http, "ollama", "--max-tokens", "300")
+    assert body["options"] == {"temperature": 0.2, "num_predict": 300}
+    fake_http.requests.clear()
+    assert _local_body(fake_http, "lmstudio", "--max-tokens", "300")["max_tokens"] == 300
+    fake_http.requests.clear()
+    assert "max_tokens" not in _local_body(fake_http, "lmstudio", "--max-tokens", "default")
+
+
+# A capped Ollama call that spent its budget before any text suggests --max-tokens.
+def test_ollama_capped_hint(fake_http):
+    fake_http.reply({"message": {"content": ""}, "done_reason": "length"})
+    args = ["--provider", "ollama", "--max-tokens", "5", "--source", "argument", "--text", "d"]
+    assert improve(*args).stdout.endswith("before writing any text; raise --max-tokens]")
+
+
+# --tier pro and --effort apply only to OpenRouter: elsewhere they are refused inline with no
+# call; the neutral values (--tier standard, --effort default) are not.
+@pytest.mark.parametrize("provider", ["ollama", "lmstudio", "anthropic"])
+@pytest.mark.parametrize(
+    ("args", "named"),
+    [(["--tier", "pro"], "--tier pro"), (["--effort", "high"], "--effort"),
+     (["--effort", "none"], "--effort")],
+)  # fmt: skip
+def test_openrouter_only_options_refused(monkeypatch, fake_http, provider, args, named):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "-".join(("test", "key")))
+    result = improve("--provider", provider, *args, "--source", "argument", "--text", "d")
+    assert result.exit_code == 0
+    assert (
+        result.stdout == f"[prompt-workflow: {named} applies only to OpenRouter, not '{provider}']"
+    )
+    assert fake_http.requests == []
+
+
+def test_neutral_tier_and_effort_pass_for_local(fake_http):
+    args = ["--tier", "standard", "--effort", "default"]
+    assert _local_body(fake_http, "ollama", *args)["model"] == "qwen3:8b"
+
+
+# PROMPT_PROVIDER decides when --provider is not given.
+def test_openrouter_only_uses_configured_provider(monkeypatch, fake_http):
+    monkeypatch.setenv("PROMPT_PROVIDER", "ollama")
+    result = improve("--tier", "pro", "--source", "argument", "--text", "d")
+    assert result.stdout == "[prompt-workflow: --tier pro applies only to OpenRouter, not 'ollama']"
+
+
+# An empty PROMPT_TEMPERATURE omits the temperature from every request.
+def test_empty_temperature_is_omitted(monkeypatch, fake_http):
+    monkeypatch.setenv("PROMPT_TEMPERATURE", "")
+    assert "options" not in _local_body(fake_http, "ollama")
+    fake_http.requests.clear()
+    assert "temperature" not in _local_body(fake_http, "lmstudio")
+
+
+# An unknown provider is reported as such, not as an OpenRouter-only option.
+def test_unknown_provider_beats_openrouter_only(fake_http):
+    result = improve("--provider", "foo", "--tier", "pro", "--source", "argument", "--text", "d")
+    assert result.stdout.startswith("[prompt-workflow: Unknown provider 'foo'")
+    assert fake_http.requests == []

@@ -13,13 +13,13 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from . import config, config_files
-from .config import DEFAULT_SOURCE, ConfigLayers, Settings, env_names, secret_names
+from .config import DEFAULT_SOURCE, ConfigLayers, env_names, secret_names, setting_fields
 from .config_files import CONFIG_VERSION, VERSION_KEY, SecretStoreError
 from .redaction import safe_repr
 
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
 MARKER_FILE = "migration.json"
 BACKUP_DIR = "backups"
-_FIELDS = {f.metadata["env"]: f for f in fields(Settings)}
+_FIELDS = {f.metadata["env"]: f for f in setting_fields()}
 
 
 class ConfigStoreError(Exception):
@@ -113,8 +113,11 @@ def _snapshot(path: Path) -> SavedSettings:
 
 def _toml_value(name: str, raw: str) -> Any:
     """``raw`` validated by the setting's own parser, as the TOML value to save: true/false,
-    a number or text. Raises the same ValueError a bad value in a .env does."""
-    return config._parse_setting(name, _FIELDS[name].metadata["parse"], raw)
+    a number or text. Raises the same ValueError a bad value in a .env does. A value that
+    parses to None (an empty PROMPT_TEMPERATURE) is saved as the empty text, since None
+    means "remove the setting" to save_settings()."""
+    value = config._parse_setting(name, _FIELDS[name].metadata["parse"], raw)
+    return raw if value is None else value
 
 
 def _changed_keys(old: Mapping[str, Any], new: Mapping[str, Any]) -> tuple[str, ...]:

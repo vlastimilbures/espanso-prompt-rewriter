@@ -6,13 +6,12 @@ the settings and profiles of an earlier checkout install (#110)."""
 from __future__ import annotations
 
 import os
-from dataclasses import fields
 from pathlib import Path
 
 import typer
 
 from .. import config_files, config_store, deploy, previous_install, profiles, smoke
-from ..config import Settings
+from ..config import setting_fields
 from ..factory import PROVIDER_NAMES
 from ..prompt_builder import PROFILES, system_prompt
 from ..redaction import safe_repr
@@ -24,7 +23,7 @@ app = typer.Typer(name="setup", add_completion=False)
 
 # The key each provider needs.
 PROVIDER_KEYS = {"openrouter": "OPENROUTER_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
-_DEFAULTS = {f.metadata["env"]: f.metadata["default"] for f in fields(Settings)}
+_DEFAULTS = {f.metadata["env"]: f.metadata["default"] for f in setting_fields()}
 
 
 class _Steps:

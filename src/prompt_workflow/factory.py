@@ -193,6 +193,7 @@ def make_provider(
             timeout=cfg.timeout,
             think=cfg.ollama_think,
             temperature=cfg.temperature,
+            max_tokens=cfg.call_max_tokens,
             observer=observer,
             local=not remote,
         )
@@ -204,6 +205,7 @@ def make_provider(
             base_url=cfg.lmstudio_base_url,
             model=cfg.lmstudio_model,
             timeout=cfg.timeout,
+            max_tokens=cfg.call_max_tokens,
             temperature=cfg.temperature,
             label="LM Studio",
             observer=observer,

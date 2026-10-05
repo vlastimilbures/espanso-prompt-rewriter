@@ -107,6 +107,13 @@ All notable changes to this project are documented here. The format follows
   failed and retried ones included, now counts against `--budget` (through the usage observer
   of #87); an attempt that reports no cost is counted apart, never as 0, and named in the
   total. `cost` in `results.json` is `null` when no attempt reported one.
+- `--max-tokens` now reaches Ollama (`options.num_predict`) and LM Studio (`max_tokens`)
+  (#31); before, only OpenRouter and Anthropic received it. Without the option their requests
+  carry no cap, as before. A capped Ollama reply that used its whole budget before writing any
+  text now suggests raising `--max-tokens`.
+- `--tier pro` with a provider other than OpenRouter used `PROMPT_PRO_TIMEOUT_SECONDS` and a
+  set `PROMPT_PRO_PROFILE` (#31). It is refused now (see Changed), and the per-call settings
+  keep the standard timeout and profile for any provider but OpenRouter.
 
 ## 0.17.0 - 2026-10-05
 
