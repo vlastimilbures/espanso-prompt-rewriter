@@ -37,6 +37,15 @@ All notable changes to this project are documented here. The format follows
 - `--tier` with an unknown value is quoted like every other rejected value (#32), so a
   key-shaped one is described instead of pasted back.
 ### Added
+- `config validate`, `doctor` and the interface's Home and Diagnostics tabs now scan
+  `PROMPT_PERSONA` with the data-protection gate's patterns (the built-in ones and
+  `PROMPT_EXTRA_PATTERNS`) once (#29). The persona goes with every cloud call in the system
+  prompt and the gate never scans it, so a match is now reported by finding name only, never
+  the text: `config validate` lists it as a problem (exit 4) and doctor's new `persona` check
+  warns. Nothing changes on the triggers. A persona that is never sent is not flagged: when
+  neither `PROMPT_PROFILE` nor `PROMPT_PRO_PROFILE` uses `{{PERSONA_RULE}}` (e.g. `general`),
+  or with `PROMPT_LOCAL_ONLY=true` and `PROMPT_GATE_LOCAL` off. A persona that cannot be read
+  shows as such in doctor instead of "not set".
 - `PROMPT_GATE_LOCAL` (default `false`) (#33): `true` runs the data-protection gate for Ollama
   and LM Studio on `localhost` too, with the same override rules, for a local server that
   relays to a cloud API (LiteLLM, an SSH tunnel). `PROMPT_LOCAL_ONLY` still allows them. A

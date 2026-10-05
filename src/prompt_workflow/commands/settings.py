@@ -201,6 +201,7 @@ def config_unset(name: str = _NAME) -> None:
 @guard
 def config_validate() -> None:
     """Check the settings as improve reads them. Exit 4 when there is anything to fix."""
+    from ..doctor import persona_problem
     from ..prompt_builder import system_prompt
 
     problems = []
@@ -215,6 +216,8 @@ def config_validate() -> None:
             system_prompt(profile, "", settings.profile_overrides)
         except ValueError as exc:
             problems.append(str(exc))
+    if flagged := persona_problem(settings):
+        problems.append(flagged)
     for problem in dict.fromkeys(problems):
         typer.echo(f"problem: {problem}")
     if problems:

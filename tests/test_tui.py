@@ -269,6 +269,26 @@ def test_home_shows_doctor_and_checks_again(espanso):
     assert {" ".join(c[:2]) for c in espanso.calls} <= {"espanso path", "espanso status"}
 
 
+# A persona matching the gate's patterns is a warning on Home and in Diagnostics, by finding
+# label only (#29 B).
+def test_home_warns_of_a_persona_matching_the_patterns(espanso, monkeypatch):
+    address = "jane.doe" + "@" + "example.com"
+    monkeypatch.setenv("PROMPT_PERSONA", f"I am an analyst, mail {address}.")
+    warning = (
+        "persona: PROMPT_PERSONA matches the data-protection patterns: email; it is sent "
+        "unscanned with every cloud call"
+    )
+
+    async def scenario(app, pilot):
+        home = str(pane(app, "home").query_one("#home-checks").render())
+        assert "[warn] " + warning in home
+        everything = str(pane(app, "diagnostics").query_one("#all-checks").render())
+        assert warning in everything
+        assert address not in home + everything
+
+    drive(scenario)
+
+
 # --- Providers & keys ---------------------------------------------------------------------
 
 

@@ -291,6 +291,84 @@ def test_clipboard_unavailable(monkeypatch):
     assert (check.status, check.data["error"]) == ("warn", "PyperclipException")
 
 
+# --- persona (#29 B) -----------------------------------------------------------------------
+
+
+def test_persona_check_without_a_persona():
+    check = doctor._persona_check(Settings())
+    assert (check.status, check.message) == ("ok", "PROMPT_PERSONA is not set")
+    assert check.data == {"set": False, "local_only": False, "findings": []}
+
+
+def test_persona_check_clean_persona():
+    check = doctor._persona_check(Settings(persona="I am a data engineer at Example Corp."))
+    assert (check.status, check.data["findings"]) == ("ok", [])
+    # bare_token is the gate's rule for a one-word draft, not for a persona.
+    assert doctor._persona_check(Settings(persona="DataOps2Lead")).status == "ok"
+
+
+def test_persona_check_warns_with_labels_only():
+    address = "jane.doe" + "@" + "example.com"
+    persona = f"I am a falcon analyst, mail {address}."
+    check = doctor._persona_check(Settings(persona=persona, extra_patterns="falcon"))
+    assert check.status == "warn"
+    assert check.message == (
+        "PROMPT_PERSONA matches the data-protection patterns: email, custom_1; it is sent "
+        "unscanned with every cloud call"
+    )
+    assert check.data == {"set": True, "local_only": False, "findings": ["email", "custom_1"]}
+    shown = str(check.message) + str(check.data)
+    assert "falcon" not in shown
+    assert address not in shown
+    local = doctor._persona_check(
+        Settings(persona=persona, extra_patterns="falcon", local_only=True)
+    )
+    assert (local.status, local.message) == (
+        "info",
+        "matches email, custom_1; not sent (PROMPT_LOCAL_ONLY=true)",
+    )
+    # A loopback server that may relay to a cloud API (PROMPT_GATE_LOCAL) can send it on.
+    relay = Settings(persona=persona, local_only=True, gate_local=True)
+    assert doctor._persona_check(relay).status == "warn"
+
+
+# Flagged only when a configured profile sends it: `general` has no {{PERSONA_RULE}}.
+def test_persona_check_only_when_a_profile_sends_it():
+    address = "jane.doe" + "@" + "example.com"
+    unused = doctor._persona_check(Settings(persona=f"Mail {address}", profile="general"))
+    assert (unused.status, unused.message) == (
+        "info",
+        "matches email; not used by the configured profiles",
+    )
+    pro = Settings(persona=f"Mail {address}", profile="general", pro_profile="default")
+    assert doctor._persona_check(pro).status == "warn"
+    folder = config._user_config_dir() / "profiles"
+    folder.mkdir(parents=True)
+    (folder / "mine.md").write_text("Rewrite it. {{PERSONA_RULE}}", "utf-8")
+    (folder / "plain.md").write_text("Rewrite it.", "utf-8")
+    assert doctor._persona_check(Settings(persona=address, profile="mine")).status == "warn"
+    assert doctor._persona_check(Settings(persona=address, profile="plain")).status == "info"
+    # A profile that cannot load sends nothing; the profiles check reports it.
+    assert doctor._persona_check(Settings(persona=address, profile="nosuch")).status == "info"
+
+
+def test_persona_check_when_the_persona_cannot_be_read(tmp_path, espanso, no_clipboard):
+    # A merged line: the value holds another setting's NAME=, so it is rejected.
+    (tmp_path / ".env").write_text("PROMPT_PERSONA=I am Jane OLLAMA_MODEL=qwen3:8b\n", "utf-8")
+    report = doctor.run(espanso_dir=espanso, launcher=LAUNCHER, runner=_runner())
+    check = _status("persona", report)
+    assert (check.status, check.message) == ("info", "PROMPT_PERSONA could not be read; see config")
+    assert "Jane" not in str(report.to_json())
+
+
+def test_persona_check_in_the_report(monkeypatch, espanso, no_clipboard):
+    monkeypatch.setenv("PROMPT_PERSONA", "Reach me at " + "jane" + "@" + "example.com")
+    report = doctor.run(espanso_dir=espanso, launcher=LAUNCHER, runner=_runner())
+    check = _status("persona", report)
+    assert check.status == "warn"
+    assert report.to_json()["checks"]["persona"]["data"]["findings"] == ["email"]
+
+
 def test_profiles_check(monkeypatch):
     assert doctor._profiles_check(Settings(profile="nosuch")).status == "fail"
     folder = config._user_config_dir() / "profiles"

@@ -89,18 +89,23 @@ def system_prompt(profile: str, persona: str = "", overrides: Collection[str] = 
     """The rendered profile: a built-in, or `<name>.md` in user_profiles_dir() for a name
     that is not built in. A user file named like a built-in replaces it only when the name is
     in ``overrides`` (PROMPT_PROFILE_OVERRIDES)."""
+    return render(template(profile, overrides), persona)
+
+
+def template(profile: str, overrides: Collection[str] = ()) -> str:
+    """system_prompt()'s profile before render(), its tokens unfilled."""
     name = profile if profile in PROFILES else ALIASES.get(profile, profile)
-    template = None
+    text = None
     if name not in PROFILES or name in overrides:
-        template = _read_user_profile(name)
-    if template is None:
-        template = PROFILES.get(name)
-    if template is None:
+        text = _read_user_profile(name)
+    if text is None:
+        text = PROFILES.get(name)
+    if text is None:
         # Built-ins first, in the order they always had; the user's own after them, sorted.
         own = sorted(p.name for p in user_profiles(overrides) if p.status == ADDED)
         known = ", ".join([*PROFILES, *own])
         raise ValueError(f"Unknown profile: {safe_repr(profile)}. Choose from: {known}")
-    return render(template, persona)
+    return text
 
 
 # user_profiles() statuses: a new profile, a built-in replaced by explicit opt-in, a file
