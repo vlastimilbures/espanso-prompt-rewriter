@@ -496,7 +496,13 @@ def test_doctor_json_schema_is_stable(espanso, clipboard, monkeypatch):
         "error",
     }
     assert set(checks["match_files"]["data"]) == {"espanso_dir", "files", "legacy"}
-    assert set(checks["launcher"]["data"]) == {"current", "deployed", "drift", "missing"}
+    assert set(checks["launcher"]["data"]) == {
+        "current",
+        "deployed",
+        "drift",
+        "missing",
+        "orphans",
+    }
     assert set(checks["clipboard"]["data"]) == {"read", "length", "concealed", "error"}
     assert set(checks["sqlite"]["data"]) == {"version", "wal_reset_bug"}
     assert checks["espanso"]["data"]["running"] is True
@@ -645,6 +651,7 @@ def test_doctor_launcher_drift_and_missing(espanso, clipboard, monkeypatch, tmp_
     launcher = data["checks"]["launcher"]
     assert launcher["data"]["drift"] is True
     assert launcher["data"]["missing"] == [LAUNCHER]
+    assert launcher["data"]["orphans"] == []
     assert launcher["status"] == "fail"
 
 
