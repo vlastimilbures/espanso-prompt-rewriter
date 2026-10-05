@@ -225,7 +225,9 @@ checkout's `.env`, so move your settings first:
    `%APPDATA%\prompt-workflow\.env` on Windows), where the wheel reads it too, or point
    `PROMPT_WORKFLOW_ENV` at it (set for GUI apps, since Espanso does not inherit your shell).
    A guided path is planned (#110).
-3. Continue below.
+3. If you added or edited profiles under the checkout's `src/prompt_workflow/prompts/`, run
+   `prompt-workflow profiles migrate` too: the wheel ships only the built-in profiles.
+4. Continue below.
 
 Install the new release's wheel with its own `constraints.txt`. `--force` makes uv install over
 the tool already there (the install scripts pass it too). Then check the result:

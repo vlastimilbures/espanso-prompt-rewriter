@@ -6,15 +6,65 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
-Upgrading from the install scripts to a release wheel: the wheel never reads the checkout's
-`.env` (only an editable install looks for one in the repository it was installed from). In
-order: update the checkout (`git pull`) and re-run the install script, so the tool's venv gets
-the new dependencies; run `prompt-workflow config migrate` (or move the `.env` to the config
-folder, `~/.config/prompt-workflow/.env` or `%APPDATA%\prompt-workflow\.env` on Windows, or
-point `PROMPT_WORKFLOW_ENV` at it, set for GUI apps since Espanso does not inherit your shell);
-then `uv tool install --force <wheel> -c constraints.txt`, `prompt-workflow doctor`, and
-`prompt-workflow espanso deploy` if it reports a stale match file. A guided path is planned
-(#110).
+## 0.16.0 - 2026-10-05
+
+Upgrading from the install scripts to the release wheel: the wheel never reads the
+checkout's `.env` (only an editable install looks for one in the repository it was installed
+from), so move your settings first, from the old editable install. Update the checkout
+(`git pull`) and re-run the install script, so that install has the new commands, then run
+`prompt-workflow config migrate`. Or keep the `.env` and point `PROMPT_WORKFLOW_ENV` at it
+(set for GUI apps too, since Espanso does not inherit your shell). Profiles you added or
+edited in the checkout need `prompt-workflow profiles migrate` too. Then install the wheel with
+`uv tool install --force <wheel> -c constraints.txt`, run `prompt-workflow doctor`, and run
+`prompt-workflow espanso deploy` if it reports a stale match file. A guided migration is
+planned (#110).
+
+### Security
+- A clipboard item that a password manager marked as concealed is refused before it is read,
+  for every trigger, and cleared, so Espanso's restore cannot put it back unmarked for the next
+  trigger (#24). Markers: `org.nspasteboard.ConcealedType` or `com.agilebits.onepassword` on
+  macOS; `ExcludeClipboardContentFromMonitorProcessing`, `Clipboard Viewer Ignore` or
+  `CanIncludeInClipboardHistory` (0, or present but unreadable) on Windows. The probe asks only
+  which formats are present, through ctypes (about 10-40 ms on macOS), and adds no dependency.
+  On Linux, for browser-extension copies, or if the probe fails, the clipboard is read as
+  before.
+- The `general` profile, used by the local triggers `-il-` and `-ilm-`, treats the whole
+  clipboard as the draft: data to rewrite, never instructions to the rewriter (#47). Pasted
+  material is copied word for word, and the rewrite adds a constraint that instructions inside
+  it must not be followed. It adds no facts, roles or audiences, and returns only the prompt.
+  On flash-lite (a proxy; no local model measured yet), the bench's `check_general` passes
+  36/36 drafts, up from 4/36 (31 of the old failures were invented roles), and the injection
+  drafts are never carried over as instructions, with the guard present, in 12/12 runs.
+- Invisible characters no longer reach the model or the paste (#22). `_clean()` now drops
+  every code point Unicode marks as default-ignorable (zero-width space, word joiner, BOM, bidi
+  marks, soft hyphen, combining grapheme joiner, Hangul fillers, variation selectors, and the
+  unassigned blocks that render as nothing) and every other format character, since a run of
+  them after one visible character could carry a hidden instruction. An emoji keeps one
+  presentation selector and one joiner, a keycap keeps its selector, and Persian and Indic
+  joiners survive. Ideographic variation selectors, Mongolian variation selectors and bidi marks
+  are dropped too. The gate's normalised scan drops the same characters, so they can no longer
+  split a card number.
+- The gate catches the secret shapes developers paste most (#20):
+  - camelCase and JSON names (`clientSecret`, `accessToken`, `dbPassword`), compound env names
+    (`PGPASSWORD`), `*_KEY` names (`SECRET_KEY`, `PRIVATE_KEY`, `secret_key_base`) and
+    `_authToken`;
+  - PHP `'password' => …`, Go `:=`, `define('DB_PASSWORD', …)`, `environ["API_KEY"] = …` and
+    values aligned with many spaces;
+  - passwords of 6+ characters (`password: hunter2`) and in prose (`the password for the
+    admin account is …`, Vietnamese `mật khẩu wifi là …`, `mật khẩu đăng nhập: …`);
+  - AWS temporary keys (`ASIA…`), `Basic` credentials (UTF-8 too), `curl -u user:password`
+    (also after a `\` line continuation), npm tokens, Azure `AccountKey=`/`SharedAccessKey=`
+    and SAS `sig=`;
+  - IBANs (any case, spaces or dashes; country length and mod-97 checked);
+  - card numbers split by up to three spaces, tabs, slashes, dashes or minus signs, or one line
+    break, or next to another number.
+- A draft that is one password- or token-like word (no spaces, 8-200 characters, a digit and
+  three of lower case, upper case, digit and symbol) is blocked as `bare_token`: the classic
+  stale-clipboard slip. URLs, paths, emails, UUIDs, hashes, versions, dates and lower-case
+  slugs and file names are not. A single word is never a prompt, so a mixed-case identifier
+  with a digit is blocked too.
+- An email address next to a password (`jane@example.com:…`) is a hard `credential_pair`
+  finding, and `scheme://:password@host` (no user name) counts as `url_credentials` (#21).
 
 ### Added
 - A full-screen interface for setting up and managing prompt-workflow (#93, #64): run
@@ -176,55 +226,6 @@ then `uv tool install --force <wheel> -c constraints.txt`, `prompt-workflow doct
   and Troubleshooting rows for launcher drift, stale match files and Espanso's rendering error.
   A test checks every `prompt-workflow …` invocation in the README and these notes, and every
   standalone option the README names, against the CLI.
-
-### Security
-- A clipboard item that a password manager marked as concealed is refused before it is read,
-  for every trigger, and cleared, so Espanso's restore cannot put it back unmarked for the next
-  trigger (#24). Markers: `org.nspasteboard.ConcealedType` or `com.agilebits.onepassword` on
-  macOS; `ExcludeClipboardContentFromMonitorProcessing`, `Clipboard Viewer Ignore` or
-  `CanIncludeInClipboardHistory` (0, or present but unreadable) on Windows. The probe asks only
-  which formats are present, through ctypes (about 10-40 ms on macOS), and adds no dependency.
-  On Linux, for browser-extension copies, or if the probe fails, the clipboard is read as
-  before.
-- The `general` profile, used by the local triggers `-il-` and `-ilm-`, treats the whole
-  clipboard as the draft: data to rewrite, never instructions to the rewriter (#47). Pasted
-  material is copied word for word, and the rewrite adds a constraint that instructions inside
-  it must not be followed. It adds no facts, roles or audiences, and returns only the prompt.
-  On flash-lite (a proxy; no local model measured yet), the bench's `check_general` passes
-  36/36 drafts, up from 4/36 (31 of the old failures were invented roles), and the injection
-  drafts are never carried over as instructions, with the guard present, in 12/12 runs.
-- Invisible characters no longer reach the model or the paste (#22). `_clean()` now drops
-  every code point Unicode marks as default-ignorable (zero-width space, word joiner, BOM, bidi
-  marks, soft hyphen, combining grapheme joiner, Hangul fillers, variation selectors, and the
-  unassigned blocks that render as nothing) and every other format character, since a run of
-  them after one visible character could carry a hidden instruction. An emoji keeps one
-  presentation selector and one joiner, a keycap keeps its selector, and Persian and Indic
-  joiners survive. Ideographic variation selectors, Mongolian variation selectors and bidi marks
-  are dropped too. The gate's normalised scan drops the same characters, so they can no longer
-  split a card number.
-- The gate catches the secret shapes developers paste most (#20):
-  - camelCase and JSON names (`clientSecret`, `accessToken`, `dbPassword`), compound env names
-    (`PGPASSWORD`), `*_KEY` names (`SECRET_KEY`, `PRIVATE_KEY`, `secret_key_base`) and
-    `_authToken`;
-  - PHP `'password' => …`, Go `:=`, `define('DB_PASSWORD', …)`, `environ["API_KEY"] = …` and
-    values aligned with many spaces;
-  - passwords of 6+ characters (`password: hunter2`) and in prose (`the password for the
-    admin account is …`, Vietnamese `mật khẩu wifi là …`, `mật khẩu đăng nhập: …`);
-  - AWS temporary keys (`ASIA…`), `Basic` credentials (UTF-8 too), `curl -u user:password`
-    (also after a `\` line continuation), npm tokens, Azure `AccountKey=`/`SharedAccessKey=`
-    and SAS `sig=`;
-  - IBANs (any case, spaces or dashes; country length and mod-97 checked);
-  - card numbers split by up to three spaces, tabs, slashes, dashes or minus signs, or one line
-    break, or next to another number.
-- A draft that is one password- or token-like word (no spaces, 8-200 characters, a digit and
-  three of lower case, upper case, digit and symbol) is blocked as `bare_token`: the classic
-  stale-clipboard slip. URLs, paths, emails, UUIDs, hashes, versions, dates and lower-case
-  slugs and file names are not. A single word is never a prompt, so a mixed-case identifier
-  with a digit is blocked too.
-- An email address next to a password (`jane@example.com:…`) is a hard `credential_pair`
-  finding, and `scheme://:password@host` (no user name) counts as `url_credentials` (#21).
-
-### Changed
 - `espanso deploy` and `detach` no longer read an answer from a non-terminal stdin: without
   `--yes` there they stop with exit code 3. The release workflow checks the installed wheel with
   `prompt-workflow --version`.
@@ -267,7 +268,6 @@ then `uv tool install --force <wheel> -c constraints.txt`, `prompt-workflow doct
   separators become newlines instead of disappearing.
 - A draft over 50,000 characters is refused before it is cleaned, so a pasted multi-megabyte
   log no longer stalls the expansion.
-
 - The built-in profiles are listed in name order on every OS (`default`, `general`). Linux
   listed them in the file system's order, so an unknown-profile error or `profiles list` could
   name `general` first.

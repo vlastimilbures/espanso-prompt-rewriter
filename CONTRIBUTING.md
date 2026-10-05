@@ -84,8 +84,8 @@ Releases are cut by `.github/workflows/release.yml`, never by hand-made tags.
 
 1. Open a `chore(release): X.Y.Z` pull request that sets `version` in `pyproject.toml`, runs
    `uv lock` (which updates the project's version in `uv.lock`), and renames `## Unreleased` in
-   CHANGELOG.md to `## X.Y.Z - YYYY-MM-DD` (the release date). Leave no empty *Unreleased*
-   heading behind; the next change adds it back. `tests/test_release.py` fails unless the newest
+   CHANGELOG.md to `## X.Y.Z - YYYY-MM-DD` (the release date), with an empty `## Unreleased`
+   above it for the next change. `tests/test_release.py` fails unless the newest
    CHANGELOG version is the `pyproject.toml` version and every version heading is dated.
 2. Merge it, then run the **release** workflow on `main` (Actions tab, or
    `gh workflow run release.yml --ref main -f dry-run=false`). It builds the sdist, the wheel and

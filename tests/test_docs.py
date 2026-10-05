@@ -76,9 +76,30 @@ def _documented_invocations(text: str) -> list[str]:
     return found
 
 
-def _changelog_unreleased() -> str:
-    changelog = (REPO / "CHANGELOG.md").read_text("utf-8")
-    return changelog.split("## Unreleased", 1)[1].split("\n## ", 1)[0]
+# The Unreleased notes plus the newest release's, so the check never runs on an empty or
+# command-free Unreleased alone (right after a release, or a first entry naming no command).
+def _changelog_notes(changelog: str) -> str:
+    sections = re.split(r"^## ", changelog, flags=re.MULTILINE)[1:]
+    notes = []
+    for section in sections:
+        title, _, body = section.partition("\n")
+        notes.append(body)
+        if title.strip() != "Unreleased":
+            return "".join(notes)
+    raise AssertionError("CHANGELOG.md has no released version")
+
+
+def test_changelog_notes_add_the_newest_release():
+    released = (
+        "## 1.1.0 - 2026-10-02\n\n- `prompt-workflow doctor`\n\n## 1.0.0 - 2026-10-01\n\n- y\n"
+    )
+    for unreleased, expected in [
+        ("## Unreleased\n\n", ["- `prompt-workflow doctor`"]),
+        ("", ["- `prompt-workflow doctor`"]),
+        ("## Unreleased\n\n- x\n\n", ["- x", "- `prompt-workflow doctor`"]),
+    ]:
+        notes = _changelog_notes(f"# Changelog\n\n{unreleased}{released}")
+        assert notes.split() == " ".join(expected).split()
 
 
 def _cli():
@@ -91,7 +112,7 @@ def _cli():
 
 
 # Every `prompt-workflow <command> [<subcommand>] --flag` the README (and the CHANGELOG's
-# Unreleased notes) names exists in the CLI, so a renamed command or option cannot leave the
+# newest notes) names exists in the CLI, so a renamed command or option cannot leave the
 # docs behind. Walks the Click tree; the lazy commands load their modules, never textual.
 @pytest.mark.parametrize("doc", ["README.md", "CHANGELOG.md"])
 def test_documented_commands_and_flags_exist(doc):
@@ -99,7 +120,7 @@ def test_documented_commands_and_flags_exist(doc):
 
     root, ctx = _cli()
     text = (REPO / doc).read_text("utf-8")
-    invocations = _documented_invocations(text if doc == "README.md" else _changelog_unreleased())
+    invocations = _documented_invocations(text if doc == "README.md" else _changelog_notes(text))
     assert invocations, f"{doc} names no prompt-workflow command; drop or adapt this test"
     for rest in invocations:
         command, words = root, rest.split()
