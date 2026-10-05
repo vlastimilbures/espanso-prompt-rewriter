@@ -13,6 +13,8 @@ rules. The invariants below must never be broken:
   `left_word: true`.
 - Match commands start with the quoted `"__PROMPT_WORKFLOW__"` placeholder and quote nothing
   else; nothing is ever deployed to Espanso's `config/` folder.
+- Keep existing triggers working and every feature cross-platform (macOS and Windows); a
+  renamed or removed trigger needs a migration note and a test.
 - Never put API keys, customer data, credentials or confidential prompts in source, tests,
   logs or commits.
 - Tests stay offline: never call external APIs from unit tests; mock the HTTP client.
