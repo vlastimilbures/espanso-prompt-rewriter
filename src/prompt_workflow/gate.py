@@ -7,12 +7,18 @@ from .redaction import SOFT_FINDINGS, scan_draft
 
 
 def _block_message(
-    findings: list[str], hard: list[str], allow_flagged: bool, name: str, relay: bool = False
+    findings: list[str],
+    hard: list[str],
+    allow_flagged: bool,
+    name: str,
+    relay: bool = False,
+    gate_local: bool = False,
 ) -> str:
     """The hint names what applies to this provider: -iok- is the OpenRouter trigger, and a
     remote Ollama or LM Studio has no local trigger to fall back to. A loopback server gated
     only by PROMPT_GATE_LOCAL (``relay``) is no cloud call, and -il-/-ilm- have no
-    --allow-flagged, so its message offers neither."""
+    --allow-flagged, so its message offers neither. With PROMPT_GATE_LOCAL on (``gate_local``)
+    a local trigger or model would block the same draft, so a cloud message offers none."""
     if relay:
         return (
             "Blocked call to the local server (PROMPT_GATE_LOCAL=true gates it). Sensitive "
@@ -21,12 +27,13 @@ def _block_message(
         )
     once = "-iok-" if name == "openrouter" else "--allow-flagged"
     local = "a local trigger (-il-)" if name in ("openrouter", "anthropic") else "a local model"
+    alternative = "" if gate_local else f", or use {local}"
     message = "Blocked cloud call. Sensitive content detected: " + ", ".join(findings) + ". "
     if not hard:
-        return message + f"If it may leave this machine, send it once with {once}, or use {local}."
+        return message + f"If it may leave this machine, send it once with {once}{alternative}."
     if allow_flagged:
         message += f"{once} never sends " + ", ".join(hard) + ". "
-    return message + f"Remove it, or use {local}."
+    return message + f"Remove it{alternative}."
 
 
 class GateBlocked(ProviderError):
@@ -50,10 +57,12 @@ class GatedProvider:
         allow_flagged: bool = False,
         name: str = "openrouter",
         relay: bool = False,
+        gate_local: bool = False,
     ) -> None:
         self._inner = inner
         self._name = name
         self._relay = relay
+        self._gate_local = gate_local
         self._allow_override = allow_override
         self._extra_patterns = extra_patterns
         self._allow_flagged = allow_flagged
@@ -66,7 +75,7 @@ class GatedProvider:
             hard = [f for f in findings if f not in SOFT_FINDINGS]
             if hard or not self._allow_flagged:
                 message = _block_message(
-                    findings, hard, self._allow_flagged, self._name, self._relay
+                    findings, hard, self._allow_flagged, self._name, self._relay, self._gate_local
                 )
                 raise GateBlocked(message)
             self.sent_despite = tuple(findings)

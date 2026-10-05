@@ -524,3 +524,16 @@ def test_make_provider_empty_temperature_and_call_cap(monkeypatch):
     capped = cfg.with_overrides(max_tokens="300")
     assert make_provider("ollama", capped).max_tokens == 300
     assert make_provider("lmstudio", capped).max_tokens == 300
+
+
+# make_provider passes PROMPT_GATE_LOCAL to every gate: a cloud block then offers no local
+# trigger, which would be blocked as well.
+def test_gate_local_cloud_block_message(monkeypatch, fake_http):
+    monkeypatch.setenv("PROMPT_GATE_LOCAL", "true")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    with pytest.raises(ProviderError) as exc:
+        make_provider("openrouter", Settings()).generate("card 4111 1111 1111 1111", "sys")
+    assert str(exc.value) == (
+        "Blocked cloud call. Sensitive content detected: payment_card. Remove it."
+    )
+    assert fake_http.requests == []

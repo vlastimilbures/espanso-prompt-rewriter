@@ -221,7 +221,7 @@ def test_invalid_extra_pattern_fails_closed(monkeypatch, fake_http, provider):
     assert result.exit_code == 0
     assert result.stdout == (
         "[prompt-workflow: PROMPT_EXTRA_PATTERNS must be valid ';'-separated regexes; "
-        "entry 2 is not a valid regex]"
+        "entry 2 (custom_2) is not a valid regex]"
     )
     assert fake_http.requests == []
 

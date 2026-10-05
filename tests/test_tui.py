@@ -426,6 +426,28 @@ def test_providers_change_a_setting_and_reload(saved, espanso, monkeypatch):
     assert KEY not in text
 
 
+# A change that makes a flagged persona go out says so, as `config set` does: the finding
+# names only, and the setting stays saved.
+def test_providers_change_warns_about_a_flagged_persona(saved, espanso, monkeypatch):
+    address = "jane.doe" + "@" + "example.com"
+    monkeypatch.setenv("PROMPT_PERSONA", f"I am an analyst, mail {address}.")
+
+    async def scenario(app, pilot):
+        await pilot.press("2")
+        await press(app, pilot, "#set-setting")
+        await fill(app, pilot, setting_name="PROMPT_PROFILE", setting_value="general")
+        assert "PROMPT_PERSONA" not in pane(app, "providers").last_message
+        await press(app, pilot, "#set-setting")
+        await fill(app, pilot, setting_name="PROMPT_PROFILE", setting_value="default")
+        message = pane(app, "providers").last_message
+        assert message.startswith("PROMPT_PROFILE saved in ")
+        assert "PROMPT_PERSONA matches the data-protection patterns: email" in message
+        assert address not in message
+
+    drive(scenario)
+    assert 'PROMPT_PROFILE = "default"' in (saved / "config.toml").read_text("utf-8")
+
+
 def test_providers_migrate_env_with_preview(saved, espanso):
     saved.mkdir(parents=True)
     (saved / ".env").write_text(

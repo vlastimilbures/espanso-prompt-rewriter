@@ -291,9 +291,10 @@ def test_extra_patterns_skip_empty_entries():
     assert compile_extra(" ; ;") == ()
 
 
-# An invalid user regex raises ValueError naming its position, not its text.
+# An invalid user regex raises ValueError naming its position, not its text, with the
+# custom_N name a finding of that entry gets (both count the non-empty entries from 1).
 def test_extra_patterns_invalid_regex():
-    with pytest.raises(ValueError, match="entry 2") as exc:
+    with pytest.raises(ValueError, match=r"entry 2 \(custom_2\) is not") as exc:
         compile_extra("ok;secret[")
     assert "secret" not in str(exc.value)
 

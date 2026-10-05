@@ -413,8 +413,8 @@ at its output limit, the partial rewrite is pasted with
 | `prompt-workflow --version` | Prints the installed version |
 | `prompt-workflow` / `prompt-workflow ui` | Opens the [full-screen interface](#first-run) when stdin and stdout are a terminal. Otherwise a bare `prompt-workflow` prints the help and exits 2, and `ui` exits 3 |
 | `prompt-workflow setup` | First run: provider and default profile (saved in `config.toml`), the API key (hidden prompt), a deploy preview it applies only if you agree, and a smoke test that runs `improve` against a stub on `127.0.0.1` (never a paid call, never your real key). If your settings are in a `.env`, it offers to migrate them and changes nothing unless you say yes; the same goes for an earlier checkout install it finds (or the one `--migrate-from PATH` names): it offers to copy its settings and edited profiles, and to retire its `.env` once the match files no longer run it. `--non-interactive` asks nothing (key with `--api-key-stdin`; the deploy stays a preview unless `--deploy`) |
-| `prompt-workflow config show [--raw]` | Every setting, its value and where it comes from (default, a file or the environment), and which lower files it overrides. Keys and the persona are shown only as set or not set |
-| `prompt-workflow config get NAME` / `set NAME VALUE` / `unset NAME` | Read one setting; save it in `config.toml` after checking it as the CLI reads it; remove it so the default applies. A key is refused here |
+| `prompt-workflow config show [--raw]` | Every setting, its value and where it comes from (default, a file or the environment), and which lower files it overrides. Keys and the persona are shown only as set or not set; a value set to empty on purpose reads `(empty)` |
+| `prompt-workflow config get NAME` / `set NAME VALUE` / `unset NAME` | Read one setting; save it in `config.toml` after checking it as the CLI reads it; remove it so the default applies. A key is refused here. `get` prints the raw value (an empty line for an empty one). `set` warns on stderr, naming the findings only, when the saved change leaves a `PROMPT_PERSONA` that `config validate` would flag; the value stays saved |
 | `prompt-workflow config validate` | Checks the settings as `improve` reads them, and the profiles they name, and flags a `PROMPT_PERSONA` that the data-protection gate's patterns match |
 | `prompt-workflow config migrate` / `rollback` | Moves the `.env` in use to `config.toml` and its keys to the secret store, with a backup, or undoes that. Shows a preview first and applies only once you confirm it; in a script, pass `--yes --preview-token <token>` from that preview. `--from PATH` also copies an earlier checkout's `.env` into every setting still at its default; that `.env` stays in place, so the old triggers keep working until you deploy again |
 | `prompt-workflow config retire --from PATH` | Moves that checkout's `.env` into the backup once its settings were copied. Refused while a match file still runs the checkout's CLI (`prompt-workflow espanso deploy` first); same preview and `--yes --preview-token` as migrate, and `rollback` puts it back |
@@ -657,8 +657,8 @@ Ollama and LM Studio on `localhost`. The gate blocks drafts containing:
   `PROMPT_EXTRA_PATTERNS="project[- ]falcon;CUST-\d{6}"` (case-insensitive; reported as
   `custom_1`, `custom_2`, … so the pattern itself never appears in the message). An entry
   that is not a valid regex is rejected when settings load: `config validate`, `config set`
-  and `doctor` report it by position, and every rewrite trigger prints a marker until it is
-  fixed (`-p-` still pastes the persona).
+  and `doctor` report it by position (`entry 2 (custom_2)`), and every rewrite trigger prints a
+  marker until it is fixed (`-p-` still pastes the persona).
   Keep each pattern simple: it runs on every draft and on each value written to the usage
   history, and Python's regex engine can take exponential time on a pattern with nested
   quantifiers such as `(\w+\s?)+` or `(a|aa)+`. Prefer a literal word, a character class with
@@ -848,7 +848,7 @@ run it are in [docs/benchmark.md](docs/benchmark.md).
 | `[prompt-workflow: OPENROUTER_REASONING_EFFORT must be empty or one of …]` | Fix the value in `.env` (`OPENROUTER_PRO_REASONING_EFFORT` likewise). |
 | `… the model stopped early (content_filter)]` at the end, or `… declined the request (refusal)` | A content filter or the model's safety policy stopped the rewrite. Rephrase the draft or use another model. |
 | `[prompt-workflow: Ollama request failed: …]` | Start Ollama (`ollama serve`) and pull the model (`ollama pull qwen3:8b`). |
-| `[prompt-workflow: Blocked cloud call. …]` | The [gate](#privacy-and-data-protection) matched. Remove the content or use a local trigger. If the message offers `-iok-` and the content may leave your machine, use `-iok-` for this draft. |
+| `[prompt-workflow: Blocked cloud call. …]` | The [gate](#privacy-and-data-protection) matched. Remove the content or use a local trigger (with `PROMPT_GATE_LOCAL=true` the message offers none, since those are gated too). If the message offers `-iok-` and the content may leave your machine, use `-iok-` for this draft. |
 | `[prompt-workflow: Blocked call to the local server …]` | `PROMPT_GATE_LOCAL=true` and the gate matched a `-il-`/`-ilm-` draft. Remove the content, or set `PROMPT_GATE_LOCAL=false` if your `localhost` server runs the model itself (not a relay to a cloud API). |
 | `[prompt-workflow: sent despite: …]` at the top of a rewrite | You used `-iok-`; the draft was sent despite those findings. Delete the line. |
 | `[prompt-workflow: Input is too long …]` | The clipboard holds more than 50,000 characters. Copy just the draft. |
