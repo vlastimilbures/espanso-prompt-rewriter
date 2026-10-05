@@ -13,6 +13,17 @@ All notable changes to this project are documented here. The format follows
   one, or another while `OPENROUTER_ALLOW_FALLBACKS` is `true`, the default) and carry an
   `X-Title` header naming this app; keys travel only as the authentication header. The
   introduction no longer suggests that only the draft is sent.
+- Docs (#41): the README, `.env.example` and CONTRIBUTING say that on macOS and Linux the config
+  folder (`config.toml`, `secrets.toml`, `.env`, `profiles/`) is `$XDG_CONFIG_HOME/prompt-workflow/`
+  when `XDG_CONFIG_HOME` is set (Windows always uses `%APPDATA%\prompt-workflow\`); the pro
+  tier's latency is quoted from the 2026-10-04 bench (median 5.6 s, p95 9.2 s) everywhere;
+  CONTRIBUTING says CI runs the tests with `--cov` and a 95 % floor, and its project tree lists
+  `previous_install.py` (a test now checks the tree names every module).
+
+### Removed
+- The unshipped candidate prompts `docs/prompt-candidates/B.md` to `I2.md` (#41). They stay in
+  git (`git show v0.17.0:docs/prompt-candidates/I2.md`); `PLAN.md` remains as the decision
+  record and now says which candidate shipped.
 
 ## 0.17.0 - 2026-10-05
 

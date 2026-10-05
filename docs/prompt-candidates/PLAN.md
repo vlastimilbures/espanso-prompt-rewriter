@@ -1,8 +1,16 @@
 # Default prompt: A/B rounds 1–2 (2026-10-02) and plan for the OpenRouter run
 
-Continues "Known gaps in the default prompt" in CONTRIBUTING.md. The candidates here are
-**not shipped**: `src/prompt_workflow/prompts/default.md` is unchanged. Each candidate is a
-complete prompt file for `scripts/bench_models.py --system-prompt-file`.
+Continues "Known gaps in the default prompt" in CONTRIBUTING.md. This is the decision record of
+the 2026-10 prompt rework. **What shipped:** candidate `I2`, with the later revisions described
+in "Results of the OpenRouter run" below, became `src/prompt_workflow/prompts/default.md` (and the
+since-retired `default-pro.md`) in 0.12.0 (34b3290, #10). 0.14.0 (9ceba39, #68) merged the two
+profiles back into one `default`, which both tiers send; `default-pro` is now only an alias.
+
+Each candidate was a complete prompt file for `scripts/bench_models.py --system-prompt-file`.
+The unshipped candidate files (`B.md` to `I2.md`) were removed from the repository after
+v0.17.0; read them in git, for example
+`git show v0.17.0:docs/prompt-candidates/I2.md` (v0.17.0 = 9fe6912 is the last commit that
+contains them).
 
 ## Round 1: gap fixes (screened here, no OpenRouter)
 
@@ -145,7 +153,7 @@ supersedes D.
    uv run python scripts/bench_models.py --suite all --runs 3 --models $M --outdir bench-A
    for c in E F G H; do
      uv run python scripts/bench_models.py --suite all --runs 3 --models $M \
-       --system-prompt-file docs/prompt-candidates/$c.md --outdir bench-$c
+       --system-prompt-file docs/prompt-candidates/$c.md --outdir bench-$c  # files: v0.17.0
    done
    ```
    Reject any candidate that loses a core-suite pass on either model. Drafts to watch:
