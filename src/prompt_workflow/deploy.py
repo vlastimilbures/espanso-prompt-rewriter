@@ -11,6 +11,7 @@ Imported lazily by the `espanso` commands, never on the trigger path.
 
 from __future__ import annotations
 
+import contextlib
 import difflib
 import hashlib
 import json
@@ -91,7 +92,8 @@ Runner = Callable[[Sequence[str]], str | CommandFailure | None]
 # Rust puts the thread id after the name: `thread 'main' (3545792) panicked at src/main.rs:1:2:`.
 # Before Rust 1.73 the message was quoted in that line, and a backtrace note followed it.
 _PANIC_HEADER = re.compile(r"thread '[^']*'( \(\d+\))? panicked at ")
-_OLD_PANIC = re.compile(r"thread '[^']*' panicked at '(?P<message>.+)', \S+:\d+:\d+")
+# The quoted message can run over several lines, so its closing `', file:line:col` is optional.
+_OLD_PANIC = re.compile(r"thread '[^']*' panicked at '(?P<message>.+?)(?:', \S+:\d+:\d+)?$")
 _BACKTRACE_NOTE = "note: run with `RUST_BACKTRACE"
 _ERROR_LINE_MAX = 200
 
@@ -118,24 +120,44 @@ def run_command(argv: Sequence[str]) -> str | CommandFailure:
     if exe is None:
         return CommandFailure()
     try:
-        proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        proc = subprocess.Popen(  # noqa: S603 - fixed argv, no shell
             [exe, *argv[1:]],
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             # Espanso, uv and brew write UTF-8; never the locale's code page, never a crash.
             encoding="utf-8",
             errors="replace",
-            timeout=COMMAND_TIMEOUT,
-            check=False,
         )
-    except subprocess.TimeoutExpired:
-        return CommandFailure(found=True, path=exe, timed_out=True)
     except (OSError, subprocess.SubprocessError) as exc:
         return CommandFailure(found=True, path=exe, error=_error_line(str(exc)))
+    try:
+        stdout, stderr = proc.communicate(timeout=COMMAND_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        _stop(proc)
+        return CommandFailure(found=True, path=exe, timed_out=True)
     if proc.returncode == 0:
-        return proc.stdout
+        return stdout
     return CommandFailure(
-        found=True, path=exe, returncode=proc.returncode, error=_error_line(proc.stderr or "")
+        found=True, path=exe, returncode=proc.returncode, error=_error_line(stderr or "")
     )
+
+
+def _stop(proc: subprocess.Popen[str]) -> None:
+    """Stop a timed-out command without waiting on what it started. On Windows `espanso` is a
+    .cmd whose cmd.exe starts espansod.exe: killing cmd.exe alone leaves the pipes open, and
+    subprocess.run would then wait for them forever, so the whole tree is killed."""
+    if os.name == "nt":
+        with contextlib.suppress(OSError, subprocess.SubprocessError):
+            subprocess.run(  # noqa: S603 - fixed argv, no shell
+                ["taskkill", "/T", "/F", "/PID", str(proc.pid)],  # noqa: S607
+                capture_output=True,
+                timeout=10,
+                check=False,
+            )
+    proc.kill()
+    # A grandchild may still hold the pipes: give up on them rather than hang.
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        proc.communicate(timeout=5)
 
 
 def output(answer: str | CommandFailure | None) -> str | None:

@@ -10,6 +10,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -631,7 +632,7 @@ def test_run_command_resolves_through_path(monkeypatch):
     def broken(*args, **kwargs):
         raise PermissionError("access denied")
 
-    monkeypatch.setattr(deploy.subprocess, "run", broken)
+    monkeypatch.setattr(deploy.subprocess, "Popen", broken)
     failed = REAL_RUN_COMMAND(deploy.PATH_CONFIG)
     assert failed == deploy.CommandFailure(found=True, path=sys.executable, error="access denied")
     assert failed.describe(deploy.PATH_CONFIG) == (
@@ -651,6 +652,20 @@ def test_run_command_survives_undecodable_output():
         [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'C:/\\xc4\\x8d')"]
     )
     assert ok == "C:/\u010d"
+
+
+def test_run_command_timeout_does_not_wait_for_a_grandchild(monkeypatch):
+    """A timed-out command whose child keeps the pipes open (espanso.cmd's espansod.exe on
+    Windows) still returns: the tree is killed, and the pipes are not waited on for ever."""
+    monkeypatch.setattr(deploy, "COMMAND_TIMEOUT", 0.5)
+    script = (
+        "import subprocess, sys, time; "
+        "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(8)']); time.sleep(8)"
+    )
+    started = time.process_time()
+    failed = REAL_RUN_COMMAND([sys.executable, "-c", script])
+    assert failed.timed_out
+    assert time.process_time() - started < 5  # CPU time: no busy wait either
 
 
 def test_run_command_times_out(monkeypatch):
@@ -674,6 +689,11 @@ def test_run_command_times_out(monkeypatch):
             "unable to load config: missing",
         ),
         ("note: run with `RUST_BACKTRACE=1` to display a backtrace\nreal\n", "real"),
+        (
+            "thread 'main' panicked at 'unable to load config: unable to load config\n\n"
+            "Caused by:\n    missing config directory', espanso/src/main.rs:611:64\n",
+            "unable to load config: unable to load config",
+        ),
         ("plain error\nsecond\n", "plain error"),
         ("\x07bell\u2066 and bidi\r\n", "bell and bidi"),
         ("x" * 500, "x" * 199 + "\u2026"),
