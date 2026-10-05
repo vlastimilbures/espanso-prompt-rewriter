@@ -5,6 +5,7 @@ and setup's smoke test against its own stub on 127.0.0.1."""
 from __future__ import annotations
 
 import json
+import re
 from decimal import Decimal
 from pathlib import Path
 
@@ -1013,7 +1014,9 @@ def test_setup_option_errors(saved, espanso, tty, monkeypatch):
     monkeypatch.setenv("PROMPT_PROVIDER", "nope")
     result = _setup(espanso, "--non-interactive")
     assert result.exit_code == 2
-    assert "pass --provider" in result.output
+    # The error panel wraps at the runner's terminal width, so compare without line breaks.
+    flat = " ".join(re.sub(r"\x1b\[[0-9;]*m|[│╭╮╰╯─]", " ", result.output).split())
+    assert "pass --provider" in flat
 
 
 def test_setup_in_legacy_mode_lists_what_to_set(espanso, fake_run, smoke_ok):
