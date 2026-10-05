@@ -20,9 +20,6 @@ All notable changes to this project are documented here. The format follows
   gone)`), even when every match file is in sync; `setup` and the TUI do so without asking,
   since no file is written. An entry for a file that exists, or that cannot be looked at (an
   unreadable folder), is never dropped.
-- `prompt-workflow doctor --json` now includes the launcher check's `orphans` list; the JSON
-  output dropped it, since the key was missing from the check's schema (schema version 1:
-  a key is only added).
 
 ## 0.16.0 - 2026-10-05
 
