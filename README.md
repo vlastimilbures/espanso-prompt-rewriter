@@ -645,8 +645,9 @@ carrying:
   with every call and is **not** scanned by the gate: an email, a company name or one of your
   `PROMPT_EXTRA_PATTERNS` in the persona is sent even where the same text in the draft would be
   blocked. Keep the persona to what you are happy to send to every recipient below;
-- the model name and request settings (temperature, maximum tokens; for OpenRouter also the
-  reasoning effort and the endpoint preference);
+- the model name and request settings, such as the temperature and maximum tokens (for
+  OpenRouter also the reasoning effort and the endpoint preference; for Ollama its `think`
+  setting; the Anthropic API version header);
 - the API key, only as the authentication header (`Authorization: Bearer …` for OpenRouter,
   `x-api-key` for Anthropic; none for Ollama or LM Studio).
 
@@ -654,10 +655,14 @@ Who receives it:
 
 | Provider | Recipients |
 |---|---|
-| OpenRouter (`-i-`, `-iok-`, `-ip-`, `-if-`) | OpenRouter, and the upstream endpoint that serves the model: the one pinned by `OPENROUTER_PROVIDER` (`OPENROUTER_PRO_PROVIDER` for `-ip-`, the form's pick for `-if-`), or another endpoint serving the same model when OpenRouter falls back, which `OPENROUTER_ALLOW_FALLBACKS` allows by default (`false` makes the pin binding). An empty pin leaves the choice to OpenRouter. The request also carries an `X-Title: espanso-prompt-rewriter` header, which attributes the calls to this app in OpenRouter's dashboard (the benchmark script sends `espanso-prompt-rewriter-bench`). |
+| OpenRouter (`-i-`, `-iok-`, `-ip-`, `-if-`) | OpenRouter (`OPENROUTER_BASE_URL`), and the upstream endpoint that serves the model: the one pinned by `OPENROUTER_PROVIDER` (`OPENROUTER_PRO_PROVIDER` for `-ip-`, the form's pick for `-if-`), or another endpoint serving the same model when OpenRouter falls back, which `OPENROUTER_ALLOW_FALLBACKS` allows by default (`false` makes the pin binding). An empty pin leaves the choice to OpenRouter. The request also carries an `X-Title: espanso-prompt-rewriter` header, which attributes the calls to this app in OpenRouter's dashboard (the benchmark script sends `espanso-prompt-rewriter-bench`). |
 | Anthropic (`-ic-`, commented out) | Anthropic (`ANTHROPIC_BASE_URL`). |
-| Ollama / LM Studio on `localhost` (`-il-`, `-ilm-`) | Nobody else: the model runs on this machine. These triggers use the `general` profile, which has no persona. |
-| Ollama / LM Studio at another address, or an Ollama `cloud` model | That server, or ollama.com for a cloud model; the gate applies as for the cloud providers. |
+| Ollama / LM Studio on `localhost` (`-il-`, `-ilm-`) | Nobody else, as long as the server on this machine runs the model itself (a `localhost` relay that forwards to a cloud API is not detected, see above; a `cloud`-tagged Ollama model is the next row). These triggers use the `general` profile, which has no persona. |
+| Ollama / LM Studio at another address, or an Ollama `cloud` model | The configured server (`OLLAMA_BASE_URL`/`api/chat` or `LMSTUDIO_BASE_URL`); for a cloud model that Ollama server also forwards the request to ollama.com (this tool sends no key there). The gate applies as for the cloud providers. |
+
+A request to a server that is not on this machine also passes through any proxy in between
+(the system proxy, or `HTTPS_PROXY`/`ALL_PROXY`, see [Configuration](#configuration)); a proxy
+that inspects TLS sees the whole request, the key header included.
 
 How long each recipient keeps the request and whether it may train on it is set by them, not by
 this tool: see OpenRouter's privacy and data settings for your account (they cover which
