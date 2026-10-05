@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## 0.17.0 - 2026-10-05
+
 Upgrading from the install scripts (an editable checkout install) to the release wheel: you no
 longer need to migrate from the old install first. Install the wheel, then run
 `prompt-workflow setup` (or open the interface): it finds the checkout, copies its settings,
