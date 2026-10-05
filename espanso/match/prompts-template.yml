@@ -1,7 +1,8 @@
 # espanso match file
-# __PROMPT_WORKFLOW__ is substituted by the install scripts (see prompts-llm.yml). The
-# persona line comes from PROMPT_PERSONA in the repo's .env, the same setting the -i-
-# rewrite uses; unset, it is a fill-in placeholder.
+# __PROMPT_WORKFLOW__ is replaced by `prompt-workflow espanso deploy` (or the install
+# scripts; see prompts-llm.yml). The persona line comes from the PROMPT_PERSONA setting
+# (e.g. `prompt-workflow config set PROMPT_PERSONA ...`), the same one the -i- rewrite uses;
+# unset, it is a fill-in placeholder.
 
 matches:
   - trigger: "-p-"

@@ -7,6 +7,11 @@ All notable changes to this project are documented here. The format follows
 ## Unreleased
 
 ### Fixed
+- The comments at the top of the deployed `prompts-template.yml` and `prompts-llm.yml` no
+  longer say the persona and settings come from the repository's `.env`. A wheel install has
+  none: they now point at `prompt-workflow espanso deploy` and the `PROMPT_PERSONA` setting
+  (`prompt-workflow config set`). Comment only; `prompt-workflow espanso deploy` shows both
+  files as `stale` and rewrites them (#123).
 - `prompt-workflow doctor` no longer fails on `launcher: the deployed matches call …, which is
   gone` because of a deploy-manifest entry for a match file that no longer exists (its folder
   was deleted, or Espanso moved to another config folder). Only entries whose file still exists
