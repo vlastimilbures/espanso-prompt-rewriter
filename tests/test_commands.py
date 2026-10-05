@@ -4,6 +4,7 @@ and setup's smoke test against its own stub on 127.0.0.1."""
 
 from __future__ import annotations
 
+import io
 import json
 import re
 from decimal import Decimal
@@ -721,14 +722,8 @@ def test_setup_non_interactive_end_to_end(saved, espanso, fake_run):
     assert "Usage history is on" in result.stdout
     assert "config set PROMPT_HISTORY false" in result.stdout
     assert fake_run.calls == []  # no restart, nothing deployed
-    # The stub improve is recorded (#89): a direct run, with its one attempt at the stub.
-    data = json.loads(_run("history", "export").stdout)
-    assert [(op["origin"], op["kind"], op["outcome"]) for op in data["operations"]] == [
-        ("direct", "improve", "ok")
-    ]
-    assert [(a["provider"], a["endpoint"]) for a in data["attempts"]] == [
-        ("openrouter", "loopback")
-    ]
+    # The stub improve is a health check, not usage: nothing is recorded (#116).
+    assert json.loads(_run("history", "export").stdout)["operations"] == []
 
 
 def test_setup_needs_a_terminal_or_non_interactive(espanso):
@@ -820,6 +815,38 @@ def test_smoke_env_points_every_provider_at_the_stub(monkeypatch):
         "LMSTUDIO_BASE_URL",
     ):
         assert seen[name].startswith("http://127.0.0.1:")
+    assert seen["PROMPT_HISTORY"] == "false"
+
+
+def _history_rows() -> str:
+    out = io.StringIO()
+    HistoryStore(history.history_path()).export(out)
+    return out.getvalue()
+
+
+def test_smoke_and_setup_add_no_history_row(saved, espanso, fake_run, monkeypatch):
+    """#116: a real smoke run reaches the stub but never the real (per-test) history."""
+    monkeypatch.setenv("PROMPT_HISTORY", "true")
+
+    def recorded(argv, env):
+        return smoke.run_cli(argv, {**env, "PROMPT_HISTORY": "true"})
+
+    # The same run with the history forced on is recorded, so the checks below are not vacuous.
+    assert smoke.run("ollama", runner=recorded).ok
+    store = HistoryStore(history.history_path())
+    before = _history_rows()
+    data = json.loads(before)
+    assert [(op["origin"], op["kind"], op["outcome"]) for op in data["operations"]] == [
+        ("direct", "improve", "ok")
+    ]
+    assert [(a["provider"], a["endpoint"]) for a in data["attempts"]] == [("ollama", "loopback")]
+
+    assert smoke.run("ollama").ok
+    result = _setup(espanso, "--non-interactive", "--no-deploy", "--provider", "ollama")
+    assert result.exit_code == 0, result.output
+    assert "ok: improve reached the stub" in result.stdout
+    assert store.health().operations == 1
+    assert _history_rows() == before
 
 
 @pytest.mark.parametrize(
