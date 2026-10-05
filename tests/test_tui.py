@@ -92,6 +92,17 @@ def pane(app: ManageApp, tab: str) -> panes.Pane:
     return app.main.query_one(f"#{tab}-pane", panes.Pane)
 
 
+def table_rows(app: ManageApp, tab: str, selector: str) -> dict[str, list[str]]:
+    """A DataTable's rows by their first cell, from its data: a rendered line can lag (#118)."""
+    from textual.widgets import DataTable
+
+    table = pane(app, tab).query_one(selector, DataTable)
+    rows = (table.get_row_at(i) for i in range(table.row_count))
+    found = {row[0].plain: [cell.plain for cell in row] for row in rows}
+    assert len(found) == table.row_count, "two rows share a first cell"
+    return found
+
+
 async def press(app: ManageApp, pilot, selector: str) -> None:
     app.screen.query_one(selector, Button).press()
     await settle(pilot)
@@ -251,8 +262,7 @@ def test_providers_set_a_key_never_shows_it(saved, espanso):
         assert app.screen.query_one("#key-value", Input).password
         await fill(app, pilot, key_name="OPENROUTER_API_KEY", key_value=f"  {KEY} ")
         assert KEY not in app.export_screenshot()
-        keys = str(pane(app, "providers").query_one("#keys").render_line(1))
-        assert "set" in keys
+        assert table_rows(app, "providers", "#keys")["OPENROUTER_API_KEY"][1] == "set"
         assert KEY not in pane(app, "providers").last_message
 
     drive(scenario)
@@ -358,8 +368,9 @@ def test_providers_change_a_setting_and_reload(saved, espanso, monkeypatch):
         assert "PROMPT_PERSONA" not in [value for _, value in options]
         await fill(app, pilot, setting_name="PROMPT_LOCAL_ONLY", setting_value="true")
         assert app.state.settings.local_only
-        routes = str(pane(app, "providers").query_one("#routes").render_line(3))
-        assert "refused (local only)" in routes
+        routes = table_rows(app, "providers", "#routes")
+        assert routes["openrouter"][3] == routes["anthropic"][3] == "refused (local only)"
+        assert routes["ollama"][3] == "stays local"
         # A bad value is refused as the CLI would refuse it; a key never reaches config.toml.
         await press(app, pilot, "#set-setting")
         await fill(app, pilot, setting_name="PROMPT_LOCAL_ONLY", setting_value="maybe")
@@ -592,14 +603,8 @@ def test_profiles_migrate_without_a_checkout(espanso):
 
 def test_triggers_show_fixed_providers_and_deploy(espanso):
     async def scenario(app, pilot):
-        from textual.widgets import DataTable
-
         await pilot.press("4")
-        table = pane(app, "triggers").query_one("#triggers", DataTable)
-        rows = {
-            table.get_row_at(i)[0].plain: [c.plain for c in table.get_row_at(i)]
-            for i in range(table.row_count)
-        }
+        rows = table_rows(app, "triggers", "#triggers")
         assert rows["-i-"][1:5] == ["openrouter", "standard", "PROMPT_PROFILE", "missing"]
         assert rows["-il-"][1:4] == ["ollama", "standard", "general"]
         assert rows["-ic-"][4] == "commented out"
@@ -613,8 +618,8 @@ def test_triggers_show_fixed_providers_and_deploy(espanso):
         await press(app, pilot, "#deploy")
         await press(app, pilot, "#submit")
         assert pane(app, "triggers").last_message.endswith("The match files are up to date.")
-        rows = [table.get_row_at(i)[4].plain for i in range(table.row_count)]
-        assert set(rows) == {"in sync", "commented out"}
+        states = {row[4] for row in table_rows(app, "triggers", "#triggers").values()}
+        assert states == {"in sync", "commented out"}
         await press(app, pilot, "#deploy")
         assert pane(app, "triggers").last_message == "Nothing to do: every match file is in sync."
         await press(app, pilot, "#show-diff")
@@ -850,15 +855,9 @@ def test_diagnostics_provenance_and_import_check(espanso, monkeypatch):
     )
 
     async def scenario(app, pilot):
-        from textual.widgets import DataTable
-
         await pilot.press("6")
         diagnostics = pane(app, "diagnostics")
-        table = diagnostics.query_one("#settings", DataTable)
-        rows = {
-            table.get_row_at(i)[0].plain: [c.plain for c in table.get_row_at(i)]
-            for i in range(table.row_count)
-        }
+        rows = table_rows(app, "diagnostics", "#settings")
         assert rows["OPENROUTER_API_KEY"][1:3] == [f"<set, {len(KEY)} chars>", "environment"]
         assert KEY not in app.export_screenshot()
         store = str(diagnostics.query_one("#store").render())
