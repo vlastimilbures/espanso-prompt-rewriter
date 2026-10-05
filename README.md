@@ -142,7 +142,10 @@ and `secrets.toml` (see [Configuration](#configuration)).
 ## Requirements
 
 - macOS or Windows with [Espanso](https://espanso.org/install/) installed and running. Espanso
-  also runs on Linux, where the CLI is tested but the triggers are not used day to day.
+  also runs on Linux, where the CLI is tested but the triggers are not used day to day. There
+  the clipboard needs `xclip` or `xsel` (X11) or `wl-clipboard` (Wayland); without one, a
+  trigger pastes `[prompt-workflow: Clipboard unavailable: Pyperclip could not find a copy/paste
+  mechanism …]` instead of a rewrite.
 - Python 3.12+ and [uv](https://docs.astral.sh/uv/getting-started/installation/)
 - For the default `-i-` trigger: an [OpenRouter API key](https://openrouter.ai/keys).
   For fully local use instead: [Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai).
@@ -192,7 +195,8 @@ prompt-workflow setup --non-interactive --api-key-stdin --deploy < key.txt
 ```
 
 Without `--deploy` the deploy stays a preview. Now copy a rough draft, type `-i-` in any text
-field, and wait a couple of seconds.
+field, and wait a couple of seconds without typing or switching windows: Espanso pastes the
+rewrite wherever the focus is when the answer arrives.
 
 ### Managing the deployed match files
 
@@ -320,14 +324,24 @@ The improve triggers (`-i-`, `-ip-`, `-if-`, `-iok-`, `-il-`, `-ilm-`) send your
 as-is, whatever it holds, so copy the draft first. On macOS and Windows an item a password
 manager marked as concealed is refused and cleared from the clipboard
 (`[prompt-workflow: The clipboard held a password-manager item …]`) when the check can tell. Cloud triggers pass through the
-[data-protection gate](#privacy-and-data-protection) first. To enable `-ic-`,
-uncomment it in [`espanso/match/prompts-llm.yml`](espanso/match/prompts-llm.yml) and run
+[data-protection gate](#privacy-and-data-protection) first. To rewrite text in place, select
+it, copy it (Cmd+C / Ctrl+C) and type `-i-`: as in any editor, the first character you type
+replaces the selection, and Espanso then replaces the trigger with the rewrite.
+
+While a rewrite runs (about 2 s for `-i-`, about 6 s median for `-ip-`, at most the call's time
+limit, see `PROMPT_TIMEOUT_SECONDS`), do not type or switch windows: Espanso pastes the result
+wherever the focus is when the answer arrives, and other triggers do not expand until it
+finishes. Writing the [usage history](#usage-history) adds up to 0.25 s after the output (1 s
+once, for the write that creates the file).
+
+In a checkout ([Development](#development)), you enable `-ic-` by uncommenting it in
+[`espanso/match/prompts-llm.yml`](espanso/match/prompts-llm.yml) and running
 `prompt-workflow espanso deploy` (or the installer) again.
 
 `-if-` opens an Espanso form with four dropdowns before the rewrite runs: the model
 (each entry is `model@endpoint`, the OpenRouter slug plus its endpoint pin; `@auto` leaves
 routing to OpenRouter), reasoning effort, max output tokens and timeout. `default` in any list
-keeps the pro-tier setting (`OPENROUTER_PRO_*`). Edit the lists in
+keeps the pro-tier setting (`OPENROUTER_PRO_*`). In a checkout, edit the lists in
 [`espanso/match/prompts-llm.yml`](espanso/match/prompts-llm.yml) and deploy again; the
 tests reject any value the CLI would not accept. Two things to know:
 
@@ -335,6 +349,16 @@ tests reject any value the CLI would not accept. Two things to know:
   with `8000` or more, or the rewrite can come back cut short.
 - Espanso waits for the command, and other triggers do not expand until it finishes. A `high`
   effort rewrite on `openai/gpt-6-luna` took about 23 s.
+
+With a release wheel there is no checkout to edit: put your own variants (`-ic-`, an `-if-`
+with other lists) in a file of your own in Espanso's `match/` folder, such as
+`my-prompts.yml`. Copy the match from the deployed `prompts-llm.yml`, which already holds the
+CLI's absolute path, give it a trigger no other match uses, and keep its `--trigger-id`
+only if its runs should count as that trigger in the usage history. `prompt-workflow espanso
+deploy`, `status` and `detach` handle only the files they deployed (`prompts-core.yml`,
+`prompts-llm.yml`, `prompts-template.yml`), so they never list or change yours. Editing a
+deployed file instead marks it `modified`: deploy then keeps your copy (or replaces it, with a
+backup, if you choose ours), so it no longer receives updates.
 
 ### CLI
 
@@ -824,7 +848,9 @@ The script runs `uv tool install --editable` pinned to `uv.lock` (and checks the
 against it), then `prompt-workflow espanso deploy --yes`, which writes the match files with the
 CLI's absolute path and restarts Espanso. It never touches Espanso's `config/` folder (the old
 `--with-config` / `-WithConfig` option is gone). The Windows script runs on Windows PowerShell
-5.1 and PowerShell 7; you may first need `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
+5.1 and PowerShell 7. If script execution is disabled, run it as
+`powershell -ExecutionPolicy Bypass -File .\scripts\install_windows.ps1` (`pwsh` for PowerShell
+7), which allows this one run without changing your execution policy.
 On Linux, run `uv tool install --editable .` and `prompt-workflow espanso deploy`. An editable
 install runs the code and profiles straight from the checkout, so a `git pull` or a branch
 switch changes `-i-` at once, while the match files change only on the next deploy. It also
