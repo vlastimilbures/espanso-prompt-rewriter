@@ -11,15 +11,12 @@ import functools
 import os
 import sys
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, NoReturn
+from typing import Any, NoReturn
 
 import typer
 
 from ..config import DEFAULT_SOURCE, ENV_SOURCE, ConfigLayers, Entry, Settings, secret_names
 from ..redaction import safe_repr
-
-if TYPE_CHECKING:
-    from typer._click import Command
 
 # Exit codes (README, "CLI"). 2 is Click's own usage error (an unknown option, a bad value).
 OK = 0
@@ -38,11 +35,6 @@ class CommandError(Exception):
     def __init__(self, message: str, code: int = FAILED) -> None:
         super().__init__(message)
         self.code = code
-
-
-def click_command(app: typer.Typer) -> Command:
-    """The Click command cli.py's lazy group mounts for a Typer app."""
-    return typer.main.get_command(app)
 
 
 def guard[**P, R](func: Callable[P, R]) -> Callable[P, R]:

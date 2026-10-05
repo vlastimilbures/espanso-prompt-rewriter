@@ -890,3 +890,259 @@ def test_doctor_data_keys_are_stable_when_a_check_fails(clipboard, monkeypatch):
         assert tuple(check["data"]) == doctor.DATA_KEYS[check_id]
     assert data["checks"]["profiles"]["status"] == "fail"
     assert data["checks"]["profiles"]["data"] == dict.fromkeys(doctor.DATA_KEYS["profiles"])
+
+
+# --- setup, step by step ------------------------------------------------------------------
+
+
+@pytest.fixture
+def smoke_ok(monkeypatch):
+    calls = []
+
+    def fake(provider):
+        calls.append(provider)
+        return smoke.SmokeResult(True, smoke.REPLY, 1, "ok")
+
+    monkeypatch.setattr(smoke, "run", fake)
+    return calls
+
+
+def test_setup_stops_writing_when_the_dotenv_is_broken(saved, espanso, fake_run, smoke_ok):
+    saved.mkdir(parents=True)
+    (saved / ".env").write_text("PROMPT_LOCAL_ONLY=maybe\n", "utf-8")
+    result = _setup(espanso, "--non-interactive")
+    assert result.exit_code == 1
+    assert "fix the current settings first" in result.stderr
+    assert not (saved / "config.toml").exists()
+
+
+def test_setup_local_provider_takes_no_key(saved, espanso, fake_run, smoke_ok):
+    args = ("--non-interactive", "--provider", "ollama", "--api-key-stdin")
+    result = _setup(espanso, *args, input=f"{KEY}\n")
+    assert result.exit_code == 1
+    assert "takes no key" in result.stderr
+    assert not (saved / "secrets.toml").exists()
+    assert smoke_ok == ["ollama"]
+
+
+def test_setup_key_from_stdin_in_legacy_mode_is_refused(espanso, fake_run, smoke_ok):
+    result = _setup(espanso, "--non-interactive", "--api-key-stdin", input=f"{KEY}\n")
+    assert result.exit_code == 1
+    assert "the key was not saved" in result.stderr
+
+
+def test_setup_refuses_a_malformed_key(saved, espanso, fake_run, smoke_ok):
+    result = _setup(espanso, "--non-interactive", "--api-key-stdin", input="two words\n")
+    assert result.exit_code == 1
+    assert "one line of visible characters" in result.stderr
+    assert not (saved / "secrets.toml").exists()
+
+
+def test_setup_reports_a_set_key_without_showing_it(saved, espanso, fake_run, smoke_ok):
+    config_store_secret(saved)
+    result = _setup(espanso, "--non-interactive")
+    assert result.exit_code == 0
+    assert "OPENROUTER_API_KEY is set (from" in result.stdout
+    assert KEY not in result.output
+
+
+def test_setup_interactive_replaces_the_key(saved, espanso, fake_run, smoke_ok, tty, monkeypatch):
+    config_store_secret(saved, "-".join(("old", "key")))
+    monkeypatch.setattr(common, "_getpass", lambda prompt: KEY)
+    # Provider and profile: the defaults; replace the key: yes; deploy: no.
+    result = _setup(espanso, input="\n\ny\nn\n")
+    assert result.exit_code == 0, result.output
+    assert KEY in (saved / "secrets.toml").read_text("utf-8")
+
+
+def test_setup_interactive_skips_an_empty_key(saved, espanso, fake_run, smoke_ok, tty, monkeypatch):
+    monkeypatch.setattr(common, "_getpass", lambda prompt: "")
+    result = _setup(espanso, input="\n\nn\n")
+    assert result.exit_code == 0, result.output
+    assert "to do: OPENROUTER_API_KEY not set" in result.stdout
+
+
+def test_setup_interactive_asks_again_for_a_bad_provider(
+    saved, espanso, fake_run, smoke_ok, tty, monkeypatch
+):
+    monkeypatch.setattr(common, "_getpass", lambda prompt: "")
+    result = _setup(espanso, input="nope\nollama\n\nn\n")
+    assert result.exit_code == 0, result.output
+    assert "Choose one of" in result.stdout
+    assert smoke_ok == ["ollama"]
+
+
+def test_setup_interactive_deploys_on_yes(saved, espanso, fake_run, smoke_ok, tty, monkeypatch):
+    monkeypatch.setattr(common, "_getpass", lambda prompt: "")
+    result = _setup(espanso, "--provider", "ollama", "--profile", "general", input="y\n")
+    assert result.exit_code == 0, result.output
+    assert len(list((espanso / "match").iterdir())) == 3
+    # A second run finds nothing to deploy.
+    result = _setup(espanso, "--non-interactive")
+    assert "Every match file is in sync." in result.stdout
+
+
+def test_setup_deploy_keeps_an_edited_file(saved, espanso, fake_run, smoke_ok):
+    target = espanso / "match" / "prompts-llm.yml"
+    target.write_text("# mine\n", "utf-8")
+    result = _setup(espanso, "--non-interactive", "--deploy")
+    assert result.exit_code == 0, result.output
+    assert target.read_text("utf-8") == "# mine\n"
+    assert "files you edited were kept" in result.stdout
+
+
+def test_setup_deploy_error_fails_the_step(saved, espanso, fake_run, smoke_ok):
+    result = _run(
+        "setup", "--non-interactive", "--espanso-dir", str(espanso), "--launcher", '/a"b/pw'
+    )
+    assert result.exit_code == 1
+    assert "deploy failed" in result.stderr
+
+
+def test_setup_no_deploy_and_no_smoke(saved, espanso, fake_run, smoke_ok):
+    result = _setup(espanso, "--non-interactive", "--no-deploy", "--no-smoke-test")
+    assert result.exit_code == 0
+    assert "Skipped (--no-deploy)." in result.stdout
+    assert "Skipped (--no-smoke-test)." in result.stdout
+    assert smoke_ok == []
+
+
+def test_setup_option_errors(saved, espanso, tty, monkeypatch):
+    assert _setup(espanso, "--api-key-stdin").exit_code == 2
+    assert _setup(espanso, "--non-interactive", "--profile", "nosuch").exit_code == 2
+    monkeypatch.setenv("PROMPT_PROVIDER", "nope")
+    result = _setup(espanso, "--non-interactive")
+    assert result.exit_code == 2
+    assert "pass --provider" in result.output
+
+
+def test_setup_in_legacy_mode_lists_what_to_set(espanso, fake_run, smoke_ok):
+    result = _setup(espanso, "--non-interactive", "--provider", "ollama")
+    assert result.exit_code == 0
+    assert "to do: set PROMPT_PROVIDER=ollama" in result.stdout
+
+
+def test_smoke_reports_a_cli_that_cannot_start():
+    def broken(argv, env):
+        raise OSError("no python")
+
+    result = smoke.run("openrouter", runner=broken)
+    assert not result.ok
+    assert "could not run the CLI" in result.message
+
+
+# --- odds and ends ------------------------------------------------------------------------
+
+
+def test_stats_shows_estimated_unknown_and_local_costs(monkeypatch):
+    target = HistoryStore(history.history_path())
+    for attempt in (
+        {"provider": "ollama", "requested_model": "qwen3:8b", "cost_state": "not_applicable"},
+        {"provider": "anthropic", "requested_model": "claude-sonnet-5"},
+    ):
+        op = {
+            "id": history.new_operation_id(),
+            "origin": "direct",
+            "kind": "improve",
+            "outcome": "ok",
+        }
+        assert target.record(op, [{"endpoint": "remote", "status": 200, **attempt}])
+    out = _run("stats", "--by", "provider").stdout
+    assert "1 local (no cost)" in out
+    assert "1 attempt(s) with an unknown cost" in out
+    estimated = {"estimated": {"USD": Decimal("0.5")}, "reported": {}}
+    row = history.StatsRow("x", 1, 1, "2026-10-05T00:00:00.000000Z", None, None, {}, **estimated)
+    from prompt_workflow.commands import usage
+
+    assert "estimated 0.5 USD" in " ".join(usage._row_text(row))
+
+
+def test_stats_when_history_is_off(monkeypatch):
+    monkeypatch.setenv("PROMPT_HISTORY", "false")
+    assert "Usage history is off" in _run("stats").stdout
+
+
+def test_an_unexpected_error_is_one_line(monkeypatch):
+    from prompt_workflow.commands import usage
+
+    def broken(settings):
+        raise RuntimeError("kaput")
+
+    monkeypatch.setattr(usage, "store", broken)
+    result = _run("stats")
+    assert result.exit_code == 1
+    assert result.stderr == "error: unexpected RuntimeError: kaput\n"
+
+
+def test_terminal_probes_survive_a_closed_stream(monkeypatch):
+    class Closed:
+        def isatty(self):
+            raise ValueError("I/O operation on closed file")
+
+    monkeypatch.setattr("sys.stdin", Closed())
+    monkeypatch.setattr("sys.stdout", Closed())
+    assert common.stdin_is_tty() is False
+    assert common.stdout_is_tty() is False
+
+
+def test_getpass_is_hidden_input(monkeypatch):
+    import getpass
+
+    monkeypatch.setattr(getpass, "getpass", lambda prompt: f"typed for {prompt}")
+    assert common._getpass("KEY: ") == "typed for KEY: "
+
+
+def test_secrets_set_empty_hidden_input(saved, tty, monkeypatch):
+    monkeypatch.setattr(common, "_getpass", lambda prompt: " ")
+    result = _run("secrets", "set", "OPENROUTER_API_KEY")
+    assert result.exit_code == 1
+    assert "no value entered" in result.stderr
+
+
+def test_config_show_quotes_an_unprintable_value(monkeypatch):
+    monkeypatch.setenv("PROMPT_EXTRA_PATTERNS", "a\tb")
+    assert "PROMPT_EXTRA_PATTERNS            'a\\tb'" in _run("config", "show").stdout
+
+
+def test_config_set_warns_when_the_environment_wins(saved, monkeypatch):
+    monkeypatch.setenv("PROMPT_PROFILE", "default")
+    result = _run("config", "set", "PROMPT_PROFILE", "general")
+    assert result.exit_code == 0
+    assert "environment variable PROMPT_PROFILE is set" in result.stderr
+
+
+def test_config_unset_of_an_unsaved_setting(saved):
+    result = _run("config", "unset", "PROMPT_PROFILE")
+    assert result.exit_code == 0
+    assert "nothing to do" in result.stdout
+    assert not (saved / "config.toml").exists()
+
+
+def test_secrets_remove_says_where_a_key_still_comes_from(saved, monkeypatch):
+    config_store_secret(saved)
+    monkeypatch.setenv("OPENROUTER_API_KEY", KEY)
+    result = _run("secrets", "remove", "OPENROUTER_API_KEY", "--yes")
+    assert result.exit_code == 0
+    assert "still set, from environment" in result.stdout
+    assert KEY not in result.output
+    assert "nothing to do" in _run("secrets", "remove", "OPENROUTER_API_KEY").stdout
+
+
+def test_profiles_migrate_nothing_changed_and_default(monkeypatch, tmp_path):
+    from prompt_workflow import profiles
+
+    checkout = tmp_path / "checkout"
+    source = checkout / profiles.PROMPTS_PATH
+    source.mkdir(parents=True)
+    (source / "default.md").write_text("same", "utf-8")
+    args = ("profiles", "migrate", "--checkout", str(checkout), "--yes")
+    monkeypatch.setattr(
+        profiles, "git_pristine_profiles", lambda root, rev=None: {"default": "same"}
+    )
+    assert "nothing to copy" in _run(*args).stdout
+    monkeypatch.setattr(
+        profiles, "git_pristine_profiles", lambda root, rev=None: {"default": "old"}
+    )
+    result = _run(*args)
+    assert result.exit_code == 0
+    assert "PROMPT_PROFILE_OVERRIDES" in result.stdout
