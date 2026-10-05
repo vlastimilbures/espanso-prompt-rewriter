@@ -24,10 +24,16 @@ All notable changes to this project are documented here. The format follows
 - An invalid `PROMPT_EXTRA_PATTERNS` regex (including a repeat count too large for the regex
   engine, or nesting too deep to compile) is now rejected when settings load, naming the
   entry but never the pattern (#36). `config validate`, `config set`, `doctor` and the
-  interface report it instead of only the cloud triggers, and every trigger, local ones too,
-  prints a marker until it is fixed (before, the local triggers ran and the usage history
-  silently dropped each record). README and `.env.example` now warn against patterns with
+  interface report it instead of only the cloud triggers, and every rewrite trigger, local
+  ones too, prints a marker until it is fixed (`-p-` still pastes the persona; before, the
+  local triggers ran and the usage history silently dropped each record). README and `.env.example` now warn against patterns with
   nested quantifiers, which can take exponential time on every draft.
+- An Ollama cloud model is recognised in any letter case and with a pinned digest
+  (`GPT-OSS:120B-CLOUD`, `gpt-oss:Cloud`, `gpt-oss:120b-cloud@sha256:…`) (#33). Before, such a
+  spelling counted as local: the data-protection gate did not run, `PROMPT_LOCAL_ONLY=true` did
+  not refuse it, the interface's Providers tab showed it as local and the usage history
+  recorded its cost as `not_applicable`. Only the tag counts, so a name such as
+  `cloudy-llama:7b` stays local.
 - An error that quotes a rejected value no longer repeats one that matches your
   `PROMPT_EXTRA_PATTERNS` (#32): for example `PROMPT_PROVIDER=PRJ-12345` with the pattern
   `PRJ-\d+` now pastes `Unknown provider <redacted, 9 chars>`, and a bad
@@ -36,6 +42,7 @@ All notable changes to this project are documented here. The format follows
   patterns themselves.
 - `--tier` with an unknown value is quoted like every other rejected value (#32), so a
   key-shaped one is described instead of pasted back.
+
 ### Added
 - `config validate`, `doctor` and the interface's Home and Diagnostics tabs now scan
   `PROMPT_PERSONA` with the data-protection gate's patterns (the built-in ones and
@@ -50,15 +57,12 @@ All notable changes to this project are documented here. The format follows
   and LM Studio on `localhost` too, with the same override rules, for a local server that
   relays to a cloud API (LiteLLM, an SSH tunnel). `PROMPT_LOCAL_ONLY` still allows them. A
   draft it blocks pastes `[prompt-workflow: Blocked call to the local server …]`.
-
-
 - The interface's header now shows the installed version next to the name
   (`prompt-workflow 0.17.0 — set up and manage`) on every screen (#112).
 - `OPENROUTER_PRO_MAX_TOKENS` (default empty) (#31): the output cap for the pro tier (`-ip-`,
   `-if-`, `--tier pro`), whose reasoning counts against it. Empty keeps today's behaviour, the
   pro tier sharing `OPENROUTER_MAX_TOKENS` (`2400`) with the standard tier. `--max-tokens` and
   a max-tokens pick in `-if-` still win; the popup's `default` now keeps this setting.
-
 
 ### Changed
 - README Triggers: a tip to use `-ip-` for a draft that pastes an email or thread, since `-i-`'s
@@ -88,6 +92,13 @@ All notable changes to this project are documented here. The format follows
   tier's latency is quoted from the 2026-10-04 bench (median 5.6 s, p95 9.2 s) everywhere;
   CONTRIBUTING says CI runs the tests with `--cov` and a 95 % floor, and its project tree lists
   `previous_install.py` (a test now checks the tree names every module).
+- README tips (#23, #38): do not type or switch windows while a rewrite runs, since Espanso
+  pastes it wherever the focus is when the answer arrives (the usage history write adds up to
+  0.25 s, 1 s on the first write); on Linux the clipboard needs `xclip`, `xsel` or
+  `wl-clipboard`; select, copy and type `-i-` to rewrite text in place; with a release wheel,
+  put your own trigger variants in a match file of your own, which `prompt-workflow espanso
+  deploy` never touches, since editing a deployed file stops its updates. The Windows install
+  script is now run with `-ExecutionPolicy Bypass -File` instead of changing the policy.
 - The benchmark's method and result tables moved from README to `docs/benchmark.md` (#40);
   README keeps a short "Model benchmark" summary (the default models, their pass counts and
   latency) and links there. Each results heading now names the release whose prompt it scored
@@ -104,6 +115,27 @@ All notable changes to this project are documented here. The format follows
   ones (`docs/benchmark.md`). The bench's note on the drafts once held out now says they are no
   longer held out, and the benchmark notes say the blind pairwise judgement of 0.11.0 was a
   one-off by hand whose harness is not in the repository.
+- A `.env` that is not UTF-8 (UTF-16, say) is now a marker on the triggers,
+  `[prompt-workflow: the checkout's .env is not UTF-8 text; save it as UTF-8]` (or "the .env
+  in the user config folder", "the .env named by PROMPT_WORKFLOW_ENV"), instead of being
+  skipped silently for the next `.env` or the defaults (#32). A persona set in the real
+  environment is still printed by `persona`.
+- An unquoted `PROMPT_EXTRA_PATTERNS` value cut at ` #` (a comment) now stops every rewrite
+  trigger with `[prompt-workflow: the value of PROMPT_EXTRA_PATTERNS was cut at ' #' (a comment);
+  quote the value]` instead of running the gate on part of the patterns (#32). A `PROMPT_PERSONA`
+  cut that way is still read as before. For both, `config validate` (exit 4), `doctor` and
+  the interface report the cut, and `config migrate` refuses until the value is quoted, so a
+  regex such as `ticket #\d{5}` is never carried into `config.toml` as `ticket`. A ` # note`
+  after any other setting stays an ordinary comment.
+- `--tier pro` and `--effort` apply only to OpenRouter (#31): with `--provider ollama`,
+  `lmstudio` or `anthropic` (or that `PROMPT_PROVIDER`), `improve` now pastes
+  `[prompt-workflow: --tier pro applies only to OpenRouter, not 'ollama']` and makes no call,
+  where it used to ignore the option silently. `--tier standard` and `--effort default` still
+  pass. No trigger is affected: none passes either option to another provider.
+- An empty `PROMPT_TEMPERATURE` (set, but to nothing: `PROMPT_TEMPERATURE=` in a `.env`, `""`
+  in `config.toml`, or `prompt-workflow config set PROMPT_TEMPERATURE ""`) now sends no
+  temperature to any provider, for models that reject the field (#31); before, it was an
+  error. Unset (or `config unset`) keeps the default `0.2`.
 
 ### Removed
 - The unshipped candidate prompts `docs/prompt-candidates/B.md` to `I2.md` (#41). They stay in
@@ -122,6 +154,18 @@ All notable changes to this project are documented here. The format follows
   failed and retried ones included, now counts against `--budget` (through the usage observer
   of #87); an attempt that reports no cost is counted apart, never as 0, and named in the
   total. `cost` in `results.json` is `null` when no attempt reported one.
+- `persona` (`-p-`) prints your `PROMPT_PERSONA` even while another setting is invalid or the
+  secret store is broken (#32); `improve` still reports the problem. Only a settings file the
+  persona cannot be read from (a broken `config.toml`, a `.env` that is not UTF-8) or a persona
+  line run into the next one gives the `[role]` placeholder.
+- A `.env` saved with a UTF-8 byte order mark (Windows Notepad) no longer loses its first
+  setting (#32), and `config migrate` no longer drops that setting as "not a setting".
+- Anthropic replies split into several text blocks are joined in order instead of keeping
+  only the first (#32).
+- The truncation note is provider-neutral, `[prompt-workflow: the reply hit the model's output
+  limit and is cut off]`, and a reply that used the whole limit before writing any text
+  suggests `--max-tokens` only when the request carried that cap (#32): always for OpenRouter
+  and Anthropic, for Ollama and LM Studio only with `--max-tokens` (#31).
 - `--max-tokens` now reaches Ollama (`options.num_predict`) and LM Studio (`max_tokens`)
   (#31); before, only OpenRouter and Anthropic received it. Without the option their requests
   carry no cap, as before. A capped Ollama reply that used its whole budget before writing any

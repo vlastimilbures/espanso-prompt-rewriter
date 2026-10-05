@@ -329,7 +329,11 @@ def test_persona_check_warns_with_labels_only():
     )
     # A loopback server that may relay to a cloud API (PROMPT_GATE_LOCAL) can send it on.
     relay = Settings(persona=persona, local_only=True, gate_local=True)
-    assert doctor._persona_check(relay).status == "warn"
+    assert (doctor._persona_check(relay).status, doctor._persona_check(relay).message) == (
+        "warn",
+        "PROMPT_PERSONA matches the data-protection patterns: email; it is sent unscanned "
+        "with every call through a local relay (PROMPT_GATE_LOCAL=true)",
+    )
 
 
 # Flagged only when a configured profile sends it: `general` has no {{PERSONA_RULE}}.

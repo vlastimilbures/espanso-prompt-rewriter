@@ -310,7 +310,9 @@ Rules for agents:
   The `persona` check (shared with `config validate` via `persona_problem()`) runs
   `redaction.scan()` (no `bare_token`) with `PROMPT_EXTRA_PATTERNS` over `PROMPT_PERSONA`, which
   the gate never scans, and warns by finding name only (#29), only when a configured profile's
-  template (`prompt_builder.template()`) holds `{{PERSONA_RULE}}`; never on the trigger path.
+  template (`prompt_builder.template()`) holds `{{PERSONA_RULE}}`, and not with
+  `PROMPT_LOCAL_ONLY=true` unless `PROMPT_GATE_LOCAL=true` (`_persona_stays_local()`); shown on
+  the interface's Home and Diagnostics tabs; never on the trigger path.
   `import_check()` (the interface's Diagnostics) imports `prompt_workflow.cli` in a fresh
   interpreter (`-P`, so a module planted in the working directory never runs; the smoke test's
   child uses `-P` too) and reports its time, module count and any `HEAVY_MODULES` it loaded.
