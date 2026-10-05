@@ -411,6 +411,10 @@ class Settings:
     # Refuse every provider that can send the draft off this machine (factory.make_provider),
     # whatever --provider a trigger passes.
     local_only: bool = _env("PROMPT_LOCAL_ONLY", "false", _bool)
+    # Also run the data-protection gate for Ollama and LM Studio on loopback (factory.py),
+    # for a localhost server that relays to a cloud API. Changes neither PROMPT_LOCAL_ONLY nor
+    # what counts as leaving this machine.
+    gate_local: bool = _env("PROMPT_GATE_LOCAL", "false", _bool)
     # Extra `;`-separated regexes the data-protection gate blocks on, e.g. internal project
     # code names or customer-ID formats. Compiled by redaction.compile_extra().
     extra_patterns: str = _env("PROMPT_EXTRA_PATTERNS", "", _regexes)

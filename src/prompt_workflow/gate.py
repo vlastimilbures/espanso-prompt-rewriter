@@ -6,9 +6,19 @@ from .providers.base import Provider, ProviderError
 from .redaction import SOFT_FINDINGS, scan_draft
 
 
-def _block_message(findings: list[str], hard: list[str], allow_flagged: bool, name: str) -> str:
+def _block_message(
+    findings: list[str], hard: list[str], allow_flagged: bool, name: str, relay: bool = False
+) -> str:
     """The hint names what applies to this provider: -iok- is the OpenRouter trigger, and a
-    remote Ollama or LM Studio has no local trigger to fall back to."""
+    remote Ollama or LM Studio has no local trigger to fall back to. A loopback server gated
+    only by PROMPT_GATE_LOCAL (``relay``) is no cloud call, and -il-/-ilm- have no
+    --allow-flagged, so its message offers neither."""
+    if relay:
+        return (
+            "Blocked call to the local server (PROMPT_GATE_LOCAL=true gates it). Sensitive "
+            "content detected: " + ", ".join(findings) + ". Remove it, or set "
+            "PROMPT_GATE_LOCAL=false if the server runs the model itself."
+        )
     once = "-iok-" if name == "openrouter" else "--allow-flagged"
     local = "a local trigger (-il-)" if name in ("openrouter", "anthropic") else "a local model"
     message = "Blocked cloud call. Sensitive content detected: " + ", ".join(findings) + ". "
@@ -39,9 +49,11 @@ class GatedProvider:
         extra_patterns: tuple[re.Pattern[str], ...] = (),
         allow_flagged: bool = False,
         name: str = "openrouter",
+        relay: bool = False,
     ) -> None:
         self._inner = inner
         self._name = name
+        self._relay = relay
         self._allow_override = allow_override
         self._extra_patterns = extra_patterns
         self._allow_flagged = allow_flagged
@@ -53,7 +65,9 @@ class GatedProvider:
         if findings and not self._allow_override:
             hard = [f for f in findings if f not in SOFT_FINDINGS]
             if hard or not self._allow_flagged:
-                message = _block_message(findings, hard, self._allow_flagged, self._name)
+                message = _block_message(
+                    findings, hard, self._allow_flagged, self._name, self._relay
+                )
                 raise GateBlocked(message)
             self.sent_despite = tuple(findings)
         return self._inner.generate(prompt, system_prompt)

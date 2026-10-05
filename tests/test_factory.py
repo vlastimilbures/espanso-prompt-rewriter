@@ -225,6 +225,57 @@ def test_ollama_cloud_model_is_gated(monkeypatch, model, gated):
     assert isinstance(make_provider("ollama", Settings()), GatedProvider) is gated
 
 
+# The `cloud` tag is matched case-insensitively and after an `@sha256:` digest is removed;
+# only the tag counts, so a model name that contains "cloud" stays local.
+CLOUD_SPELLINGS = [
+    "GPT-OSS:120B-CLOUD",
+    "gpt-oss:Cloud",
+    "gpt-oss:120b-cloud@sha256:abc123",
+    "glm-4.6:CLOUD@sha256:abc123",
+]
+LOCAL_SPELLINGS = [
+    "cloudy-llama:7b",
+    "cloud-model",
+    "my-cloud:latest",
+    "qwen3:8b@sha256:abc123",
+    "registry.local:5000/team/cloud",
+]
+
+
+@pytest.mark.parametrize(
+    ("model", "cloud"),
+    [(m, True) for m in CLOUD_SPELLINGS] + [(m, False) for m in LOCAL_SPELLINGS],
+)
+def test_ollama_cloud_tag_spellings(monkeypatch, model, cloud):
+    monkeypatch.setenv("OLLAMA_MODEL", model)
+    cfg = Settings()
+    assert factory._is_ollama_cloud(model) is cloud
+    # the gate wraps it, and its cost is not_applicable only when it truly runs here
+    provider = make_provider("ollama", cfg)
+    assert isinstance(provider, GatedProvider) is cloud
+    inner = provider._inner if isinstance(provider, GatedProvider) else provider
+    assert inner.local is not cloud
+    # routes() (the interface's Providers tab) reports the same verdict
+    route = {r.name: r for r in factory.routes(cfg)}["ollama"]
+    assert route.remote is cloud
+
+
+@pytest.mark.parametrize("model", CLOUD_SPELLINGS)
+def test_local_only_refuses_every_cloud_tag_spelling(monkeypatch, model):
+    monkeypatch.setenv("PROMPT_LOCAL_ONLY", "true")
+    monkeypatch.setenv("OLLAMA_MODEL", model)
+    assert {r.name: r for r in factory.routes(Settings())}["ollama"].refused
+    with pytest.raises(ProviderError, match=r"^PROMPT_LOCAL_ONLY=true: ollama would send"):
+        make_provider("ollama", Settings())
+
+
+@pytest.mark.parametrize("model", LOCAL_SPELLINGS)
+def test_local_only_allows_a_name_containing_cloud(monkeypatch, model):
+    monkeypatch.setenv("PROMPT_LOCAL_ONLY", "true")
+    monkeypatch.setenv("OLLAMA_MODEL", model)
+    assert not isinstance(make_provider("ollama", Settings()), GatedProvider)
+
+
 # PROMPT_LOCAL_ONLY=true refuses every provider that can leave this machine before building
 # it (so even without an API key the refusal is what the user sees).
 @pytest.mark.parametrize(
@@ -394,3 +445,66 @@ def test_allow_flagged_on_remote_and_local_models(name, remote_cfg, local_type):
 def test_local_only_beats_allow_flagged():
     with pytest.raises(ProviderError, match="PROMPT_LOCAL_ONLY"):
         make_provider("openrouter", Settings(local_only=True), allow_flagged=True)
+
+
+# PROMPT_GATE_LOCAL=true also wraps Ollama and LM Studio on loopback in the gate (for a
+# localhost relay to a cloud API), without changing what counts as leaving this machine.
+@pytest.mark.parametrize("name", ["ollama", "lmstudio"])
+def test_gate_local_wraps_loopback_providers(monkeypatch, name):
+    monkeypatch.setenv("PROMPT_GATE_LOCAL", "true")
+    cfg = Settings()
+    provider = make_provider(name, cfg)
+    assert isinstance(provider, GatedProvider)
+    # still local: cost not_applicable, routes() says it stays here
+    assert provider._inner.local is True
+    assert not factory._leaves_machine(name, cfg)
+    assert not {r.name: r for r in factory.routes(cfg)}[name].remote
+
+
+@pytest.mark.parametrize("name", ["ollama", "lmstudio"])
+def test_gate_local_blocks_a_sensitive_draft(monkeypatch, fake_http, name):
+    monkeypatch.setenv("PROMPT_GATE_LOCAL", "true")
+    provider = make_provider(name, Settings())
+    with pytest.raises(ProviderError, match="Sensitive content detected: payment_card"):
+        provider.generate("card 4111 1111 1111 1111", "sys")
+    assert fake_http.calls == []
+
+
+# The same override rules apply: ALLOW_CLOUD_OVERRIDE and --allow-flagged for soft findings.
+def test_gate_local_follows_the_override_rules(monkeypatch, fake_http):
+    monkeypatch.setenv("PROMPT_GATE_LOCAL", "true")
+    flagged = make_provider("ollama", Settings(), allow_flagged=True)
+    with pytest.raises(ProviderError, match="payment_card"):
+        flagged.generate("card 4111 1111 1111 1111", "sys")
+    monkeypatch.setenv("ALLOW_CLOUD_OVERRIDE", "true")
+    overridden = make_provider("ollama", Settings())
+    assert isinstance(overridden, GatedProvider)
+    assert overridden._allow_override is True
+
+
+# PROMPT_LOCAL_ONLY still allows a loopback provider when PROMPT_GATE_LOCAL gates it.
+@pytest.mark.parametrize("name", ["ollama", "lmstudio"])
+def test_gate_local_with_local_only_keeps_loopback(monkeypatch, name):
+    monkeypatch.setenv("PROMPT_GATE_LOCAL", "true")
+    monkeypatch.setenv("PROMPT_LOCAL_ONLY", "true")
+    assert isinstance(make_provider(name, Settings()), GatedProvider)
+    assert not {r.name: r for r in factory.routes(Settings())}[name].refused
+
+
+# Off (the default), a loopback provider stays unwrapped.
+def test_gate_local_defaults_to_false():
+    assert Settings().gate_local is False
+
+
+# A loopback server gated by PROMPT_GATE_LOCAL is not a cloud call, and -il-/-ilm- cannot
+# pass --allow-flagged, so the block message says what applies instead.
+@pytest.mark.parametrize("name", ["ollama", "lmstudio"])
+def test_gate_local_block_message(monkeypatch, fake_http, name):
+    monkeypatch.setenv("PROMPT_GATE_LOCAL", "true")
+    with pytest.raises(ProviderError) as exc:
+        make_provider(name, Settings()).generate("write to jane@example.com", "sys")
+    assert str(exc.value) == (
+        "Blocked call to the local server (PROMPT_GATE_LOCAL=true gates it). Sensitive content "
+        "detected: email. Remove it, or set PROMPT_GATE_LOCAL=false if the server runs the "
+        "model itself."
+    )

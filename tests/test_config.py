@@ -289,7 +289,9 @@ def test_bool_parsing(monkeypatch, raw, expected):
     monkeypatch.setenv("OLLAMA_THINK", raw)
     monkeypatch.setenv("OPENROUTER_ALLOW_FALLBACKS", raw)
     monkeypatch.setenv("PROMPT_LOCAL_ONLY", raw)
+    monkeypatch.setenv("PROMPT_GATE_LOCAL", raw)
     settings = Settings()
+    assert settings.gate_local is expected
     assert settings.allow_cloud_override is expected
     assert settings.ollama_think is expected
     assert settings.openrouter_allow_fallbacks is expected
@@ -298,9 +300,10 @@ def test_bool_parsing(monkeypatch, raw, expected):
 
 # Anything else is an error, not a silent false: OLLAMA_THINK=1 must not mean "off".
 @pytest.mark.parametrize("raw", ["1", "yes", ""])
-def test_bool_parsing_rejects_other_values(monkeypatch, raw):
-    monkeypatch.setenv("OLLAMA_THINK", raw)
-    with pytest.raises(ValueError, match=f"^OLLAMA_THINK must be true or false, got '{raw}'$"):
+@pytest.mark.parametrize("name", ["OLLAMA_THINK", "PROMPT_GATE_LOCAL"])
+def test_bool_parsing_rejects_other_values(monkeypatch, raw, name):
+    monkeypatch.setenv(name, raw)
+    with pytest.raises(ValueError, match=f"^{name} must be true or false, got '{raw}'$"):
         Settings()
 
 
