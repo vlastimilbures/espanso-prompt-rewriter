@@ -19,6 +19,7 @@ KNOWN_SOURCES: dict[str, frozenset[str]] = {
         {
             "2e120ea22d5791f4f9666d39d59aace143f8f50777bdb1f94246a2b07ac1085f",
             "2f4a39feed880856a5f11ac5ae4a37a7ff690a88a07a3afc58b3556d9aedfa09",
+            "4ffb6b04f406e81bae125a8d6fdcdad6ce1022f4b086697b236526469c51e8d1",
             "591c2fc3e1d65ab9288957e04eca1e1919f56814c0ad71512991b4a3d192a077",
             "8ae1421a528c7fded5459e46bdf92838ce6ec6686b3f5b9a191226ed76dae082",
             "8f9eb7a8d4cd42606df54f7e3e3ea7cdcfd9e57770dbd39fc6ed020bc3d3d21c",
@@ -30,6 +31,7 @@ KNOWN_SOURCES: dict[str, frozenset[str]] = {
     "prompts-template.yml": frozenset(
         {
             "1b967f502089e307a885ba7b3eb3a85782629c443bc4bc50ac864364b1c0e0ad",
+            "1d271379279e787f18b1515d1c13990e718efad3ea562f78dd8a14d8640a3a4e",
             "53292b9f1d1c24e3771606b69c7c6bff9feacca9395b9668e36d6762752ad1b1",
             "5b3b9f2541e3dafebd033c724febb77b8e9a4478d17f3deaad364a5195e85153",
             "a064a91c8e05437d00e3b708434d492d1e6903eba912b9bf19488b97d46a648b",
