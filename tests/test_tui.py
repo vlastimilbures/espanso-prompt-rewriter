@@ -621,6 +621,21 @@ def test_profiles_migrate_without_a_checkout(espanso):
 # --- Triggers -----------------------------------------------------------------------------
 
 
+def test_triggers_say_when_espanso_cannot_name_its_folder(espanso):
+    """#115: deploy and detach then use the default folder; the Triggers tab says so."""
+    espanso.answers["espanso path config"] = deploy.CommandFailure(
+        found=True, returncode=101, error="unable to load config"
+    )
+
+    async def scenario(app, pilot):
+        await pilot.press("4")
+        target = str(pane(app, "triggers").query_one("#deploy-target").render())
+        assert "`espanso path config` failed (exit 101): unable to load config" in target
+        assert "using the default folder" in target
+
+    drive(scenario)
+
+
 def test_triggers_show_fixed_providers_and_deploy(espanso):
     async def scenario(app, pilot):
         await pilot.press("4")

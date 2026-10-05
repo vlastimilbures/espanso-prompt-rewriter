@@ -2,14 +2,17 @@
 the real Espanso folder, and the real espanso, uv and brew are never run (conftest refuses
 deploy.run_command; a test passes or patches in a fake runner)."""
 
+import contextlib
 import hashlib
 import importlib.util
 import json
 import os
 import shutil
+import signal
 import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -599,8 +602,140 @@ def test_restart(answers, ok, calls):
 def test_run_command():
     py = sys.executable
     assert REAL_RUN_COMMAND([py, "-c", "print('hi')"]).strip() == "hi"
-    assert REAL_RUN_COMMAND([py, "-c", "raise SystemExit(3)"]) is None
-    assert REAL_RUN_COMMAND([str(Path(py).parent / "no-such-binary")]) is None
+    failed = REAL_RUN_COMMAND([py, "-c", "raise SystemExit(3)"])
+    assert failed == deploy.CommandFailure(found=True, path=failed.path, returncode=3)
+    assert REAL_RUN_COMMAND([str(Path(py).parent / "no-such-binary")]) == deploy.CommandFailure()
+
+
+def test_run_command_keeps_the_first_useful_stderr_line():
+    """#115: Espanso panics with a location line first; the message comes after it."""
+    stderr = (
+        "thread 'main' panicked at espanso/src/main.rs:611:64:\n\n"
+        "unable to load config: \x1b[31mmissing\u202e dir\nCaused by: x\n"
+    )
+    # Written as UTF-8 bytes, as Espanso writes them: a Windows child's text stderr would
+    # encode with the console code page instead.
+    script = f"import sys; sys.stderr.buffer.write({stderr.encode()!r}); sys.exit(101)"
+    failed = REAL_RUN_COMMAND([sys.executable, "-c", script])
+    assert (failed.returncode, failed.error) == (101, "unable to load config: [31mmissing dir")
+    argv = deploy.PATH_CONFIG
+    assert failed.describe(argv) == (
+        "`espanso path config` failed (exit 101): unable to load config: [31mmissing dir"
+    )
+
+
+def test_run_command_resolves_through_path(monkeypatch):
+    """On Windows `espanso` is `espanso.cmd`: it is run by the path `shutil.which` gives, so
+    an installed command is never reported as missing (#115)."""
+    seen = []
+    monkeypatch.setattr(deploy.shutil, "which", lambda name: seen.append(name) or sys.executable)
+    assert REAL_RUN_COMMAND(["espanso", "-c", "print('ran')"]).strip() == "ran"
+    assert seen == ["espanso"]
+
+    def broken(*args, **kwargs):
+        raise PermissionError("access denied")
+
+    monkeypatch.setattr(deploy.subprocess, "Popen", broken)
+    failed = REAL_RUN_COMMAND(deploy.PATH_CONFIG)
+    assert failed == deploy.CommandFailure(found=True, path=sys.executable, error="access denied")
+    assert failed.describe(deploy.PATH_CONFIG) == (
+        "`espanso path config` could not be run: access denied"
+    )
+
+
+def test_run_command_survives_undecodable_output():
+    """Output that is not UTF-8 is replaced, never raised as UnicodeDecodeError."""
+    script = (
+        "import sys; sys.stdout.buffer.write(b'out \\xff'); "
+        "sys.stderr.buffer.write(b'bad \\x8d byte\\n'); sys.exit(101)"
+    )
+    failed = REAL_RUN_COMMAND([sys.executable, "-c", script])
+    assert (failed.returncode, failed.error) == (101, "bad \ufffd byte")
+    ok = REAL_RUN_COMMAND(
+        [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'C:/\\xc4\\x8d')"]
+    )
+    assert ok == "C:/\u010d"
+
+
+def test_run_command_timeout_does_not_wait_for_a_grandchild(monkeypatch, tmp_path):
+    """A timed-out command whose child keeps the pipes open (espanso.cmd's espansod.exe on
+    Windows) still returns: the tree is killed, and the pipes are not waited on for ever."""
+    monkeypatch.setattr(deploy, "COMMAND_TIMEOUT", 0.5)
+    monkeypatch.setattr(deploy, "GIVE_UP_TIMEOUT", 1)
+    pid_file = tmp_path / "grandchild.pid"
+    script = (
+        "import subprocess, sys, time; "
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']); "
+        f"open({str(pid_file)!r}, 'w').write(str(child.pid)); time.sleep(60)"
+    )
+    started = time.monotonic()
+    try:
+        failed = REAL_RUN_COMMAND([sys.executable, "-c", script])
+        # A hang would wait the grandchild's 60 s; the margin keeps a slow runner green.
+        assert time.monotonic() - started < 30
+        assert failed.timed_out
+    finally:
+        if pid_file.exists() and pid_file.read_text():
+            with contextlib.suppress(OSError):
+                os.kill(int(pid_file.read_text()), signal.SIGTERM)
+
+
+def test_run_command_times_out(monkeypatch):
+    monkeypatch.setattr(deploy, "COMMAND_TIMEOUT", 0.2)
+    failed = REAL_RUN_COMMAND([sys.executable, "-c", "import time; time.sleep(10)"])
+    assert (failed.found, failed.timed_out) == (True, True)
+    assert failed.describe(deploy.PATH_CONFIG) == "`espanso path config` timed out after 0.2 s"
+
+
+@pytest.mark.parametrize(
+    ("stderr", "expected"),
+    [
+        ("", None),
+        ("\n  \n", None),
+        ("thread 'main' panicked at x.rs:1:2:\n", None),
+        ("thread 'main' (3545792) panicked at x.rs:1:2:\nunable to load\n", "unable to load"),
+        ("thread 'main' (x) panicked at\n", "thread 'main' (x) panicked at"),
+        (
+            "thread 'main' panicked at 'unable to load config: missing', src/main.rs:611:64\n"
+            "note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n",
+            "unable to load config: missing",
+        ),
+        ("note: run with `RUST_BACKTRACE=1` to display a backtrace\nreal\n", "real"),
+        (
+            "thread 'main' panicked at 'unable to load config: unable to load config\n\n"
+            "Caused by:\n    missing config directory', espanso/src/main.rs:611:64\n",
+            "unable to load config: unable to load config",
+        ),
+        ("plain error\nsecond\n", "plain error"),
+        ("\x07bell\u2066 and bidi\r\n", "bell and bidi"),
+        ("x" * 500, "x" * 199 + "\u2026"),
+    ],
+)
+def test_error_line(stderr, expected):
+    assert deploy._error_line(stderr) == expected
+
+
+@pytest.mark.parametrize(
+    ("answer", "fallback"),
+    [
+        (None, "espanso was not found on PATH"),
+        (deploy.CommandFailure(), "espanso was not found on PATH"),
+        (deploy.CommandFailure(found=True, timed_out=True), "`espanso path config` timed out"),
+        (
+            deploy.CommandFailure(found=True, returncode=101, error="unable to load config"),
+            "`espanso path config` failed (exit 101): unable to load config",
+        ),
+        ("\n", "`espanso path config` printed nothing"),
+    ],
+)
+def test_locate_espanso_dir_says_why_it_falls_back(answer, fallback, monkeypatch, tmp_path):
+    monkeypatch.setattr(deploy, "default_espanso_dir", lambda: tmp_path / "default")
+    found = deploy.locate_espanso_dir(lambda argv: answer)
+    assert found.path == tmp_path / "default"
+    assert found.fallback.startswith(fallback)
+    assert deploy.locate_espanso_dir(lambda argv: "/x/espanso\n") == deploy.EspansoDir(
+        Path("/x/espanso")
+    )
 
 
 # --- CLI ------------------------------------------------------------------------------------

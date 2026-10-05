@@ -282,6 +282,18 @@ then `uv tool install --force <wheel> -c constraints.txt`, `prompt-workflow doct
 - `setup`'s smoke test and the interface's Test call no longer add a row to the usage history
   (#116): the `improve` they run against the stub on 127.0.0.1 runs with
   `PROMPT_HISTORY=false`, so `stats` shows only real use.
+- `doctor` no longer says "espanso was not found on PATH" when Espanso is installed but
+  `espanso path config` fails, as it does before Espanso has started once (#115). It now tells
+  the three cases apart: not on PATH; found, but the query failed (its exit code and first
+  useful stderr line, with a hint to run `espanso start` once); found, but the query timed out.
+  In `doctor --json`, `espanso.data.found` now means on PATH, and new keys `query_failed`,
+  `exit_code`, `timed_out` and `error` give the detail. `setup` and `espanso deploy`, `status`
+  and `detach` say on stderr when they fall back to Espanso's default folder because the query
+  failed, instead of doing it silently, and the interface's Triggers tab shows the same notice.
+  The commands `doctor`, `setup` and `espanso` run (`espanso`, `uv`, `brew`) are now found
+  through `PATH` the way a shell finds them, so on Windows `espanso.cmd` is no longer reported
+  missing, and their output is read as UTF-8, so a byte the locale cannot decode no longer
+  aborts the command.
 
 ## 0.15.0 - 2026-10-04
 

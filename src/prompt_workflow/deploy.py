@@ -11,11 +11,13 @@ Imported lazily by the `espanso` commands, never on the trigger path.
 
 from __future__ import annotations
 
+import contextlib
 import difflib
 import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -38,6 +40,8 @@ KEEP_BACKUPS = 2
 # A side-by-side copy is not a .yml file, so Espanso does not load its triggers twice.
 SIDE_SUFFIX = ".prompt-workflow-new"
 COMMAND_TIMEOUT = 30
+# After a timed-out command is killed, how long to wait for its output pipes.
+GIVE_UP_TIMEOUT = 5
 
 # Plan states (status) and conflict choices (deploy).
 MISSING, IN_SYNC, STALE, MODIFIED, FOREIGN = "missing", "in sync", "stale", "modified", "foreign"
@@ -59,19 +63,122 @@ class DeployError(Exception):
     """A deployment that cannot go ahead; the message says why."""
 
 
-# Runs a command and returns its stdout, or None when it is missing, fails or times out.
-# Every function that runs one looks run_command up when called, so tests can replace it.
-Runner = Callable[[Sequence[str]], str | None]
+@dataclass(frozen=True)
+class CommandFailure:
+    """Why a command gave no output: not found, timed out, or its exit code and the first
+    stderr line that says something (#115)."""
+
+    found: bool = False
+    path: str | None = None
+    returncode: int | None = None
+    error: str | None = None
+    timed_out: bool = False
+
+    def describe(self, argv: Sequence[str]) -> str:
+        name, command = argv[0], " ".join(argv)
+        if not self.found:
+            return f"{name} was not found on PATH"
+        if self.timed_out:
+            return f"`{command}` timed out after {COMMAND_TIMEOUT} s"
+        detail = f": {self.error}" if self.error else ""
+        if self.returncode is None:
+            return f"`{command}` could not be run{detail}"
+        return f"`{command}` failed (exit {self.returncode}){detail}"
 
 
-def run_command(argv: Sequence[str]) -> str | None:
+# Runs a command and returns its stdout, or a CommandFailure. A fake may answer None, read as
+# not found. Every function that runs one looks run_command up when called, so tests can
+# replace it.
+Runner = Callable[[Sequence[str]], str | CommandFailure | None]
+# A Rust panic's first line names only the source location; the message follows it. Newer
+# Rust puts the thread id after the name: `thread 'main' (3545792) panicked at src/main.rs:1:2:`.
+# Before Rust 1.73 the message was quoted in that line, and a backtrace note followed it.
+_PANIC_HEADER = re.compile(r"thread '[^']*'( \(\d+\))? panicked at ")
+# The quoted message can run over several lines, so its closing `', file:line:col` is optional.
+_OLD_PANIC = re.compile(r"thread '[^']*' panicked at '(?P<message>.+?)(?:', \S+:\d+:\d+)?$")
+_BACKTRACE_NOTE = "note: run with `RUST_BACKTRACE"
+_ERROR_LINE_MAX = 200
+
+
+def _error_line(stderr: str) -> str | None:
+    """The first stderr line worth showing, cut to length, with only printable characters
+    (no control, bidi or other format characters reach a terminal or a bug report)."""
+    for raw in stderr.splitlines():
+        line = "".join(c for c in raw if c.isprintable()).strip()
+        old = _OLD_PANIC.match(line)
+        if old:
+            line = old["message"]
+        elif line.startswith(_BACKTRACE_NOTE):
+            continue
+        if line and not _PANIC_HEADER.match(line):
+            return line if len(line) <= _ERROR_LINE_MAX else line[: _ERROR_LINE_MAX - 1] + "…"
+    return None
+
+
+def run_command(argv: Sequence[str]) -> str | CommandFailure:
+    # Resolved through PATH (and PATHEXT) first: on Windows `espanso` is `espanso.cmd`, which
+    # CreateProcess alone never finds, so an installed Espanso looked missing (#115).
+    exe = shutil.which(argv[0])
+    if exe is None:
+        return CommandFailure()
     try:
-        proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
-            list(argv), capture_output=True, text=True, timeout=COMMAND_TIMEOUT, check=False
+        proc = subprocess.Popen(  # noqa: S603 - fixed argv, no shell
+            [exe, *argv[1:]],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            # Espanso, uv and brew write UTF-8; never the locale's code page, never a crash.
+            encoding="utf-8",
+            errors="replace",
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError) as exc:
+        return CommandFailure(found=True, path=exe, error=_error_line(str(exc)))
+    try:
+        stdout, stderr = proc.communicate(timeout=COMMAND_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        _stop(proc)
+        return CommandFailure(found=True, path=exe, timed_out=True)
+    if proc.returncode == 0:
+        return stdout
+    return CommandFailure(
+        found=True, path=exe, returncode=proc.returncode, error=_error_line(stderr or "")
+    )
+
+
+def _stop(proc: subprocess.Popen[str]) -> None:
+    """Stop a timed-out command without waiting on what it started. On Windows `espanso` is a
+    .cmd whose cmd.exe starts espansod.exe: killing cmd.exe alone leaves the pipes open, and
+    subprocess.run would then wait for them forever, so the whole tree is killed."""
+    if os.name == "nt":
+        with contextlib.suppress(OSError, subprocess.SubprocessError):
+            subprocess.run(  # noqa: S603 - fixed argv, no shell
+                ["taskkill", "/T", "/F", "/PID", str(proc.pid)],  # noqa: S607
+                capture_output=True,
+                timeout=10,
+                check=False,
+            )
+    proc.kill()
+    # A grandchild may still hold the pipes: give up on them rather than hang, then close
+    # them and reap the killed child, so neither leaks.
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        proc.communicate(timeout=GIVE_UP_TIMEOUT)
+    for pipe in (proc.stdout, proc.stderr):
+        if pipe is not None:
+            with contextlib.suppress(OSError):
+                pipe.close()
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        proc.wait(timeout=GIVE_UP_TIMEOUT)
+
+
+def output(answer: str | CommandFailure | None) -> str | None:
+    """A runner's answer as stdout, or None when the command gave none."""
+    return answer if isinstance(answer, str) else None
+
+
+def failure(answer: str | CommandFailure | None) -> CommandFailure | None:
+    """Why a runner's answer is not stdout, or None when it is."""
+    if isinstance(answer, str):
         return None
-    return proc.stdout if proc.returncode == 0 else None
+    return answer or CommandFailure()
 
 
 def _digest(text: str) -> str:
@@ -126,14 +233,14 @@ def resolve_launcher(
     script = Path(sys.argv[0]) if script is None else script
     exe = "prompt-workflow.exe" if windows else "prompt-workflow"
 
-    tool_dir = runner(["uv", "tool", "dir"])
+    tool_dir = output(runner(["uv", "tool", "dir"]))
     if tool_dir and _inside(prefix, Path(tool_dir.strip())):
-        bin_dir = runner(["uv", "tool", "dir", "--bin"])
+        bin_dir = output(runner(["uv", "tool", "dir", "--bin"]))
         if bin_dir and (Path(bin_dir.strip()) / exe).is_file():
             return Launcher(Path(bin_dir.strip()) / exe, "uv")
 
     if "Cellar" in prefix.parts:
-        brew = runner(["brew", "--prefix"])
+        brew = output(runner(["brew", "--prefix"]))
         if brew:
             formula = prefix.parts[prefix.parts.index("Cellar") + 1]
             root = Path(brew.strip())
@@ -173,19 +280,36 @@ def default_espanso_dir(
     return Path(environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "espanso"
 
 
-def espanso_dir(runner: Runner | None = None) -> Path:
-    runner = runner or run_command
-    # 'espanso path config' prints just the config dir (read-only), unlike 'espanso path'.
-    out = runner(["espanso", "path", "config"])
+# 'espanso path config' prints just the config dir (read-only), unlike 'espanso path'.
+PATH_CONFIG = ("espanso", "path", "config")
+
+
+@dataclass(frozen=True)
+class EspansoDir:
+    """Espanso's config folder, and why it is the default one when Espanso could not say."""
+
+    path: Path
+    fallback: str | None = None
+
+
+def locate_espanso_dir(runner: Runner | None = None) -> EspansoDir:
+    answer = (runner or run_command)(PATH_CONFIG)
+    out = output(answer)
     if out and out.strip():
-        return Path(out.strip())
-    return default_espanso_dir()
+        return EspansoDir(Path(out.strip()))
+    why = failure(answer)
+    reason = why.describe(PATH_CONFIG) if why else "`espanso path config` printed nothing"
+    return EspansoDir(default_espanso_dir(), reason)
+
+
+def espanso_dir(runner: Runner | None = None) -> Path:
+    return locate_espanso_dir(runner).path
 
 
 def restart_espanso(runner: Runner | None = None) -> bool:
     """`espanso restart`, else `espanso start` (restart fails when Espanso is not running)."""
     runner = runner or run_command
-    return runner(["espanso", "restart"]) is not None or runner(["espanso", "start"]) is not None
+    return any(output(runner(["espanso", verb])) is not None for verb in ("restart", "start"))
 
 
 # --- Manifest -----------------------------------------------------------------------------
