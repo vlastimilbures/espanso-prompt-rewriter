@@ -65,8 +65,14 @@ def _require_https(url: str, env_name: str) -> str:
 
 def _is_ollama_cloud(model: str) -> bool:
     """Ollama forwards models tagged `cloud` or `*-cloud` (e.g. gpt-oss:120b-cloud) to
-    ollama.com instead of running them locally."""
-    tag = model.partition(":")[2]
+    ollama.com instead of running them locally. Ollama's names are case-insensitive and a
+    reference may pin a digest (`name:tag@sha256:…`), so the tag is compared in lower case
+    without it. Only the tag counts: a name such as `cloudy-llama:7b` stays local, and a
+    `host:port/` registry prefix is not a tag."""
+    _, colon, tag = model.partition("@")[0].rpartition(":")
+    if not colon or "/" in tag:
+        return False
+    tag = tag.lower()
     return tag == "cloud" or tag.endswith("-cloud")
 
 
@@ -121,11 +127,17 @@ def routes(cfg: Settings) -> list[Route]:
 
 
 def _gate(
-    inner: Provider, cfg: Settings, allow_flagged: bool = False, name: str = "openrouter"
+    inner: Provider,
+    cfg: Settings,
+    allow_flagged: bool = False,
+    name: str = "openrouter",
+    *,
+    remote: bool = True,
 ) -> GatedProvider:
     # make_provider refuses earlier with a clearer message; this keeps the guarantee for any
-    # provider added later that returns through _gate().
-    if cfg.local_only:
+    # provider added later that returns through _gate(). ``remote=False`` is only for a
+    # loopback provider gated by PROMPT_GATE_LOCAL, which PROMPT_LOCAL_ONLY allows.
+    if remote and cfg.local_only:
         raise GateBlocked(
             "PROMPT_LOCAL_ONLY=true: this provider would send the draft off this machine"
         )
@@ -135,6 +147,7 @@ def _gate(
         extra_patterns=compile_extra(cfg.extra_patterns),
         allow_flagged=allow_flagged,
         name=name,
+        relay=not remote,
     )
 
 
@@ -155,6 +168,10 @@ def make_provider(
 
     ``allow_flagged`` (--allow-flagged) lets the gate send a draft whose findings are all
     soft, once; it never touches PROMPT_LOCAL_ONLY or a provider that stays on this machine.
+
+    ``PROMPT_GATE_LOCAL=true`` gates a loopback Ollama or LM Studio too (a localhost relay to a
+    cloud API), with the same override rules; it is still local for PROMPT_LOCAL_ONLY, routes()
+    and its ``not_applicable`` cost.
 
     ``extra_body``, ``on_response`` and ``title`` only apply to OpenRouter; they let
     scripts/bench_models.py request usage/cost data through the same construction path.
@@ -179,7 +196,9 @@ def make_provider(
             observer=observer,
             local=not remote,
         )
-        return _gate(ollama, cfg, allow_flagged, name) if remote else ollama
+        if remote or cfg.gate_local:
+            return _gate(ollama, cfg, allow_flagged, name, remote=remote)
+        return ollama
     if name == "lmstudio":
         lmstudio = OpenAICompatibleProvider(
             base_url=cfg.lmstudio_base_url,
@@ -191,7 +210,9 @@ def make_provider(
             name=name,
             local=not remote,
         )
-        return _gate(lmstudio, cfg, allow_flagged, name) if remote else lmstudio
+        if remote or cfg.gate_local:
+            return _gate(lmstudio, cfg, allow_flagged, name, remote=remote)
+        return lmstudio
     if name == "openrouter":
         return _gate(
             OpenAICompatibleProvider(

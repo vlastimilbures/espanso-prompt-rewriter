@@ -323,7 +323,10 @@ Rules for agents:
 `factory.py`'s `make_provider()` (the only place providers are built) wraps, via `_gate()`,
 everything that can send the draft off the machine (`_leaves_machine()`) in `gate.GatedProvider`: `openrouter` and
 `anthropic` always, `ollama`/`lmstudio` when the base URL is not loopback (`providers.base.is_loopback()`) or
-the Ollama model is a `cloud`-tagged one. The gate runs `redaction.scan_draft()` (built-in patterns,
+the Ollama model is a `cloud`-tagged one (`_is_ollama_cloud()`: the tag only, any case, an
+`@digest` stripped). `PROMPT_GATE_LOCAL=true` gates a loopback Ollama/LM Studio too
+(`_gate(..., remote=False)`), without changing `_leaves_machine()`, so `PROMPT_LOCAL_ONLY`,
+`routes()` and the `not_applicable` cost still treat it as local. The gate runs `redaction.scan_draft()` (built-in patterns,
 the user's `PROMPT_EXTRA_PATTERNS`, and the whole-draft `bare_token` rule, which `safe_repr()`'s
 `scan()` leaves out) and blocks the call unless `ALLOW_CLOUD_OVERRIDE=true`.
 `make_provider(..., allow_flagged=True)` (`--allow-flagged`, the `-iok-` trigger) lets one call

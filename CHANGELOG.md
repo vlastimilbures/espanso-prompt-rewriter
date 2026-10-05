@@ -28,8 +28,17 @@ All notable changes to this project are documented here. The format follows
   prints a marker until it is fixed (before, the local triggers ran and the usage history
   silently dropped each record). README and `.env.example` now warn against patterns with
   nested quantifiers, which can take exponential time on every draft.
+### Added
+- `PROMPT_GATE_LOCAL` (default `false`) (#33): `true` runs the data-protection gate for Ollama
+  and LM Studio on `localhost` too, with the same override rules, for a local server that
+  relays to a cloud API (LiteLLM, an SSH tunnel). `PROMPT_LOCAL_ONLY` still allows them. A
+  draft it blocks pastes `[prompt-workflow: Blocked call to the local server …]`.
+
 
 ### Changed
+- README and `.env.example` say that an `http://` Ollama or LM Studio base URL on another
+  machine sends the draft in clear text over the network (only the cloud providers require
+  `https://`) (#33).
 - README "Privacy and data protection" has a new "What is sent, and to whom" section (#29): the
   system prompt, including your `PROMPT_PERSONA`, goes with every call and is not scanned by the
   data-protection gate; OpenRouter calls reach OpenRouter and an upstream endpoint (the pinned

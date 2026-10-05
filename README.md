@@ -517,6 +517,7 @@ short and does not look like a key.
 | `LMSTUDIO_MODEL`             | `local-model`                  |                                                           |
 | `ALLOW_CLOUD_OVERRIDE`       | `false`                        | `true` lets flagged drafts reach cloud providers          |
 | `PROMPT_LOCAL_ONLY`          | `false`                        | `true` refuses every provider that can send the draft off this machine |
+| `PROMPT_GATE_LOCAL`          | `false`                        | `true` runs the gate for Ollama / LM Studio on `localhost` too (a local relay to a cloud API) |
 | `PROMPT_EXTRA_PATTERNS`      | *(empty)*                      | Your own `;`-separated regexes for the gate               |
 | `PROMPT_HISTORY`             | `true`                         | Keep a local [usage history](#usage-history) (metadata only); `false` keeps none |
 | `PROMPT_HISTORY_RETENTION_DAYS` | `365`                       | Days a usage-history record is kept before pruning (1 to 36500) |
@@ -583,7 +584,9 @@ Left empty, the rewrite uses only a role the draft itself states and never guess
 > that would send the draft off your machine then pastes
 > `[prompt-workflow: PROMPT_LOCAL_ONLY=true: … would send the draft off this machine]` instead.
 > It judges by the base URL and the Ollama model tag, so a relay on `localhost` that forwards to
-> a cloud API (LiteLLM, an SSH tunnel) still counts as local.
+> a cloud API (LiteLLM, an SSH tunnel) still counts as local. If your `localhost` server is such
+> a relay, set `PROMPT_GATE_LOCAL=true`: the gate below then scans `-il-` and `-ilm-` drafts too,
+> with the same override rules (it does not make `PROMPT_LOCAL_ONLY` refuse them).
 
 The trigger sends whatever is on the clipboard, unseen: if you forgot to copy the draft, the last
 thing you copied goes instead. On macOS and Windows the CLI first asks the clipboard which formats
@@ -600,8 +603,10 @@ Linux; there the item is sent like any other text.
 Every call that can send the draft off your machine first runs through a regex gate
 ([`redaction.py`](src/prompt_workflow/redaction.py)): OpenRouter and Anthropic always, and
 Ollama or LM Studio when their base URL is not `localhost` (or `127.0.0.1`, `::1`) or the Ollama
-model is a cloud model (a `:cloud` or `-cloud` tag, which the local daemon forwards to
-ollama.com). The gate blocks drafts containing:
+model is a cloud model (a `:cloud` or `-cloud` tag in any letter case, also with an
+`@sha256:…` digest, which the local daemon forwards to ollama.com; a model copied under another
+name with `ollama cp` is not detected). With `PROMPT_GATE_LOCAL=true` the gate also covers
+Ollama and LM Studio on `localhost`. The gate blocks drafts containing:
 
 - payment card numbers (Luhn-checked, also when split by double spaces, tabs, dashes or one line
   break), IBANs (checksum-validated) and email addresses
@@ -653,7 +658,10 @@ passwords, cards, private keys, a bare token and your own `PROMPT_EXTRA_PATTERNS
 this way. `ALLOW_CLOUD_OVERRIDE=true` turns the gate off for every finding and every later call;
 prefer `-iok-` for a one-off. No code path builds a
 provider that can reach another machine without the gate. Cloud base URLs must be `https://`
-(plain `http` only to `localhost`), so a key is never sent in clear text. Keys stay in your
+(plain `http` only to `localhost`), so a key is never sent in clear text. Ollama and LM Studio
+send no key and accept any scheme: an `http://` base URL on another machine sends the draft and
+the rewrite in clear text across your network, so use `https://` (or an SSH tunnel) for a server
+you do not reach over `localhost`. Keys stay in your
 `.env` or `secrets.toml` (never `config.toml`), are never logged and never shown in a traceback.
 
 The rewrite comes from a model that read your clipboard, so text copied from a web page can steer
@@ -692,7 +700,7 @@ Who receives it:
 | OpenRouter (`-i-`, `-iok-`, `-ip-`, `-if-`) | OpenRouter (`OPENROUTER_BASE_URL`), and the upstream endpoint that serves the model: the one pinned by `OPENROUTER_PROVIDER` (`OPENROUTER_PRO_PROVIDER` for `-ip-`, the form's pick for `-if-`), or another endpoint serving the same model when OpenRouter falls back, which `OPENROUTER_ALLOW_FALLBACKS` allows by default (`false` makes the pin binding). An empty pin leaves the choice to OpenRouter. The request also carries an `X-Title: espanso-prompt-rewriter` header, which attributes the calls to this app in OpenRouter's dashboard (the benchmark script sends `espanso-prompt-rewriter-bench`). |
 | Anthropic (`-ic-`, commented out) | Anthropic (`ANTHROPIC_BASE_URL`). |
 | Ollama / LM Studio on `localhost` (`-il-`, `-ilm-`) | Nobody else, as long as the server on this machine runs the model itself (a `localhost` relay that forwards to a cloud API is not detected, see above; a `cloud`-tagged Ollama model is the next row). These triggers use the `general` profile, which has no persona. |
-| Ollama / LM Studio at another address, or an Ollama `cloud` model | The configured server (`OLLAMA_BASE_URL`/`api/chat` or `LMSTUDIO_BASE_URL`); for a cloud model that Ollama server also forwards the request to ollama.com (this tool sends no key there). The gate applies as for the cloud providers. |
+| Ollama / LM Studio at another address, or an Ollama `cloud` model | The configured server (`OLLAMA_BASE_URL`/`api/chat` or `LMSTUDIO_BASE_URL`); for a cloud model that Ollama server also forwards the request to ollama.com (this tool sends no key there). With an `http://` URL anyone on the network path can read the draft too. The gate applies as for the cloud providers. |
 
 A request to a server that is not on this machine also passes through any proxy in between
 (the system proxy, or `HTTPS_PROXY`/`ALL_PROXY`, see [Configuration](#configuration)); a proxy
@@ -814,6 +822,7 @@ tables (with cost per rewrite), the older prompts' results and how to run it are
 | `… the model stopped early (content_filter)]` at the end, or `… declined the request (refusal)` | A content filter or the model's safety policy stopped the rewrite. Rephrase the draft or use another model. |
 | `[prompt-workflow: Ollama request failed: …]` | Start Ollama (`ollama serve`) and pull the model (`ollama pull qwen3:8b`). |
 | `[prompt-workflow: Blocked cloud call. …]` | The [gate](#privacy-and-data-protection) matched. Remove the content or use a local trigger. If the message offers `-iok-` and the content may leave your machine, use `-iok-` for this draft. |
+| `[prompt-workflow: Blocked call to the local server …]` | `PROMPT_GATE_LOCAL=true` and the gate matched a `-il-`/`-ilm-` draft. Remove the content, or set `PROMPT_GATE_LOCAL=false` if your `localhost` server runs the model itself (not a relay to a cloud API). |
 | `[prompt-workflow: sent despite: …]` at the top of a rewrite | You used `-iok-`; the draft was sent despite those findings. Delete the line. |
 | `[prompt-workflow: Input is too long …]` | The clipboard holds more than 50,000 characters. Copy just the draft. |
 | `… output truncated at max tokens]` at the end, or `… used the whole max-tokens budget` | The model hit its output cap, often by spending it on reasoning. Raise `OPENROUTER_MAX_TOKENS`, or pick a larger max tokens (or lower effort) in `-if-`. |
