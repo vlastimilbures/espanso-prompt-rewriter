@@ -385,28 +385,40 @@ def _previous_install_check(
         message = f"could not look for a previous install: {type(exc).__name__}"
         return Check("previous_install", WARN, message)
     first = found.candidates[0] if found.candidates else None
+    pending = found.pending
+    retire = pending is not None and not pending.launchers_in_root
     data = {
         "gated": found.gated,
         "roots": [str(c.root) for c in found.candidates],
         "signals": sorted(first.signals) if first else [],
         "env_file": str(first.env_file) if first and first.env_file else None,
-        "retire_pending": None,
+        "retire_pending": str(pending.env_file) if pending and retire else None,
         "shadow": found.shadow.path if found.shadow else None,
     }
     found_at = (
         f"a previous install was found at {', '.join(str(c.root) for c in found.candidates)} "
         "and is not migrated"
     )
+    notes = [found_at] if first else []
+    if pending and retire:
+        notes.append(
+            f"the old .env at {pending.env_file} is still in place "
+            f"(`prompt-workflow config retire --from {pending.root}`)"
+        )
+    elif pending:
+        notes.append(
+            f"the settings of {pending.root} were copied, but the match files still run "
+            f"{', '.join(pending.launchers_in_root)} (`prompt-workflow espanso deploy`)"
+        )
     if found.shadow:
-        message = (
+        notes.append(
             f"`prompt-workflow` on PATH is {found.shadow.path}, not the installed launcher "
             f"{found.shadow.launcher}: {found.shadow.hint}"
         )
-        if first:
-            message = f"{found_at}; {message}"
-        return Check("previous_install", WARN, message, data)
-    if first:
-        return Check("previous_install", INFO, found_at, data)
+    if found.shadow or (pending and retire):
+        return Check("previous_install", WARN, "; ".join(notes), data)
+    if notes:
+        return Check("previous_install", INFO, "; ".join(notes), data)
     if found.gated:
         return Check("previous_install", OK, "settings are in place; nothing to look for", data)
     return Check("previous_install", OK, "no previous install found", data)

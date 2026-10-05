@@ -45,6 +45,12 @@ def fake_run(monkeypatch):
     return fake
 
 
+def _changes(calls: list[list[str]]) -> list[list[str]]:
+    """The commands that change something: setup's previous-install lookup reads `uv tool
+    dir` too (#110)."""
+    return [call for call in calls if call != ["uv", "tool", "dir"]]
+
+
 @pytest.fixture
 def saved(monkeypatch):
     """Saved mode: no PROMPT_WORKFLOW_ENV, so config.toml and the secret store are read (in
@@ -403,14 +409,21 @@ def test_no_command_accepts_a_key_as_an_argument(path, saved, tmp_path, monkeypa
 def _commands(espanso: Path) -> dict[tuple[str, ...], list[list[str]]]:
     where = ["--espanso-dir", str(espanso), "--launcher", LAUNCHER]
     return {
-        ("setup",): [["setup", "--non-interactive", "--no-smoke-test", *where]],
+        ("setup",): [
+            ["setup", "--non-interactive", "--no-smoke-test", *where],
+            ["setup", "--non-interactive", "--no-smoke-test", "--migrate-from", str(espanso)],
+        ],
         ("config", "show"): [["config", "show"], ["config", "show", "--raw"]],
         ("config", "get"): [["config", "get", "PROMPT_PROFILE"]],
         ("config", "set"): [["config", "set", "PROMPT_PROFILE", "general"]],
         ("config", "unset"): [["config", "unset", "PROMPT_PROFILE"]],
         ("config", "validate"): [["config", "validate"]],
-        ("config", "migrate"): [["config", "migrate", "--dry-run"]],
+        ("config", "migrate"): [
+            ["config", "migrate", "--dry-run"],
+            ["config", "migrate", "--dry-run", "--from", str(espanso)],
+        ],
         ("config", "rollback"): [["config", "rollback", "--dry-run"]],
+        ("config", "retire"): [["config", "retire", "--dry-run", "--from", str(espanso)]],
         ("secrets", "set"): [["secrets", "set", "OPENROUTER_API_KEY", "--stdin"]],
         ("secrets", "status"): [["secrets", "status"]],
         ("secrets", "remove"): [["secrets", "remove", "OPENROUTER_API_KEY", "--yes"]],
@@ -814,7 +827,7 @@ def test_setup_non_interactive_end_to_end(saved, espanso, fake_run):
     assert "ok: improve reached the stub" in result.stdout
     assert "Usage history is on" in result.stdout
     assert "config set PROMPT_HISTORY false" in result.stdout
-    assert fake_run.calls == []  # no restart, nothing deployed
+    assert _changes(fake_run.calls) == []  # no restart, nothing deployed
     # The stub improve is a health check, not usage: nothing is recorded (#116).
     assert json.loads(_run("history", "export").stdout)["operations"] == []
 
@@ -830,7 +843,7 @@ def test_setup_deploy_applies(saved, espanso, fake_run, monkeypatch):
     result = _setup(espanso, "--non-interactive", "--deploy", "--provider", "ollama")
     assert result.exit_code == 0, result.output
     assert len(list((espanso / "match").iterdir())) == 3
-    assert fake_run.calls == [["espanso", "restart"]]
+    assert _changes(fake_run.calls) == [["espanso", "restart"]]
     assert 'PROMPT_PROVIDER = "ollama"' in (saved / "config.toml").read_text("utf-8")
 
 
@@ -1122,7 +1135,7 @@ def test_setup_forgets_gone_entries_without_asking(saved, espanso, fake_run, smo
     assert "(already gone)" in result.stdout
     assert "Dry run" not in result.stdout
     assert "deploy the match files" not in result.stdout
-    assert fake_run.calls == []
+    assert _changes(fake_run.calls) == []
     assert {p: p.read_bytes() for p in (espanso / "match").iterdir()} == before
     assert all(Path(t).parent.parent == espanso for t in deploy.Manifest.load().entries)
 
@@ -1152,7 +1165,7 @@ def test_setup_no_deploy_and_no_smoke(saved, espanso, fake_run, smoke_ok):
     assert smoke_ok == []
 
 
-def test_setup_option_errors(saved, espanso, tty, monkeypatch):
+def test_setup_option_errors(saved, espanso, tty, monkeypatch, fake_run):
     assert _setup(espanso, "--api-key-stdin").exit_code == 2
     assert _setup(espanso, "--non-interactive", "--profile", "nosuch").exit_code == 2
     monkeypatch.setenv("PROMPT_PROVIDER", "nope")

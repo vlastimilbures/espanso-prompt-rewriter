@@ -1,14 +1,17 @@
 """`setup`: the first-run flow. Settings and the default profile, the API key, a deploy
 preview (applied only when you agree or pass --deploy), and a smoke test against a stub on
-127.0.0.1, never a paid call. A .env in use is migrated only with your consent."""
+127.0.0.1, never a paid call. A .env in use is migrated only with your consent, and so are
+the settings and profiles of an earlier checkout install (#110)."""
 
 from __future__ import annotations
 
+import os
 from dataclasses import fields
+from pathlib import Path
 
 import typer
 
-from .. import config_files, config_store, deploy, smoke
+from .. import config_files, config_store, deploy, previous_install, profiles, smoke
 from ..config import Settings
 from ..factory import PROVIDER_NAMES
 from ..prompt_builder import PROFILES, system_prompt
@@ -44,10 +47,45 @@ class _Steps:
         self.todo.append(message)
 
 
-def _settings_writable(steps: _Steps, interactive: bool) -> bool:
+def _previous_install(
+    entered: Path | None, espanso_dir: str | None, launcher: str | None
+) -> previous_install.Candidate | None:
+    """Print what detection finds of an earlier checkout install, and return the one to offer:
+    the entered one, else the first with a .env, else the first. Reads only."""
+    try:
+        found = previous_install.detect(
+            entered=entered,
+            espanso_dir=Path(espanso_dir).expanduser() if espanso_dir else None,
+            launcher=Path(launcher).expanduser() if launcher else None,
+        )
+    except (OSError, ValueError, deploy.DeployError) as exc:
+        typer.echo(f"  Could not look for a previous install: {exc}")
+        return None
+    if found.shadow:
+        common.warn(
+            f"`prompt-workflow` on PATH is {found.shadow.path}, not {found.shadow.launcher}: "
+            f"{found.shadow.hint}"
+        )
+    if not found.candidates:
+        return None
+    for candidate in found.candidates:
+        typer.echo(f"  Previous install: {candidate.root} ({', '.join(sorted(candidate.signals))})")
+        env_file = ".env present" if candidate.env_file else "no .env"
+        typer.echo(f"    {env_file}; profiles folder: {'yes' if candidate.profiles_dir else 'no'}")
+        for deployed in candidate.launchers_in_root:
+            typer.echo(f"    the match files still run {deployed}")
+    ranked = sorted(
+        found.candidates,
+        key=lambda c: (previous_install.ENTERED not in c.signals, c.env_file is None),
+    )
+    return ranked[0]
+
+
+def _settings_writable(steps: _Steps, interactive: bool, copy_from: Path | None = None) -> bool:
     """Whether setup may write config.toml and the secret store. A .env in use is migrated
     first, with consent; without it nothing is written, since config.toml would make the
-    .env unread."""
+    .env unread. With ``copy_from``, an earlier checkout's .env is copied in the same step
+    (copy mode): declined, nothing is written either, so the offer comes back next time."""
     if common.legacy_env():
         steps.later(
             "PROMPT_WORKFLOW_ENV is set, so settings and keys stay in that file; setup "
@@ -55,26 +93,94 @@ def _settings_writable(steps: _Steps, interactive: bool) -> bool:
         )
         return False
     try:
-        plan = config_store.plan_migration()
+        plan = config_store.plan_migration(source=copy_from)
     except config_store.MigrationError as exc:
         steps.fail("settings", f"{exc}")
         return False
     if plan.status != "ready":
+        if copy_from is not None:
+            typer.echo(f"  Nothing was copied from {copy_from}: {plan.describe()[0]}")
         return True
-    typer.echo("  Your settings are in a .env. Moving them to config.toml and the secret store:")
+    command = "prompt-workflow config migrate"
+    if plan.copy is not None:
+        root = plan.copy.path.parent
+        command += f" --from {root}"
+        typer.echo(
+            f"  Your settings are in {root}'s .env. Copying them to config.toml and the "
+            "secret store:"
+        )
+    else:
+        typer.echo(
+            "  Your settings are in a .env. Moving them to config.toml and the secret store:"
+        )
     for line in plan.describe():
         typer.echo(f"    {line}")
+    verb = "copy" if plan.copy is not None else "move"
     if not interactive:
-        steps.later("run `prompt-workflow config migrate` to move them (setup changed nothing)")
+        steps.later(f"run `{command}` to {verb} them (setup changed nothing)")
         return False
+    question = "Copy" if plan.copy is not None else "Migrate"
     if not typer.confirm(
-        "  Migrate now (with a backup; `config rollback` undoes it)?", default=False
+        f"  {question} now (with a backup; `config rollback` undoes it)?", default=False
     ):
-        steps.later("settings stay in the .env; run `prompt-workflow config migrate` later")
+        steps.later(f"settings stay in the .env; run `{command}` later")
         return False
-    result = config_store.apply_migration(consent=plan.token)
-    typer.echo(f"  Migrated; backup in {result.backup}")
+    result = config_store.apply_migration(source=copy_from, consent=plan.token)
+    typer.echo(f"  {'Copied' if plan.copy is not None else 'Migrated'}; backup in {result.backup}")
     return True
+
+
+def _profiles_step(steps: _Steps, root: Path, interactive: bool) -> None:
+    """Offer to copy the profiles added or edited in an earlier checkout (copy only)."""
+    source = root / profiles.PROMPTS_PATH
+    command = f"prompt-workflow profiles migrate --checkout {root}"
+    try:
+        pristine = profiles.git_pristine_profiles(root)
+        changed = profiles.changed_profiles(source, pristine)
+    except ValueError as exc:
+        typer.echo(f"  Could not compare the profiles of {root}: {exc}")
+        steps.later(f"copy edited profiles yourself: `{command} --rev <commit>`")
+        return
+    if not changed:
+        return
+    typer.echo(f"  Profiles added or edited in {root}:")
+    for name, change in changed.items():
+        typer.echo(f"    {name}.md ({change})")
+    if not interactive:
+        steps.later(f"copy them: `{command}`")
+        return
+    if not typer.confirm("  Copy them to your profile folder (never overwrites)?", default=False):
+        steps.later(f"copy them later: `{command}`")
+        return
+    for item in profiles.migrate_profiles(source, pristine):
+        typer.echo(f"    {item.name}.md: {item.status}")
+
+
+def _retire_step(steps: _Steps, espanso_dir: str | None, interactive: bool) -> None:
+    """Once its settings were copied, offer to retire an earlier checkout's .env; refused
+    (and left as a to-do) while a match file still runs that checkout's CLI."""
+    copied = previous_install.copied_env(os.environ)
+    if copied is None:
+        return
+    root, env_file = copied
+    command = f"prompt-workflow config retire --from {root}"
+    folder = Path(espanso_dir).expanduser() if espanso_dir else None
+    try:
+        plan = config_store.plan_retire(root, espanso_dir=folder)
+    except config_store.MigrationError as exc:
+        typer.echo(f"  {env_file} stays in place: {exc}")
+        steps.later(f"retire the old .env later: `{command}`")
+        return
+    for line in plan.describe():
+        typer.echo(f"  {line}")
+    if not interactive:
+        steps.later(f"retire the old .env: `{command}`")
+        return
+    if not typer.confirm("  Retire it now?", default=False):
+        steps.later(f"retire the old .env later: `{command}`")
+        return
+    place = config_store.apply_retire(root, espanso_dir=folder, consent=plan.token)
+    typer.echo(f"  Retired: {env_file} -> {place}")
 
 
 def _choose(option: str | None, question: str, current: str, interactive: bool) -> str:
@@ -216,6 +322,13 @@ def setup(
     smoke_test: bool = typer.Option(
         True, "--smoke-test/--no-smoke-test", help="Run improve against a local stub at the end"
     ),
+    migrate_from: str | None = typer.Option(
+        None,
+        "--migrate-from",
+        help="An earlier checkout to copy settings and profiles from; default: the one "
+        "the match files, the deploy manifest or uv name",
+        metavar="PATH",
+    ),
 ) -> None:
     """First run: settings, the API key, the Espanso match files and a smoke test against a
     stub on 127.0.0.1 (never a paid call). Re-run it any time; it changes only what you
@@ -233,6 +346,7 @@ def setup(
         (espanso_dir, "--espanso-dir"),
         (launcher, "--launcher"),
         (profile, "--profile"),
+        (migrate_from, "--migrate-from"),
     ):
         common.no_key(value, option)
     steps = _Steps()
@@ -244,7 +358,19 @@ def setup(
         typer.echo(f"  {line}")
 
     steps.heading("Settings")
-    writable = _settings_writable(steps, interactive)
+    entered = Path(migrate_from).expanduser() if migrate_from else None
+    previous = None if common.legacy_env() else _previous_install(entered, espanso_dir, launcher)
+    if previous is not None and previous.env_file is not None:
+        copy_from: Path | None = previous.root
+    elif previous is not None:
+        typer.echo(f"  {previous.root} has no .env; there are no settings to copy")
+        copy_from = None
+    else:
+        # Not detected (not a checkout, or the settings are saved): the plan says why.
+        copy_from = entered
+    writable = _settings_writable(steps, interactive, copy_from)
+    if previous is not None and previous.profiles_dir is not None:
+        _profiles_step(steps, previous.root, interactive)
     if writable:
         layers, settings = common.load_layers()
     chosen = _choose(provider, "  Provider", settings.provider, interactive)
@@ -284,6 +410,9 @@ def setup(
             launcher=launcher,
             no_restart=no_restart,
         )
+
+    if not common.legacy_env():
+        _retire_step(steps, espanso_dir, interactive)
 
     steps.heading("Smoke test (a stub on 127.0.0.1; no provider is called)")
     if smoke_test:

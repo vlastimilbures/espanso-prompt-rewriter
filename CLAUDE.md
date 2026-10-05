@@ -102,7 +102,14 @@ in README and in the CHANGELOG's Unreleased and newest release notes, and every 
   `apply_migration(consent=plan.token)` backs up, writes, verifies by reloading that every
   effective value is unchanged, then moves each `.env` into `backups/` (rename, never delete)
   and writes `migration.json`; `plan_rollback()`/`apply_rollback(consent=...)` restore exact
-  bytes. `tomli_w` is imported lazily (forbidden on the trigger path).
+  bytes. Copy mode (#110, `source=<checkout root>`): the earlier checkout's `.env` fills only
+  keys whose effective source is the default (the rest are listed as `kept`), the active
+  `.env` still migrates as above, the check is `after == before` overlaid with the plan, the
+  copied `.env` is never moved, and the marker gets `"mode": "copy"` and a `copied` entry.
+  `plan_retire()`/`apply_retire()` later rename that `.env` into the backup, refused while a
+  deployed match file or manifest entry still runs a launcher inside the checkout (or Espanso
+  cannot say where its files are); a rollback moves a retired one back. `tomli_w` is imported
+  lazily (forbidden on the trigger path).
 - `history.py` — the local usage history (#88): `HistoryStore` over a per-device SQLite file,
   `config.user_data_dir()/history.sqlite3` (`$XDG_DATA_HOME` or `~/.local/share`,
   `%LOCALAPPDATA%` on Windows; `tests/conftest.py` points both at a temp dir). Metadata only:
@@ -266,7 +273,11 @@ in README and in the CHANGELOG's Unreleased and newest release notes, and every 
   not the running `config._PROJECT_ROOT`. Gated (D-MIG-4): nothing in legacy mode or once
   `config.toml` or the secret store exists; a manifest does not gate. Skipped roots live in
   `user_data_dir()/previous-install.json` (damaged = empty). `shadow()` reports a different
-  `prompt-workflow` first on PATH. Doctor's `previous_install` check; off the trigger path.
+  `prompt-workflow` first on PATH. `Detection.pending` (ungated, since the copy itself closes
+  the gate) is a copy from `migration.json` whose `.env` is not retired yet: doctor WARNs
+  (`retire_pending`) once no launcher points into it. `setup` offers the copy at the start of
+  its Settings step (`--migrate-from PATH`), then the profiles, and the retire after the
+  deploy step. Doctor's `previous_install` check; off the trigger path.
 - `smoke.py` — `setup`'s smoke test: a `ThreadingHTTPServer` on 127.0.0.1:0 answering the
   OpenAI-compatible, Anthropic and Ollama shapes, and a child `python -m prompt_workflow.cli
   improve --provider <p>` whose env points every `*_BASE_URL` at it with a placeholder key (the

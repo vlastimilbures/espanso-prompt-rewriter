@@ -7,11 +7,24 @@ import builtins
 import io
 import json
 import os
+import re
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import pytest
+from typer.testing import CliRunner
 
-from prompt_workflow import assets, config, deploy, doctor, previous_install
+from prompt_workflow import (
+    assets,
+    config,
+    config_files,
+    config_store,
+    deploy,
+    doctor,
+    previous_install,
+)
+from prompt_workflow.cli import app
+from prompt_workflow.config import Settings
+from prompt_workflow.config_store import MigrationError
 from prompt_workflow.previous_install import ENTERED, LAUNCHER, MANIFEST, RECEIPT
 
 WINDOWS = os.name == "nt"
@@ -514,3 +527,404 @@ def test_doctor_warns_about_a_shadowed_cli(
     assert check.status == "warn"
     assert str(old) in check.message
     assert report.to_json()["checks"]["previous_install"]["data"]["shadow"] == str(old)
+
+
+# --- Copy mode, retire and rollback (#110 PR b) -------------------------------------------
+
+# Built at runtime, so no key-shaped literal lands in the repo (gitleaks).
+COPIED_KEY = "sk-or-v1-" + "cd34" * 16
+FOREIGN_ENV = (
+    "OPENROUTER_MODEL=vendor/old-model\nOLLAMA_MODEL=foreign\nOPENROUTER_MAX_TOKENS=2400\n"
+    f"HTTPS_PROXY=http://127.0.0.1:9\nOPENROUTER_API_KEY={COPIED_KEY}\n"
+)
+
+
+def old_checkout(tmp_path: Path, text: str = FOREIGN_ENV) -> Path:
+    root = checkout(tmp_path, env=False)
+    (root / ".env").write_bytes(text.encode("utf-8"))
+    return root
+
+
+def user_dir() -> Path:
+    directory = config._user_config_dir(os.environ)
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def _copy(root: Path, **kwargs):
+    plan = config_store.plan_migration(source=root)
+    return plan, config_store.apply_migration(source=root, consent=plan.token, **kwargs)
+
+
+def test_copy_fills_only_settings_at_their_default(tmp_path, env):
+    root = old_checkout(tmp_path)
+    original = (root / ".env").read_bytes()
+    active = user_dir() / ".env"
+    active.write_text("OLLAMA_MODEL=mine\n", "utf-8")
+
+    plan = config_store.plan_migration(source=root)
+
+    assert plan.status == "ready"
+    assert plan.copy is not None
+    assert plan.copy.path == root.resolve() / ".env"
+    assert [s.path for s in plan.sources] == [active]
+    assert plan.copied == ("OPENROUTER_MODEL", "OPENROUTER_API_KEY")
+    assert plan.kept == ("OLLAMA_MODEL",)
+    assert "OPENROUTER_MAX_TOKENS" in plan.defaults
+    assert plan.copy_ignored == ("'HTTPS_PROXY'",)
+    preview = "\n".join(plan.describe())
+    assert "stays in place" in preview
+    assert "Already set here, kept as it is: OLLAMA_MODEL" in preview
+    assert COPIED_KEY not in preview
+
+    result = config_store.apply_migration(source=root, consent=plan.token)
+
+    settings = Settings.load()
+    assert settings.ollama_model == "mine"
+    assert settings.openrouter_model == "vendor/old-model"
+    assert settings.openrouter_api_key == COPIED_KEY
+    # The .env in use moved into the backup as always; the old checkout's stays, unchanged.
+    assert not active.exists()
+    assert result.moved[active].parent == result.backup
+    assert result.copied == root.resolve() / ".env"
+    assert (root / ".env").read_bytes() == original
+    record = json.loads((user_dir() / "migration.json").read_text("utf-8"))
+    assert record["mode"] == "copy"
+    copied = [s for s in record["sources"] if s.get("copied")]
+    assert copied == [
+        {
+            "from": str(root.resolve() / ".env"),
+            "to": None,
+            "in_place": None,
+            "sha256": config_files.digest(original),
+            "copied": True,
+            "root": str(root.resolve()),
+        }
+    ]
+
+
+def test_copy_never_overrides_a_stored_key_or_a_real_variable(tmp_path, env, monkeypatch):
+    root = old_checkout(tmp_path)
+    stored = "sk-or-v1-" + "ef56" * 16
+    config_store.save_secret("OPENROUTER_API_KEY", stored)
+    monkeypatch.setenv("OPENROUTER_MODEL", "vendor/from-the-shell")
+    # A secret store alone closes detection, but an explicit copy still runs.
+    plan, _ = _copy(root)
+    assert plan.kept == ("OPENROUTER_MODEL", "OPENROUTER_API_KEY")
+    assert plan.copied == ("OLLAMA_MODEL",)
+    assert Settings.load().openrouter_api_key == stored
+
+
+def test_copy_needs_the_preview_token_and_writes_nothing_without_it(tmp_path, env):
+    root = old_checkout(tmp_path)
+    plan = config_store.plan_migration(source=root)
+    for consent in ("", "yes", plan.token[::-1]):
+        with pytest.raises(MigrationError, match="not confirmed"):
+            config_store.apply_migration(source=root, consent=consent)
+    # The token covers the old .env's bytes: an edit after the preview needs a new preview.
+    (root / ".env").write_text(FOREIGN_ENV + "OLLAMA_MODEL=edited\n", "utf-8")
+    with pytest.raises(MigrationError, match="not confirmed"):
+        config_store.apply_migration(source=root, consent=plan.token)
+    # And the plain migration's token is not a copy's.
+    with pytest.raises(MigrationError):
+        config_store.apply_migration(consent=plan.token)
+    assert sorted(p.name for p in user_dir().iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    ("make", "error"),
+    [
+        (lambda tmp: checkout(tmp, "something-else"), "is not a checkout"),
+        (lambda tmp: checkout(tmp, env=False), "has no .env to copy"),
+        (lambda tmp: old_checkout(tmp, "OPENROUTER_MAX_TOKENS=lots\n"), "fix .* first"),
+        (
+            lambda tmp: old_checkout(tmp, "OPENROUTER_MODEL=aOLLAMA_MODEL=b\n"),
+            "runs into the next line",
+        ),
+    ],
+)
+def test_copy_refusals(tmp_path, env, make, error):
+    with pytest.raises(MigrationError, match=error):
+        config_store.plan_migration(source=make(tmp_path))
+    assert not config.settings_file().exists()
+
+
+def test_copy_refuses_the_running_checkout(tmp_path, env, monkeypatch):
+    root = old_checkout(tmp_path)
+    monkeypatch.setattr(config, "_PROJECT_ROOT", root)
+    with pytest.raises(MigrationError, match="this install's own checkout"):
+        config_store.plan_migration(source=root)
+
+
+def test_copy_in_legacy_mode_is_refused(tmp_path):
+    with pytest.raises(MigrationError, match="PROMPT_WORKFLOW_ENV is set"):
+        config_store.plan_migration(source=old_checkout(tmp_path))
+
+
+def test_a_failed_copy_check_undoes_everything(tmp_path, env, monkeypatch):
+    root = old_checkout(tmp_path)
+    plan = config_store.plan_migration(source=root)
+    real = config_store._effective
+    calls = []
+
+    def effective(environ):
+        calls.append(1)
+        values = real(environ)
+        if len(calls) == 2:  # the reload after the writes
+            values["OPENROUTER_MODEL"] = ("vendor/other", "env")
+        return values
+
+    monkeypatch.setattr(config_store, "_effective", effective)
+    with pytest.raises(MigrationError, match="reloading changed OPENROUTER_MODEL"):
+        config_store.apply_migration(source=root, consent=plan.token)
+    assert not config.settings_file().exists()
+    assert not (user_dir() / "secrets.toml").exists()
+    assert not (user_dir() / "migration.json").exists()
+
+
+def _redeployed(espanso: Path) -> None:
+    for path in (espanso / "match").iterdir():
+        path.unlink()
+    deploy_old(espanso, UV_BIN)
+
+
+def test_retire_waits_for_the_redeploy(tmp_path, espanso, env):
+    root = old_checkout(tmp_path)
+    original = (root / ".env").read_bytes()
+    deploy_old(espanso, str(venv_launcher(root)))
+    _copy(root)
+    with pytest.raises(MigrationError, match=r"the match files still run .*deploy them first"):
+        config_store.plan_retire(root, espanso_dir=espanso)
+
+    _redeployed(espanso)
+    plan = config_store.plan_retire(root, espanso_dir=espanso)
+    assert COPIED_KEY not in "\n".join(plan.describe())
+    for consent in ("", plan.token[::-1]):
+        with pytest.raises(MigrationError, match="not confirmed"):
+            config_store.apply_retire(root, espanso_dir=espanso, consent=consent)
+    assert (root / ".env").read_bytes() == original
+
+    place = config_store.apply_retire(root, espanso_dir=espanso, consent=plan.token)
+
+    assert not (root / ".env").exists()
+    assert place == plan.target
+    assert place.name == "1-checkout.env.inactive"
+    assert place.read_bytes() == original
+    assert previous_install.copied_env(os.environ) is None
+    with pytest.raises(MigrationError, match="already retired"):
+        config_store.plan_retire(root, espanso_dir=espanso)
+
+
+def test_retire_refuses_while_the_manifest_names_the_checkout(tmp_path, espanso, env):
+    root = old_checkout(tmp_path)
+    launcher = str(venv_launcher(root)).replace("\\", "/")
+    deploy.apply(deploy.plan(espanso, launcher, deploy.Manifest.load()))
+    _copy(root)
+    # The files no longer name the checkout, but the manifest still does.
+    deploy_old(espanso, UV_BIN)
+    with pytest.raises(MigrationError, match="the match files still run"):
+        config_store.plan_retire(root, espanso_dir=espanso)
+
+
+def test_retire_refuses_when_espanso_cannot_say_where_its_files_are(tmp_path, env):
+    root = old_checkout(tmp_path)
+    _copy(root)
+    with pytest.raises(MigrationError, match="pass --espanso-dir"):
+        config_store.plan_retire(root, runner=FakeRunner())
+
+
+def test_retire_refusals(tmp_path, espanso, env):
+    root = old_checkout(tmp_path)
+    with pytest.raises(MigrationError, match="nothing was copied"):
+        config_store.plan_retire(root, espanso_dir=espanso)
+    _copy(root)
+    other = old_checkout(tmp_path / "other")
+    with pytest.raises(MigrationError, match="nothing was copied"):
+        config_store.plan_retire(other, espanso_dir=espanso)
+    (root / ".env").write_text("OLLAMA_MODEL=edited\n", "utf-8")
+    with pytest.raises(MigrationError, match="changed since its settings were copied"):
+        config_store.plan_retire(root, espanso_dir=espanso)
+    (root / ".env").unlink()
+    with pytest.raises(MigrationError, match="is gone"):
+        config_store.plan_retire(root, espanso_dir=espanso)
+
+
+def _rollback() -> None:
+    config_store.apply_rollback(consent=config_store.plan_rollback().token)
+
+
+def test_rollback_of_a_copy_leaves_the_old_env_alone(tmp_path, espanso, env):
+    root = old_checkout(tmp_path)
+    original = (root / ".env").read_bytes()
+    active = user_dir() / ".env"
+    active.write_text("OLLAMA_MODEL=mine\n", "utf-8")
+    deploy_old(espanso, str(venv_launcher(root)))
+    _copy(root)
+    _rollback()
+    assert active.read_text("utf-8") == "OLLAMA_MODEL=mine\n"
+    assert (root / ".env").read_bytes() == original
+    assert not config.settings_file().exists()
+    assert not (user_dir() / "secrets.toml").exists()
+    # The gate is open again, so the checkout is offered again.
+    found = previous_install.detect(runner=FakeRunner(), espanso_dir=espanso)
+    assert _roots(found) == {root.resolve(): {LAUNCHER}}
+
+
+def test_rollback_after_a_retire_puts_the_old_env_back(tmp_path, espanso, env):
+    root = old_checkout(tmp_path)
+    original = (root / ".env").read_bytes()
+    _copy(root)
+    plan = config_store.plan_retire(root, espanso_dir=espanso)
+    config_store.apply_retire(root, espanso_dir=espanso, consent=plan.token)
+    rollback = config_store.plan_rollback()
+    assert [(s.name, o) for s, o in rollback.restores] == [
+        ("1-checkout.env.inactive", root.resolve() / ".env")
+    ]
+    _rollback()
+    assert (root / ".env").read_bytes() == original
+    assert not config.settings_file().exists()
+
+
+def test_rollback_refuses_a_new_env_where_a_retired_one_goes_back(tmp_path, espanso, env):
+    root = old_checkout(tmp_path)
+    _copy(root)
+    plan = config_store.plan_retire(root, espanso_dir=espanso)
+    config_store.apply_retire(root, espanso_dir=espanso, consent=plan.token)
+    (root / ".env").write_text("OLLAMA_MODEL=new\n", "utf-8")
+    with pytest.raises(MigrationError, match="exists again"):
+        config_store.plan_rollback()
+
+
+def test_the_copy_is_pending_after_the_gate_closes(tmp_path, espanso, env, no_clipboard):
+    root = old_checkout(tmp_path)
+    launcher = str(venv_launcher(root)).replace("\\", "/") if WINDOWS else str(venv_launcher(root))
+    deploy_old(espanso, str(venv_launcher(root)))
+    _copy(root)
+
+    found = previous_install.detect(runner=FakeRunner(), espanso_dir=espanso)
+    assert found.gated == previous_install.SAVED
+    assert found.candidates == ()
+    assert found.pending == previous_install.CopyRecord(
+        root.resolve(), root.resolve() / ".env", (launcher,)
+    )
+    report = doctor.run(espanso_dir=espanso, launcher=UV_BIN, runner=FakeRunner())
+    check = _check(report)
+    assert check.status == "info"
+    assert "espanso deploy" in check.message
+    assert report.to_json()["checks"]["previous_install"]["data"]["retire_pending"] is None
+
+    _redeployed(espanso)
+    report = doctor.run(espanso_dir=espanso, launcher=UV_BIN, runner=FakeRunner())
+    check = _check(report)
+    assert check.status == "warn"
+    assert f"config retire --from {root.resolve()}" in check.message
+    data = report.to_json()["checks"]["previous_install"]["data"]
+    assert data["retire_pending"] == str(root.resolve() / ".env")
+    assert COPIED_KEY not in repr(report.to_json())
+
+    plan = config_store.plan_retire(root, espanso_dir=espanso)
+    config_store.apply_retire(root, espanso_dir=espanso, consent=plan.token)
+    report = doctor.run(espanso_dir=espanso, launcher=UV_BIN, runner=FakeRunner())
+    assert _check(report).status == "ok"
+
+
+@pytest.mark.parametrize("text", ["{", "[]", '{"mode": "copy", "sources": {}}'])
+def test_a_damaged_marker_has_nothing_pending(env, text):
+    (user_dir() / "migration.json").write_text(text, "utf-8")
+    assert previous_install.copied_env(os.environ) is None
+
+
+# --- The commands ----------------------------------------------------------------------------
+
+
+def _cli(*args, input=None):
+    return CliRunner().invoke(app, list(args), input=input)
+
+
+def _token(output: str) -> str:
+    return re.search(r"Preview token: (\w+)", output).group(1)
+
+
+def test_config_migrate_from_and_retire(tmp_path, espanso, env, monkeypatch):
+    root = old_checkout(tmp_path)
+    deploy_old(espanso, str(venv_launcher(root)))
+    preview = _cli("config", "migrate", "--from", str(root), "--dry-run")
+    assert preview.exit_code == 0, preview.output
+    assert "stays in place" in preview.stdout
+    assert "Dry run: nothing was changed." in preview.stdout
+    # --yes needs this preview's token.
+    assert _cli("config", "migrate", "--from", str(root), "--yes").exit_code == 2
+    token = _token(preview.stdout)
+    done = _cli("config", "migrate", "--from", str(root), "--yes", "--preview-token", token)
+    assert done.exit_code == 0, done.output
+    assert f"config retire --from {root.resolve()}" in done.stdout
+    assert Settings.load().openrouter_api_key == COPIED_KEY
+
+    refused = _cli("config", "retire", "--from", str(root), "--espanso-dir", str(espanso))
+    assert refused.exit_code == 1
+    assert "deploy them first" in refused.stderr
+
+    _redeployed(espanso)
+    where = ["--from", str(root), "--espanso-dir", str(espanso)]
+    preview = _cli("config", "retire", *where, "--dry-run")
+    assert preview.exit_code == 0, preview.output
+    token = _token(preview.stdout)
+    done = _cli("config", "retire", *where, "--yes", "--preview-token", token)
+    assert done.exit_code == 0, done.output
+    assert not (root / ".env").exists()
+    for result in (preview, done):
+        assert COPIED_KEY not in result.output
+
+
+def test_setup_non_interactive_offers_the_copy_and_writes_nothing(
+    tmp_path, espanso, env, monkeypatch
+):
+    root = old_checkout(tmp_path)
+    deploy_old(espanso, str(venv_launcher(root)))
+    monkeypatch.setattr(deploy, "run_command", FakeRunner())
+    result = _cli(
+        "setup",
+        "--non-interactive",
+        "--no-smoke-test",
+        "--espanso-dir",
+        str(espanso),
+        "--launcher",
+        UV_BIN,
+    )
+    assert result.exit_code == 0, result.output
+    assert f"Previous install: {root.resolve()} (launcher)" in result.stdout
+    assert f"to do: run `prompt-workflow config migrate --from {root.resolve()}`" in result.stdout
+    assert "Taken from" in result.stdout
+    assert COPIED_KEY not in result.output
+    assert not config.settings_file().exists()
+    assert (root / ".env").is_file()
+
+
+def test_setup_copies_with_consent_then_offers_retire_after_the_deploy(
+    tmp_path, espanso, env, monkeypatch
+):
+    from prompt_workflow import smoke
+    from prompt_workflow.commands import common
+
+    root = old_checkout(tmp_path)
+    monkeypatch.setattr(deploy, "run_command", FakeRunner({"espanso restart": ""}))
+    monkeypatch.setattr(common, "stdin_is_tty", lambda: True)
+    monkeypatch.setattr(common, "_getpass", lambda prompt: "")
+    monkeypatch.setattr(smoke, "run", lambda p: smoke.SmokeResult(True, smoke.REPLY, 1, "ok"))
+    # Copy: yes; provider and profile: defaults; key already set: keep; deploy: yes; retire: yes.
+    result = _cli(
+        "setup",
+        "--espanso-dir",
+        str(espanso),
+        "--launcher",
+        UV_BIN,
+        "--migrate-from",
+        str(root),
+        input="y\n\n\nn\ny\ny\n",
+    )
+    assert result.exit_code == 0, result.output
+    assert "Copied; backup in" in result.stdout
+    assert "Retired:" in result.stdout
+    assert not (root / ".env").exists()
+    assert Settings.load().openrouter_api_key == COPIED_KEY
+    assert COPIED_KEY not in result.output

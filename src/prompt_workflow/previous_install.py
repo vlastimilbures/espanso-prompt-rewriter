@@ -55,10 +55,22 @@ class Shadow:
 
 
 @dataclass(frozen=True)
+class CopyRecord:
+    """A checkout whose settings a copy-mode migration copied while its .env stayed in place:
+    the redeploy and the retire step are still to come."""
+
+    root: Path
+    env_file: Path
+    launchers_in_root: tuple[str, ...]  # deployed launchers that still point inside it
+
+
+@dataclass(frozen=True)
 class Detection:
     candidates: tuple[Candidate, ...] = ()
     gated: str | None = None
     shadow: Shadow | None = None
+    # Read from migration.json whatever the gate says: the copy itself closes the gate.
+    pending: CopyRecord | None = None
 
 
 def gate(environ: Mapping[str, str]) -> str | None:
@@ -103,7 +115,7 @@ def _project_name(root: Path) -> str | None:
     return name if isinstance(name, str) else None
 
 
-def _resolved(path: Path) -> Path:
+def resolved(path: Path) -> Path:
     try:
         return path.resolve()
     except (OSError, RuntimeError):
@@ -115,9 +127,9 @@ def is_checkout(root: Path) -> bool:
     return config_files.is_file(root / "pyproject.toml") and _project_name(root) == PROJECT_NAME
 
 
-def _is_running_checkout(root: Path) -> bool:
+def is_running_checkout(root: Path) -> bool:
     # An editable install that reads its own .env is `config migrate`'s case (#84).
-    return _resolved(root) == _resolved(config._PROJECT_ROOT)
+    return resolved(root) == resolved(config._PROJECT_ROOT)
 
 
 def receipt_root(runner: deploy.Runner) -> Path | None:
@@ -179,7 +191,7 @@ def skip(root: Path, environ: Mapping[str, str] | None = None) -> None:
     """Remember that the user skipped ``root``; a different checkout found later is offered."""
     skipped = _skipped(environ)
     now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    skipped.setdefault(str(_resolved(root.expanduser())), now)
+    skipped.setdefault(str(resolved(root.expanduser())), now)
     items = [{"root": r, "at": at} for r, at in sorted(skipped.items())]
     record = {"version": SKIP_VERSION, "skipped": items}
     path = skip_file(environ)
@@ -192,7 +204,7 @@ def skip(root: Path, environ: Mapping[str, str] | None = None) -> None:
 
 
 def _inside(path: Path, parent: Path) -> bool:
-    return _resolved(path).is_relative_to(_resolved(parent))
+    return resolved(path).is_relative_to(resolved(parent))
 
 
 def shadow(
@@ -234,7 +246,41 @@ def shadow(
 # --- Detection ----------------------------------------------------------------------------
 
 
-def _manifest_launchers() -> set[str]:
+def copied_env(environ: Mapping[str, str]) -> tuple[Path, Path] | None:
+    """The (root, .env) a copy-mode migration copied and nobody retired yet, while that .env
+    is still there; None otherwise, also for a missing or damaged migration.json."""
+    from .config_store import MARKER_FILE
+
+    try:
+        raw = json.loads((config._user_config_dir(environ) / MARKER_FILE).read_text("utf-8"))
+    except (OSError, ValueError):
+        return None
+    sources = raw.get("sources") if isinstance(raw, dict) else None
+    if not isinstance(raw, dict) or raw.get("mode") != "copy" or not isinstance(sources, list):
+        return None
+    for entry in sources:
+        if not isinstance(entry, dict) or not entry.get("copied") or entry.get("retired_to"):
+            continue
+        root, env_file = entry.get("root"), entry.get("from")
+        if not isinstance(root, str) or not isinstance(env_file, str):
+            continue
+        if config_files.is_file(Path(env_file)):
+            return resolved(Path(root)), Path(env_file)
+    return None
+
+
+def launchers_inside(launchers: set[str], root: Path) -> tuple[str, ...]:
+    """The ``launchers`` that belong to the checkout at (resolved) ``root``."""
+    return tuple(
+        sorted(
+            deployed
+            for deployed in launchers
+            if (owner := checkout_root_of(deployed)) is not None and resolved(Path(owner)) == root
+        )
+    )
+
+
+def manifest_launchers() -> set[str]:
     try:
         manifest = deploy.Manifest.load()
     except deploy.DeployError:
@@ -259,19 +305,25 @@ def detect(
     env = os.environ if environ is None else environ
     run = runner or deploy.run_command
     found_shadow = shadow(env, run, launcher, look_up=look_up_launcher)
+    copied = copied_env(env)
     why = gate(env)
-    if why:
+    if why and copied is None:
         return Detection(gated=why, shadow=found_shadow)
 
     espanso = espanso_dir or deploy.espanso_dir(run)
     in_files = deploy.deployed_launchers(espanso)
-    in_manifest = _manifest_launchers()
+    in_manifest = manifest_launchers()
     launchers = in_files | in_manifest
+    pending = None
+    if copied is not None:
+        pending = CopyRecord(copied[0], copied[1], launchers_inside(launchers, copied[0]))
+    if why:
+        return Detection(gated=why, shadow=found_shadow, pending=pending)
     signals: dict[Path, set[str]] = {}
 
     def add(root: PurePath | Path | None, signal: str) -> None:
         if root is not None:
-            signals.setdefault(_resolved(Path(root)), set()).add(signal)
+            signals.setdefault(resolved(Path(root)), set()).add(signal)
 
     for deployed in sorted(in_files):
         add(checkout_root_of(deployed), LAUNCHER)
@@ -284,18 +336,11 @@ def detect(
     skipped = skipped_roots(env)
     candidates = []
     for root, kinds in sorted(signals.items()):
-        if not is_checkout(root) or _is_running_checkout(root):
+        if not is_checkout(root) or is_running_checkout(root):
             continue
         if str(root) in skipped and ENTERED not in kinds:
             continue
-        inside = tuple(
-            sorted(
-                deployed
-                for deployed in launchers
-                if (owner := checkout_root_of(deployed)) is not None
-                and _resolved(Path(owner)) == root
-            )
-        )
+        inside = launchers_inside(launchers, root)
         env_file = root / ".env"
         profiles = root / PROMPTS_PATH
         candidates.append(
@@ -308,4 +353,4 @@ def detect(
                 profiles_dir=profiles if os.path.isdir(profiles) else None,
             )
         )
-    return Detection(candidates=tuple(candidates), shadow=found_shadow)
+    return Detection(candidates=tuple(candidates), shadow=found_shadow, pending=pending)
