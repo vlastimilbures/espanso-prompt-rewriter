@@ -40,6 +40,8 @@ KEEP_BACKUPS = 2
 # A side-by-side copy is not a .yml file, so Espanso does not load its triggers twice.
 SIDE_SUFFIX = ".prompt-workflow-new"
 COMMAND_TIMEOUT = 30
+# After a timed-out command is killed, how long to wait for its output pipes.
+GIVE_UP_TIMEOUT = 5
 
 # Plan states (status) and conflict choices (deploy).
 MISSING, IN_SYNC, STALE, MODIFIED, FOREIGN = "missing", "in sync", "stale", "modified", "foreign"
@@ -155,9 +157,16 @@ def _stop(proc: subprocess.Popen[str]) -> None:
                 check=False,
             )
     proc.kill()
-    # A grandchild may still hold the pipes: give up on them rather than hang.
+    # A grandchild may still hold the pipes: give up on them rather than hang, then close
+    # them and reap the killed child, so neither leaks.
     with contextlib.suppress(subprocess.TimeoutExpired):
-        proc.communicate(timeout=5)
+        proc.communicate(timeout=GIVE_UP_TIMEOUT)
+    for pipe in (proc.stdout, proc.stderr):
+        if pipe is not None:
+            with contextlib.suppress(OSError):
+                pipe.close()
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        proc.wait(timeout=GIVE_UP_TIMEOUT)
 
 
 def output(answer: str | CommandFailure | None) -> str | None:

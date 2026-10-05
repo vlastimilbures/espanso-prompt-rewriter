@@ -2,11 +2,13 @@
 the real Espanso folder, and the real espanso, uv and brew are never run (conftest refuses
 deploy.run_command; a test passes or patches in a fake runner)."""
 
+import contextlib
 import hashlib
 import importlib.util
 import json
 import os
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -607,12 +609,13 @@ def test_run_command():
 
 def test_run_command_keeps_the_first_useful_stderr_line():
     """#115: Espanso panics with a location line first; the message comes after it."""
-    script = (
-        "import sys; sys.stderr.write("
-        "\"thread 'main' panicked at espanso/src/main.rs:611:64:\\n\\n"
-        'unable to load config: \\x1b[31mmissing\\u202e dir\\nCaused by: x\\n"); '
-        "sys.exit(101)"
+    stderr = (
+        "thread 'main' panicked at espanso/src/main.rs:611:64:\n\n"
+        "unable to load config: \x1b[31mmissing\u202e dir\nCaused by: x\n"
     )
+    # Written as UTF-8 bytes, as Espanso writes them: a Windows child's text stderr would
+    # encode with the console code page instead.
+    script = f"import sys; sys.stderr.buffer.write({stderr.encode()!r}); sys.exit(101)"
     failed = REAL_RUN_COMMAND([sys.executable, "-c", script])
     assert (failed.returncode, failed.error) == (101, "unable to load config: [31mmissing dir")
     argv = deploy.PATH_CONFIG
@@ -654,18 +657,27 @@ def test_run_command_survives_undecodable_output():
     assert ok == "C:/\u010d"
 
 
-def test_run_command_timeout_does_not_wait_for_a_grandchild(monkeypatch):
+def test_run_command_timeout_does_not_wait_for_a_grandchild(monkeypatch, tmp_path):
     """A timed-out command whose child keeps the pipes open (espanso.cmd's espansod.exe on
     Windows) still returns: the tree is killed, and the pipes are not waited on for ever."""
     monkeypatch.setattr(deploy, "COMMAND_TIMEOUT", 0.5)
+    monkeypatch.setattr(deploy, "GIVE_UP_TIMEOUT", 1)
+    pid_file = tmp_path / "grandchild.pid"
     script = (
         "import subprocess, sys, time; "
-        "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(8)']); time.sleep(8)"
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']); "
+        f"open({str(pid_file)!r}, 'w').write(str(child.pid)); time.sleep(60)"
     )
-    started = time.process_time()
-    failed = REAL_RUN_COMMAND([sys.executable, "-c", script])
-    assert failed.timed_out
-    assert time.process_time() - started < 5  # CPU time: no busy wait either
+    started = time.monotonic()
+    try:
+        failed = REAL_RUN_COMMAND([sys.executable, "-c", script])
+        # A hang would wait the grandchild's 60 s; the margin keeps a slow runner green.
+        assert time.monotonic() - started < 30
+        assert failed.timed_out
+    finally:
+        if pid_file.exists() and pid_file.read_text():
+            with contextlib.suppress(OSError):
+                os.kill(int(pid_file.read_text()), signal.SIGTERM)
 
 
 def test_run_command_times_out(monkeypatch):
