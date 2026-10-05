@@ -762,34 +762,38 @@ def test_doctor_launcher_drift_and_missing(espanso, clipboard, monkeypatch, tmp_
 # --- stats and history --------------------------------------------------------------------
 
 
-def _record(n=2):
-    target = HistoryStore(history.history_path())
-    for _ in range(n):
-        op = {
-            "id": history.new_operation_id(),
-            "origin": "espanso_managed",
-            "trigger_id": "-i-",
-            "kind": "improve",
-            "profile_id": "default",
-            "outcome": "ok",
-            "latency_ms": 1000.0,
-        }
-        attempt = {
-            "provider": "openrouter",
-            "requested_model": "google/gemini-3.5-flash-lite",
-            "endpoint": "remote",
-            "status": 200,
-            "latency_ms": 900.0,
-            "output": 30,
-            "input_uncached": 100,
-            "charged_amount": Decimal("0.0001"),
-            "charged_unit": "credits",
-        }
-        assert target.record(op, [attempt])
-    return target
+@pytest.fixture
+def record_ops(seed_history):
+    """record_ops(n) seeds n recorded -i- calls to OpenRouter."""
+
+    def record(n=2):
+        for _ in range(n):
+            op = {
+                "id": history.new_operation_id(),
+                "origin": "espanso_managed",
+                "trigger_id": "-i-",
+                "kind": "improve",
+                "profile_id": "default",
+                "outcome": "ok",
+                "latency_ms": 1000.0,
+            }
+            attempt = {
+                "provider": "openrouter",
+                "requested_model": "google/gemini-3.5-flash-lite",
+                "endpoint": "remote",
+                "status": 200,
+                "latency_ms": 900.0,
+                "output": 30,
+                "input_uncached": 100,
+                "charged_amount": Decimal("0.0001"),
+                "charged_unit": "credits",
+            }
+            seed_history(op, [attempt])
+
+    return record
 
 
-def test_stats_text_states_the_caveats_and_the_history(monkeypatch):
+def test_stats_text_states_the_caveats_and_the_history(monkeypatch, record_ops):
     result = _run("stats")
     assert result.exit_code == 0
     for caveat in (
@@ -801,7 +805,7 @@ def test_stats_text_states_the_caveats_and_the_history(monkeypatch):
     ):
         assert caveat in result.stdout
     assert "No usage recorded yet." in result.stdout
-    _record()
+    record_ops()
     result = _run("stats", "--by", "provider")
     assert "openrouter: 2 call(s), 2 request(s)" in result.stdout
     assert "reported 0.0002 credits" in result.stdout
@@ -816,8 +820,8 @@ def test_stats_help_states_the_caveats(monkeypatch):
     assert "ignore PROMPT_PROVIDER" in out
 
 
-def test_stats_json():
-    _record()
+def test_stats_json(record_ops):
+    record_ops()
     data = json.loads(_run("stats", "--json").stdout)
     assert data["group_by"] == "trigger"
     assert len(data["caveats"]) == 3
@@ -830,8 +834,8 @@ def test_stats_bad_group():
     assert _run("stats", "--by", "week").exit_code == 2
 
 
-def test_history_export_prune_reset(tmp_path):
-    _record()
+def test_history_export_prune_reset(tmp_path, record_ops):
+    record_ops()
     data = json.loads(_run("history", "export").stdout)
     assert len(data["operations"]) == 2
     out = tmp_path / "out.csv"
@@ -840,7 +844,7 @@ def test_history_export_prune_reset(tmp_path):
     assert _run("history", "export", "-o", str(out)).exit_code == 1  # never replaced
     assert "Deleted 0" in _run("history", "prune").stdout
     assert "Deleted 2" in _run("history", "prune", "--older-than", "0d", "--yes").stdout
-    _record(1)
+    record_ops(1)
     assert _run("history", "reset").exit_code == common.NEEDS_TERMINAL
     assert _run("history", "reset", "--yes").exit_code == 0
     assert json.loads(_run("history", "export").stdout)["operations"] == []
@@ -1077,14 +1081,14 @@ def test_a_key_under_a_setting_name_is_never_shown(monkeypatch):
     assert KEY not in get.output
 
 
-def test_prune_sooner_than_retention_asks(tty):
-    _record()
+def test_prune_sooner_than_retention_asks(tty, record_ops):
+    record_ops()
     assert _run("history", "prune", "--older-than", "0", input="n\n").exit_code == 1
     assert len(json.loads(_run("history", "export").stdout)["operations"]) == 2
 
 
-def test_prune_sooner_than_retention_needs_yes_without_terminal():
-    _record()
+def test_prune_sooner_than_retention_needs_yes_without_terminal(record_ops):
+    record_ops()
     assert _run("history", "prune", "--older-than", "0").exit_code == common.NEEDS_TERMINAL
     assert "Deleted 2" in _run("history", "prune", "--older-than", "0", "--yes").stdout
 
@@ -1285,8 +1289,7 @@ def test_smoke_reports_a_cli_that_cannot_start():
 # --- odds and ends ------------------------------------------------------------------------
 
 
-def test_stats_shows_estimated_unknown_and_local_costs(monkeypatch):
-    target = HistoryStore(history.history_path())
+def test_stats_shows_estimated_unknown_and_local_costs(monkeypatch, seed_history):
     for attempt in (
         {"provider": "ollama", "requested_model": "qwen3:8b", "cost_state": "not_applicable"},
         {"provider": "anthropic", "requested_model": "claude-sonnet-5"},
@@ -1297,7 +1300,7 @@ def test_stats_shows_estimated_unknown_and_local_costs(monkeypatch):
             "kind": "improve",
             "outcome": "ok",
         }
-        assert target.record(op, [{"endpoint": "remote", "status": 200, **attempt}])
+        seed_history(op, [{"endpoint": "remote", "status": 200, **attempt}])
     out = _run("stats", "--by", "provider").stdout
     assert "1 local (no cost)" in out
     assert "1 attempt(s) with an unknown cost" in out

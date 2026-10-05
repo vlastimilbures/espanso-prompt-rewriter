@@ -328,9 +328,8 @@ def test_finishing_twice_writes_once(monkeypatch, history_rows):
 
 
 # Each recorded run also prunes, a batch at a time, what is older than the retention.
-def test_recording_prunes_old_operations(monkeypatch, stub_provider, history_rows):
+def test_recording_prunes_old_operations(monkeypatch, stub_provider, history_rows, seed_history):
     monkeypatch.setattr(history, "_PRUNE_BATCH", 2)
-    store = HistoryStore(history.history_path())
     old = datetime.now(UTC) - timedelta(days=400)
     for _ in range(3):
         op = {
@@ -340,9 +339,7 @@ def test_recording_prunes_old_operations(monkeypatch, stub_provider, history_row
             "kind": "improve",
             "outcome": "ok",
         }
-        assert store.record(
-            op, [{"provider": "ollama", "requested_model": "m", "endpoint": "loopback"}]
-        )
+        seed_history(op, [{"provider": "ollama", "requested_model": "m", "endpoint": "loopback"}])
     _run(LOCAL)
     assert len(history_rows("operations")) == 2  # 3 old - 2 pruned + this run
     _run(LOCAL)
@@ -352,9 +349,8 @@ def test_recording_prunes_old_operations(monkeypatch, stub_provider, history_row
     assert history_rows("attempts") == []
 
 
-def test_retention_setting_drives_the_prune(monkeypatch, stub_provider, history_rows):
+def test_retention_setting_drives_the_prune(monkeypatch, stub_provider, history_rows, seed_history):
     monkeypatch.setenv("PROMPT_HISTORY_RETENTION_DAYS", "5")
-    store = HistoryStore(history.history_path())
     op = {
         "id": history.new_operation_id(),
         "occurred_at_utc": datetime.now(UTC) - timedelta(days=10),
@@ -362,6 +358,6 @@ def test_retention_setting_drives_the_prune(monkeypatch, stub_provider, history_
         "kind": "improve",
         "outcome": "ok",
     }
-    assert store.record(op)
+    seed_history(op)
     _run(LOCAL)
     assert len(history_rows("operations")) == 1
