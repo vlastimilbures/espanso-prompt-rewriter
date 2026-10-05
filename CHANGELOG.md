@@ -48,6 +48,8 @@ All notable changes to this project are documented here. The format follows
 
 
 ### Changed
+- README Triggers: a tip to use `-ip-` for a draft that pastes an email or thread, since `-i-`'s
+  faster model often summarises short pasted material instead of copying it (#42).
 - Match files (#38, #23, #41): every match, the commented-out `-ic-` too, has a `label:`
   (`prompt-workflow: …`), so Espanso's search bar names each trigger instead of showing
   `{{output}}`. The `-if-` model list now starts with, and defaults to, `default`, which keeps

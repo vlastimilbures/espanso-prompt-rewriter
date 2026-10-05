@@ -315,6 +315,10 @@ The Profile column shows the defaults. `-i-` uses `PROMPT_PROFILE`. `-ip-` and `
 except that a model other than `OPENROUTER_PRO_MODEL` picked in `-if-` always gets
 `PROMPT_PROFILE`. The local triggers always use `general`.
 
+For a draft that pastes an email, a thread or a document to work on, use `-ip-`: the pro tier
+copies the pasted material into INPUTS word for word (up to 60 lines), while `-i-`'s faster
+model often summarises a short pasted email instead (CONTRIBUTING, "Known gaps in the default prompt", #42).
+
 Each match has a label starting with `prompt-workflow:`, which Espanso's search bar
 (Alt+Space / Option+Space by default) shows instead of the `{{output}}` placeholder.
 
