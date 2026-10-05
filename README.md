@@ -99,8 +99,8 @@ step. A quick note to yourself would get "execute now" and a self-review checkli
   `CONTEXT / GOAL / INSTRUCTIONS / CONSTRAINTS / INPUTS / OUTPUTS`, and picks the planning and
   review steps from the task's complexity and audience.
 - 🧠 **Two tiers.** `-i-` answers in about 2 seconds; `-ip-` hands hard, multi-part
-  drafts to a reasoning model for a more rigorous rewrite in about 6 seconds (median; 95 % within
-  3 and 9 seconds, see the [model benchmark](#model-benchmark)).
+  drafts to a reasoning model for a more rigorous rewrite in about 6 seconds (median; 95 % of
+  calls within about 9 seconds, see the [model benchmark](#model-benchmark)).
 - 🔌 **Four providers, one interface.** OpenRouter (default), Anthropic, Ollama and LM Studio.
   Each trigger names its provider; `PROMPT_LOCAL_ONLY=true` refuses every cloud call.
 - 🛡️ **Data-protection gate.** Before the draft can leave your machine it is scanned for
