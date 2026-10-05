@@ -987,6 +987,11 @@ def test_setup_carries_on_past_a_broken_env_it_found_itself(tmp_path, espanso, e
     result = _cli(*args, "--espanso-dir", str(espanso), "--launcher", UV_BIN)
     assert result.exit_code == 0, result.output
     assert "its settings were not copied" in result.stdout
+    assert f"config migrate --from {root.resolve()}`" in result.stdout
+    # Nothing is written, so the offer stays open for the next run (D-MIG-4).
+    assert not config.settings_file().exists()
+    assert not (config._user_config_dir() / config_files.SECRETS_FILE).exists()
+    assert previous_install.gate(os.environ) is None
     # Named with --migrate-from, the same checkout fails setup: the user asked for it.
     result = _cli(*args, "--espanso-dir", str(espanso), "--migrate-from", str(root))
     assert result.exit_code == 1

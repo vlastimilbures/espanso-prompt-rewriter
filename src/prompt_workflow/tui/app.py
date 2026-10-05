@@ -23,6 +23,7 @@ from .panes import (
     ProvidersPane,
     TriggersPane,
 )
+from .previous import PreviousInstallScreen, wants_offer
 from .state import State, gather
 
 DEFAULT_THEME = "textual-dark"
@@ -70,6 +71,10 @@ ModalScreen { align: center middle; }
 .dialog-title { text-style: bold; margin-bottom: 1; }
 .preview { height: auto; max-height: 18; border: round $panel-lighten-2; margin-bottom: 1; }
 .dialog Select, .dialog Input { margin-bottom: 1; }
+#previous-found { margin-bottom: 1; }
+#previous-steps, .step { height: auto; }
+.step Button { width: 34; margin-right: 1; }
+.step-state { width: 1fr; padding-top: 1; }
 """
 
 
@@ -114,6 +119,8 @@ class ManageApp(App[int]):
         # after a newer one: only the newest is shown.
         self.generation = 0
         self.main = MainScreen()
+        # The previous install screen opens by itself once per session (#110).
+        self.offered = False
         self.register_theme(HIGH_CONTRAST)
         self.theme = DEFAULT_THEME
 
@@ -153,3 +160,15 @@ class ManageApp(App[int]):
         for pane in self.main.query(Pane):
             if pane.ready:
                 pane.show(state)
+        for screen in self.screen_stack:
+            if isinstance(screen, PreviousInstallScreen) and screen.is_mounted:
+                screen.show(state)
+        if not self.offered and wants_offer(state.previous):
+            self.offered = True
+            self.open_previous()
+
+    def open_previous(self) -> None:
+        """Show the switch from an earlier checkout install, unless it is already open."""
+        self.offered = True
+        if not any(isinstance(s, PreviousInstallScreen) for s in self.screen_stack):
+            self.push_screen(PreviousInstallScreen())

@@ -1299,3 +1299,235 @@ def test_builtin_profiles_load_in_a_fixed_order(monkeypatch):
 
     monkeypatch.setattr(prompt_builder, "_PROMPT_DIR", Folder())
     assert list(prompt_builder._load_profiles()) == ["default", "general", "zeta"]
+
+
+# --- Previous install (#110) --------------------------------------------------------------
+
+
+def _old_checkout(tmp_path: Path, espanso) -> Path:
+    """A checkout an editable install ran from: a .env with one setting and the key, an
+    edited profile, and the match files rendered with its .venv launcher."""
+    from prompt_workflow import assets, previous_install
+
+    root = tmp_path / "Projects" / "epr"
+    (root / profile_service.PROMPTS_PATH).mkdir(parents=True)
+    name = previous_install.PROJECT_NAME
+    (root / "pyproject.toml").write_text(f'[project]\nname = "{name}"\n', "utf-8")
+    (root / ".env").write_text(f"PROMPT_TIMEOUT_SECONDS=45\nOPENROUTER_API_KEY={KEY}\n", "utf-8")
+    (root / profile_service.PROMPTS_PATH / "mine.md").write_text("Mine.\n", "utf-8")
+    if os.name == "nt":
+        launcher = (root / ".venv" / "Scripts" / "prompt-workflow.exe").as_posix()
+    else:
+        launcher = str(root / ".venv" / "bin" / "prompt-workflow")
+    for match in assets.match_names():
+        text = assets.read_match(match).replace(deploy.PLACEHOLDER, launcher)
+        (espanso.root / "match" / match).write_bytes(text.encode("utf-8"))
+    return root
+
+
+@pytest.fixture
+def previous(saved, espanso, tmp_path, monkeypatch):
+    from prompt_workflow import previous_install
+
+    monkeypatch.setattr(previous_install.shutil, "which", lambda *a, **k: None)
+    return _old_checkout(tmp_path, espanso)
+
+
+def _found(app) -> str:
+    return str(app.screen.query_one("#previous-found").render())
+
+
+def _disabled(app, step: str) -> bool:
+    return app.screen.query_one(f"#previous-{step}", Button).disabled
+
+
+def test_previous_install_walks_copy_deploy_retire(previous):
+    from prompt_workflow.tui.previous import PreviousInstallScreen
+
+    root = previous.resolve()
+
+    async def scenario(app, pilot):
+        assert isinstance(app.screen, PreviousInstallScreen)
+        assert f"Previous install: {root} (launcher); .env present" in _found(app)
+        assert _disabled(app, "retire")
+        await press(app, pilot, "#previous-copy")
+        assert isinstance(app.screen, ConfirmModal)
+        assert "OPENROUTER_API_KEY" in app.screen.preview
+        assert KEY not in app.screen.preview
+        await press(app, pilot, "#confirm")
+        assert app.screen.last_message.startswith("Copied; backup in")
+        assert f"Settings copied from {root}" in _found(app)
+        assert _disabled(app, "copy")
+        assert _disabled(app, "retire")  # the match files still run the checkout's CLI
+        await press(app, pilot, "#previous-deploy")
+        assert isinstance(app.screen, FormModal)
+        await press(app, pilot, "#submit")
+        assert isinstance(app.screen, PreviousInstallScreen)
+        assert not _disabled(app, "retire")
+        await press(app, pilot, "#previous-retire")
+        assert isinstance(app.screen, ConfirmModal)
+        await press(app, pilot, "#confirm")
+        assert app.screen.last_message.startswith(f"Retired: {root / '.env'}")
+
+    drive(scenario)
+    assert not (previous / ".env").exists()
+    from prompt_workflow.config import Settings
+
+    settings = Settings.load()
+    assert settings.timeout == 45
+    assert settings.openrouter_api_key == KEY
+
+
+def test_previous_install_cancel_writes_nothing_and_deploy_warns(previous):
+    before = {p.name: p.read_bytes() for p in previous.parent.parent.parent.rglob("*.yml")}
+
+    async def scenario(app, pilot):
+        await pilot.press("1")
+        await settle(pilot)
+        assert isinstance(app.screen, ConfirmModal)
+        await press(app, pilot, "#cancel")
+        await pilot.press("4")  # retire is disabled: the key does nothing
+        await settle(pilot)
+        assert not isinstance(app.screen, ConfirmModal)
+        await press(app, pilot, "#previous-deploy")
+        assert isinstance(app.screen, ConfirmModal)
+        assert "not copied yet" in app.screen.dialog_title
+        assert app.screen.focused.id == "cancel"
+        await press(app, pilot, "#cancel")
+
+    drive(scenario)
+    assert not config.settings_file().exists()
+    assert not (config._user_config_dir() / "secrets.toml").exists()
+    after = {p.name: p.read_bytes() for p in previous.parent.parent.parent.rglob("*.yml")}
+    assert after == before
+
+
+def test_previous_install_shown_once_skip_and_home_reopens(previous):
+    from prompt_workflow import previous_install
+    from prompt_workflow.tui.previous import PreviousInstallScreen
+
+    async def first(app, pilot):
+        assert isinstance(app.screen, PreviousInstallScreen)
+        await pilot.press("escape")
+        await settle(pilot)
+        app.reload()
+        await settle(pilot)
+        assert not isinstance(app.screen, PreviousInstallScreen)  # once per session
+        await press(app, pilot, "#home-previous")
+        assert isinstance(app.screen, PreviousInstallScreen)
+        await press(app, pilot, "#previous-skip")
+
+    drive(first)
+    assert previous_install.skipped_roots() == {str(previous.resolve())}
+
+    async def second(app, pilot):
+        assert not isinstance(app.screen, PreviousInstallScreen)
+        await press(app, pilot, "#home-previous")
+        assert "No previous install found" in _found(app)
+        assert _disabled(app, "skip")
+
+    drive(second)
+
+
+def test_previous_install_entered_path(saved, espanso, tmp_path, monkeypatch):
+    from prompt_workflow import previous_install
+    from prompt_workflow.tui.previous import PreviousInstallScreen
+
+    monkeypatch.setattr(previous_install.shutil, "which", lambda *a, **k: None)
+    root = _old_checkout(tmp_path, espanso)
+    for path in (espanso.root / "match").iterdir():
+        path.unlink()  # no launcher signal: only the path the user types finds it
+
+    async def scenario(app, pilot):
+        assert not isinstance(app.screen, PreviousInstallScreen)
+        await press(app, pilot, "#home-previous")
+        assert "No previous install found" in _found(app)
+        await press(app, pilot, "#previous-enter")
+        await fill(app, pilot, previous_path=str(root))
+        assert f"Previous install: {root.resolve()} (entered)" in _found(app)
+        await press(app, pilot, "#previous-enter")
+        await fill(app, pilot, previous_path="sk-or-v1-" + "ab12" * 16)
+        assert "looks like a key" in app.screen.last_message
+
+    drive(scenario)
+
+
+def test_previous_install_profiles_tab_uses_the_detected_root(previous, monkeypatch):
+    monkeypatch.setattr(profile_service, "git_pristine_profiles", lambda root, rev=None: {})
+
+    async def scenario(app, pilot):
+        await pilot.press("escape")
+        await settle(pilot)
+        await pilot.press("3")
+        await press(app, pilot, "#migrate-profiles")
+        assert isinstance(app.screen, ConfirmModal)
+        assert f"From {previous.resolve()}:" in app.screen.preview
+        assert "mine.md (added)" in app.screen.preview
+
+    drive(scenario)
+
+
+def test_previous_install_detect_failure_is_shown(espanso, monkeypatch):
+    from prompt_workflow import previous_install
+
+    def broken(*args, **kwargs):
+        raise OSError("no access")
+
+    monkeypatch.setattr(previous_install, "detect", broken)
+
+    async def scenario(app, pilot):
+        await press(app, pilot, "#home-previous")
+        assert "Could not look for a previous install: no access" in _found(app)
+
+    drive(scenario)
+
+
+def test_previous_install_steps_wait_for_a_deploy(previous):
+    async def scenario(app, pilot):
+        app.main.query_one("#triggers-pane", panes.TriggersPane).busy = True
+        for step in ("copy", "profiles", "deploy", "enter"):
+            await press(app, pilot, f"#previous-{step}")
+            assert not isinstance(app.screen, ConfirmModal | FormModal), step
+            assert app.screen.last_message.startswith("A deploy is in progress")
+
+    drive(scenario)
+
+
+def test_previous_install_retire_needs_espanso_to_name_its_folder(previous, espanso):
+    async def scenario(app, pilot):
+        await press(app, pilot, "#previous-copy")
+        await press(app, pilot, "#confirm")
+        await press(app, pilot, "#previous-deploy")
+        await press(app, pilot, "#submit")
+        del espanso.answers["espanso path config"]
+        await press(app, pilot, "#previous-retire")
+        assert not isinstance(app.screen, ConfirmModal)
+        message = app.screen.last_message
+        assert "cannot check which CLI the match files run" in message
+        assert f"config retire --from {previous.resolve()} --espanso-dir PATH" in message
+
+    drive(scenario)
+    assert (previous / ".env").is_file()
+
+
+def test_previous_install_entered_path_that_is_no_checkout(saved, espanso, tmp_path, monkeypatch):
+    from prompt_workflow import previous_install
+
+    monkeypatch.setattr(previous_install.shutil, "which", lambda *a, **k: None)
+    root = _old_checkout(tmp_path, espanso)
+    for path in (espanso.root / "match").iterdir():
+        path.unlink()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+
+    async def scenario(app, pilot):
+        await press(app, pilot, "#home-previous")
+        await press(app, pilot, "#previous-enter")
+        await fill(app, pilot, previous_path=str(elsewhere))
+        assert app.screen.last_message.startswith(f"{elsewhere} is not a checkout")
+        assert app.screen.entered is None
+        await press(app, pilot, "#previous-enter")
+        await fill(app, pilot, previous_path=f'"{root}"')  # pasted with its quotes
+        assert f"Previous install: {root.resolve()} (entered)" in _found(app)
+
+    drive(scenario)
