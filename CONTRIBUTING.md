@@ -43,6 +43,8 @@ until you regenerate them, review the new SVGs and commit them (Linux or macOS):
 UPDATE_SNAPSHOTS=1 uv run pytest tests/test_tui_snapshots.py
 ```
 
+The snapshots pin the version shown in the header, so a release regenerates none of them.
+
 If you change a prompt, a provider or anything on the request path, also run the opt-in live
 tests (needs `OPENROUTER_API_KEY` in `.env`, costs fractions of a cent):
 

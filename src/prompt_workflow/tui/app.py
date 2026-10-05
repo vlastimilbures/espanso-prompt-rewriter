@@ -14,6 +14,7 @@ from textual.screen import Screen
 from textual.theme import Theme
 from textual.widgets import Footer, Header, TabbedContent, TabPane
 
+from .. import __version__
 from .panes import (
     DiagnosticsPane,
     HistoryPane,
@@ -103,7 +104,7 @@ class MainScreen(Screen[None]):
 
 
 class ManageApp(App[int]):
-    TITLE = "prompt-workflow"
+    TITLE = "prompt-workflow"  # Plus the installed version, set in __init__ (#112).
     SUB_TITLE = "set up and manage"
     CSS = CSS
     # The palette would offer screenshots written to the working directory and other extras
@@ -112,6 +113,8 @@ class ManageApp(App[int]):
 
     def __init__(self, *, loader: Callable[[str], State] = gather) -> None:
         super().__init__()
+        # Read here, not at import, so the snapshot tests can pin it and a release changes none.
+        self.title = f"{self.TITLE} {__version__}"
         self.loader = loader
         self.group_by = "trigger"
         self.state: State | None = None
