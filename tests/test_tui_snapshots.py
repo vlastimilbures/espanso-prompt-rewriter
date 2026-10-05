@@ -48,6 +48,7 @@ _MESSAGES = {
     "install": (doctor.OK, f"uv: {LAUNCHER}"),
     "config": (doctor.OK, f"valid (saved: {HOME}/.config/prompt-workflow/config.toml)"),
     "keys": (doctor.OK, "OPENROUTER_API_KEY: set, ANTHROPIC_API_KEY: not set"),
+    "persona": (doctor.OK, "PROMPT_PERSONA matches no data-protection pattern"),
     "espanso": (doctor.OK, f"running (config: {ESPANSO})"),
     "match_files": (doctor.WARN, "some files are not ours as deployed"),
     "launcher": (doctor.OK, f"the deployed matches call {LAUNCHER}"),

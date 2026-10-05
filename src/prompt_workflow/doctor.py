@@ -32,6 +32,7 @@ CHECK_IDS = (
     "install",
     "config",
     "keys",
+    "persona",
     "espanso",
     "match_files",
     "launcher",
@@ -49,6 +50,7 @@ DATA_KEYS = {
     "install": ("channel", "launcher", "editable"),
     "config": ("mode", "files", "valid", "findings"),
     "keys": ("keys", "provider"),
+    "persona": ("set", "local_only", "findings"),
     "espanso": (
         "found",
         "config_dir",
@@ -191,6 +193,81 @@ def _keys_check(layers: ConfigLayers, provider: str, local_only: bool) -> Check:
         )
     shown = ", ".join(f"{n}: {'set' if k['set'] else 'not set'}" for n, k in keys.items())
     return Check("keys", OK, shown, data)
+
+
+def persona_findings(settings: config.Settings) -> list[str]:
+    """What the gate's scan finds in PROMPT_PERSONA: finding names only, never the text. The
+    gate scans the draft, but every call also sends the persona in the system prompt (#29), so
+    `config validate`, this check and the interface scan it once instead: a match warns and
+    never blocks a trigger, which never runs this. No ``bare_token``: that rule is for a
+    whole draft that is one secret-like word (a password left on the clipboard); a persona is
+    a typed setting, a one-word one (DataOps2Lead) is a role, and a pasted key still matches
+    the key patterns, as `config set` checks every value with the same scan()."""
+    from .redaction import compile_extra, scan
+
+    return scan(settings.persona, compile_extra(settings.extra_patterns))
+
+
+def _persona_stays_local(settings: config.Settings) -> bool:
+    """PROMPT_LOCAL_ONLY makes make_provider() refuse every provider that leaves the machine,
+    unless PROMPT_GATE_LOCAL says a loopback server may relay to a cloud API."""
+    return settings.local_only and not settings.gate_local
+
+
+def _persona_used(settings: config.Settings) -> bool:
+    """Whether PROMPT_PROFILE or PROMPT_PRO_PROFILE sends the persona: its template (built-in
+    or opted-in user file) holds {{PERSONA_RULE}}. A profile that cannot load sends nothing
+    (improve stops; the profiles check reports it). The triggers' only explicit --profile is
+    `general`, which has no persona."""
+    from .prompt_builder import PERSONA_TOKEN, template
+
+    for name in dict.fromkeys(filter(None, (settings.profile, settings.pro_profile))):
+        try:
+            if PERSONA_TOKEN in template(name, settings.profile_overrides):
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def persona_problem(settings: config.Settings) -> str | None:
+    """`config validate`'s problem for a persona the gate's patterns match, labels only."""
+    findings = persona_findings(settings)
+    if not findings or _persona_stays_local(settings) or not _persona_used(settings):
+        return None
+    return (
+        f"PROMPT_PERSONA matches the data-protection patterns: {', '.join(findings)}; "
+        "it is sent unscanned with every cloud call"
+    )
+
+
+def _persona_readable() -> bool:
+    """False when a problem can change PROMPT_PERSONA (its own rejected value, a merged line,
+    an unreadable settings file): then the persona subcommand prints its placeholder, and
+    repair mode's fallback value says nothing about the one the user wrote."""
+    try:
+        ConfigLayers.resolve(only="PROMPT_PERSONA")
+    except ValueError:
+        return False
+    return True
+
+
+def _persona_check(settings: config.Settings, readable: bool = True) -> Check:
+    findings = persona_findings(settings)
+    data = {"set": bool(settings.persona), "local_only": settings.local_only, "findings": findings}
+    if not readable:
+        return Check("persona", INFO, "PROMPT_PERSONA could not be read; see config", data)
+    if not settings.persona:
+        return Check("persona", OK, "PROMPT_PERSONA is not set", data)
+    problem = persona_problem(settings)
+    if problem:
+        return Check("persona", WARN, problem, data)
+    if findings:
+        why = "not sent (PROMPT_LOCAL_ONLY=true)"
+        if not _persona_used(settings):
+            why = "not used by the configured profiles"
+        return Check("persona", INFO, f"matches {', '.join(findings)}; {why}", data)
+    return Check("persona", OK, "PROMPT_PERSONA matches no data-protection pattern", data)
 
 
 def _espanso_check(runner: deploy.Runner, espanso_dir: Path | None) -> tuple[Check, Path]:
@@ -477,6 +554,7 @@ def run(
         _safely("install", lambda: _install_check(found, launcher_error)),
         _safely("config", lambda: _config_check(layers, strict_error)),
         _safely("keys", lambda: _keys_check(layers, settings.provider, settings.local_only)),
+        _safely("persona", lambda: _persona_check(settings, _persona_readable())),
     ]
     try:
         espanso, target = _espanso_check(run_command, espanso_dir)

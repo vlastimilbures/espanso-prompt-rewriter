@@ -268,6 +268,35 @@ def test_config_validate_redacts_a_value_matching_a_user_pattern(monkeypatch):
     assert "falcon" not in result.output
 
 
+# The persona goes with every call, unscanned by the gate: validate scans it once and names
+# the findings only (#29 B).
+def test_config_validate_scans_the_persona(monkeypatch):
+    assert _run("config", "validate").exit_code == 0  # no persona
+    monkeypatch.setenv("PROMPT_PERSONA", "I am a data engineer at Example Corp.")
+    assert _run("config", "validate").exit_code == 0
+    # One word with a digit and three classes is bare_token in a draft, not in a persona.
+    monkeypatch.setenv("PROMPT_PERSONA", "DataOps2Lead")
+    assert _run("config", "validate").exit_code == 0
+    address = "jane.doe" + "@" + "example.com"
+    monkeypatch.setenv("PROMPT_PERSONA", f"I am a falcon analyst, mail {address}.")
+    monkeypatch.setenv("PROMPT_EXTRA_PATTERNS", "falcon")
+    result = _run("config", "validate")
+    assert result.exit_code == common.PROBLEMS
+    assert (
+        "problem: PROMPT_PERSONA matches the data-protection patterns: email, custom_1; it is "
+        "sent unscanned with every cloud call"
+    ) in result.stdout
+    assert "falcon" not in result.output
+    assert address not in result.output
+    monkeypatch.setenv("PROMPT_LOCAL_ONLY", "true")  # nothing leaves the machine
+    assert _run("config", "validate").exit_code == 0
+    monkeypatch.setenv("PROMPT_GATE_LOCAL", "true")  # ...unless localhost may relay
+    assert _run("config", "validate").exit_code == common.PROBLEMS
+    monkeypatch.delenv("PROMPT_LOCAL_ONLY")
+    monkeypatch.setenv("PROMPT_PROFILE", "general")  # no {{PERSONA_RULE}}: never sent
+    assert _run("config", "validate").exit_code == 0
+
+
 def test_config_validate_unknown_profile(monkeypatch):
     monkeypatch.setenv("PROMPT_PROFILE", "nosuch")
     result = _run("config", "validate")

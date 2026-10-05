@@ -151,6 +151,7 @@ HOME_CHECKS = (
     "install",
     "config",
     "keys",
+    "persona",
     "espanso",
     "match_files",
     "launcher",
