@@ -18,6 +18,12 @@ absolute CLI path into the match files, since GUI-launched Espanso does not inhe
 prompt-workflow espanso status  # missing / in sync / stale / modified / foreign per match file
 ```
 
+Users install the release wheel instead (`uv tool install <wheel> -c constraints.txt`, README
+"Install"), which reads no checkout `.env`; README "Updating"/"Uninstall" document `--force`
+and detach-before-uninstall. `tests/test_docs.py` checks every `prompt-workflow …` invocation
+in README and CHANGELOG Unreleased, and every standalone `--flag` span in README, against the
+Click tree.
+
 ## Architecture
 
 - `cli.py` — main Typer command, `improve`. Reads a draft (`clipboard`/`stdin`/`argument`),
