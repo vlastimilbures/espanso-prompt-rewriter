@@ -40,6 +40,16 @@ All notable changes to this project are documented here. The format follows
   (`prompt-workflow 0.17.0 — set up and manage`) on every screen (#112).
 
 ### Changed
+- Match files (#38, #23, #41): every match, the commented-out `-ic-` too, has a `label:`
+  (`prompt-workflow: …`), so Espanso's search bar names each trigger instead of showing
+  `{{output}}`. The `-if-` model list now starts with, and defaults to, `default`, which keeps
+  `OPENROUTER_PRO_MODEL` and its `OPENROUTER_PRO_PROVIDER` pin, as the comment and README
+  already said (with the shipped settings that is the same `openai/gpt-6-luna@openai` as
+  before; with a custom pro model it now follows that model and uses `PROMPT_PRO_PROFILE` if
+  set, where the old fixed default used `PROMPT_PROFILE`). The `-if-` timeout list stops at 120 s (`180` removed), since Espanso blocks every
+  other trigger while a call runs. The `-ip-` comment quotes the 2026-10-04 bench (about 6 s
+  median, 9 s p95) instead of "~5-8 s". Run `prompt-workflow espanso deploy` to update the
+  deployed matches; until then `doctor` reports them as `stale`.
 - README and `.env.example` say that an `http://` Ollama or LM Studio base URL on another
   machine sends the draft in clear text over the network (only the cloud providers require
   `https://`) (#33).

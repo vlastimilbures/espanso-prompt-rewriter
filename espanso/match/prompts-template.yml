@@ -6,6 +6,7 @@
 
 matches:
   - trigger: "-p-"
+    label: "prompt-workflow: golden prompt template"
     left_word: true
     vars:
       - name: persona

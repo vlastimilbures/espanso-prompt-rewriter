@@ -355,6 +355,8 @@ overrides any `--provider` a trigger passes; `PROMPT_PROVIDER` only sets the bar
 - Every match that runs the CLI (including commented-out ones and `-p-`) sets
   `force_mode: clipboard`, so output is always pasted: Espanso's default backend would type output
   shorter than 100 characters key by key. `tests/test_yaml.py` enforces it.
+- Every match (commented-out ones too) has its own `label:` (`prompt-workflow: …`), shown in
+  Espanso's search bar; `tests/test_yaml.py` enforces it.
 - `espanso/match/prompts-core.yml` holds static, non-LLM form-based snippets (no CLI call).
 - Every match (commented-out ones too) sets `left_word: true`, so a trigger fires only after a
   word separator (space, punctuation, bracket, newline), never inside a word such as
@@ -366,8 +368,9 @@ overrides any `--provider` a trigger passes; `PROMPT_PROVIDER` only sets the bar
   command and checks its provider, profile and tier. `-if-` puts an Espanso form
   (choice dropdowns) in front of the pro tier and passes the picks as `--model model@endpoint
   --effort --max-tokens --timeout` via `{{form1.*}}`, which `Settings.with_overrides()` applies.
-  Its fields must stay fixed choices (no free text reaches the shell); `tests/test_yaml.py`
-  checks each value against the CLI. `-ic-`
+  Its fields must stay fixed choices (no free text reaches the shell), each list starting with
+  and defaulting to `default` (keep the pro-tier setting), timeouts at most 120 s;
+  `tests/test_yaml.py` checks each value against the CLI. `-ic-`
   (Anthropic) stays commented out in `prompts-llm.yml`. The data-protection gate is a heuristic,
   not a guarantee — cloud triggers should only be used where company policy permits.
 - Every CLI match (commented-out `-ic-` and `-p-`'s `persona` call too) passes its own literal

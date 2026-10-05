@@ -12,6 +12,7 @@ KNOWN_SOURCES: dict[str, frozenset[str]] = {
     "prompts-core.yml": frozenset(
         {
             "0c0e2c0bf68a4e2573c713470c5cd4d43451e76691c8e671ae066944f807bbc4",
+            "1cf316c0745bbdc9827643530caacf3b782a59cb72312ccfebcfccd4ea73c656",
             "7d04c4988a4bacf0b8e43bba5182886020b9bddd3d7fe41846390b46caec3170",
         }
     ),
@@ -25,6 +26,7 @@ KNOWN_SOURCES: dict[str, frozenset[str]] = {
             "8f9eb7a8d4cd42606df54f7e3e3ea7cdcfd9e57770dbd39fc6ed020bc3d3d21c",
             "9454bff8830e3ab38934a0f1a97cb42fdad6769cc0249cce38a456dc1dfe796c",
             "9bc66c69044c3b795126cb5819f70dce11435f7167bf6ad1fdc94d0614b02c4e",
+            "c8f51c448713aff6f0ea69a83d6a9e1e918b28569bf1430597e675cf0f59a2da",
             "e7e437e9e07e78de55f181d8f263f31dbe06bc3617defca8b2665bbed548ed77",
         }
     ),
@@ -35,6 +37,7 @@ KNOWN_SOURCES: dict[str, frozenset[str]] = {
             "38045846defcbbcf355e4fcf0db551516a141a02f7a483fba6876e417b8e15cc",
             "53292b9f1d1c24e3771606b69c7c6bff9feacca9395b9668e36d6762752ad1b1",
             "5b3b9f2541e3dafebd033c724febb77b8e9a4478d17f3deaad364a5195e85153",
+            "882c8d4ac9943da4243cbf5205bc1c559ae558080fa83c3786aae72fcad82dc5",
             "a064a91c8e05437d00e3b708434d492d1e6903eba912b9bf19488b97d46a648b",
             "b5715354600d86b6ff4b5369586479ded87da27d8c4fbbe6ec3c296503d91e46",
             "cfddea43ae7e5dba1518a0c585fae4cacf5867da2cac1877c6b70e2c211dc695",

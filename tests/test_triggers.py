@@ -107,6 +107,7 @@ def test_trigger_request(stub_provider, trigger):
 # -if- model choice -> profile with the shipped settings: one prompt for every model. A set
 # PROMPT_PRO_PROFILE applies to the pro model only (test_profile_settings_reach_triggers).
 IF_MODEL_PROFILES = {
+    "default": "default",
     "openai/gpt-6-luna@openai": "default",
     "openai/gpt-6-luna@auto": "default",
     "google/gemini-3.8-flash@google-ai-studio": "default",
@@ -119,8 +120,24 @@ def test_if_profile_follows_model(stub_provider, model, profile):
     _, cfg, prompt = _replay(stub_provider, "-if-", model=model)
     slug, _, endpoint = model.partition("@")
     assert _profile(prompt) == profile
+    if model == "default":
+        slug, endpoint = Settings().openrouter_pro_model, Settings().openrouter_pro_provider
     assert cfg.openrouter_model == slug
     assert cfg.openrouter_provider == ("" if endpoint == "auto" else endpoint)
+
+
+# The popup's `default` model keeps the OPENROUTER_PRO_* model and endpoint, whatever they are
+# set to, and with them PROMPT_PRO_PROFILE.
+def test_if_default_model_keeps_pro_settings(monkeypatch, stub_provider):
+    monkeypatch.setenv("OPENROUTER_PRO_MODEL", "vendor/custom-model")
+    monkeypatch.setenv("OPENROUTER_PRO_PROVIDER", "custom-endpoint")
+    monkeypatch.setenv("PROMPT_PRO_PROFILE", "general")
+    _, cfg, prompt = _replay(stub_provider, "-if-", model="default")
+    assert (cfg.openrouter_model, cfg.openrouter_provider) == (
+        "vendor/custom-model",
+        "custom-endpoint",
+    )
+    assert _profile(prompt) == "general"
 
 
 # The table above covers every model the -if- popup offers.

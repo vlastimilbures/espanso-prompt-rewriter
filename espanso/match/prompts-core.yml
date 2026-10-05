@@ -1,5 +1,6 @@
 matches:
   - trigger: "-prompt-"
+    label: "prompt-workflow: prompt form (role, objective, context)"
     left_word: true
     form: |
       Act as {{role}}.
@@ -30,6 +31,7 @@ matches:
         multiline: true
 
   - trigger: "-risk-"
+    label: "prompt-workflow: enterprise risk analysis"
     left_word: true
     replace: |
       Analyze the following issue from an enterprise risk perspective: $|$

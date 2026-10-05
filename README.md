@@ -315,6 +315,9 @@ The Profile column shows the defaults. `-i-` uses `PROMPT_PROFILE`. `-ip-` and `
 except that a model other than `OPENROUTER_PRO_MODEL` picked in `-if-` always gets
 `PROMPT_PROFILE`. The local triggers always use `general`.
 
+Each match has a label starting with `prompt-workflow:`, which Espanso's search bar
+(Alt+Space / Option+Space by default) shows instead of the `{{output}}` placeholder.
+
 Triggers expand only at the start of a word: after a space, tab, newline, punctuation
 (`. , ? ! : ; ' "`) or a bracket, or as the first thing typed after clicking into a field. Text
 such as `a[n-i-1]` or `only-if-cached` does not fire them, but `s[-i-1]` or `x = -i-1` still
@@ -340,8 +343,10 @@ In a checkout ([Development](#development)), you enable `-ic-` by uncommenting i
 
 `-if-` opens an Espanso form with four dropdowns before the rewrite runs: the model
 (each entry is `model@endpoint`, the OpenRouter slug plus its endpoint pin; `@auto` leaves
-routing to OpenRouter), reasoning effort, max output tokens and timeout. `default` in any list
-keeps the pro-tier setting (`OPENROUTER_PRO_*`). In a checkout, edit the lists in
+routing to OpenRouter), reasoning effort, max output tokens and timeout (at most 120 s).
+Every list starts with, and defaults to, `default`, which keeps the pro-tier setting
+(`OPENROUTER_PRO_*`; for the model, `OPENROUTER_PRO_MODEL` with its
+`OPENROUTER_PRO_PROVIDER` pin). In a checkout, edit the lists in
 [`espanso/match/prompts-llm.yml`](espanso/match/prompts-llm.yml) and deploy again; the
 tests reject any value the CLI would not accept. Two things to know:
 
