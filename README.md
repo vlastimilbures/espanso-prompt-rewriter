@@ -99,7 +99,8 @@ step. A quick note to yourself would get "execute now" and a self-review checkli
   `CONTEXT / GOAL / INSTRUCTIONS / CONSTRAINTS / INPUTS / OUTPUTS`, and picks the planning and
   review steps from the task's complexity and audience.
 - 🧠 **Two tiers.** `-i-` answers in about 2 seconds; `-ip-` hands hard, multi-part
-  drafts to a reasoning model for a more rigorous rewrite in about 5-8 seconds.
+  drafts to a reasoning model for a more rigorous rewrite in about 6 seconds (median; 95 % within
+  3 and 9 seconds, see the [model benchmark](#model-benchmark)).
 - 🔌 **Four providers, one interface.** OpenRouter (default), Anthropic, Ollama and LM Studio.
   Each trigger names its provider; `PROMPT_LOCAL_ONLY=true` refuses every cloud call.
 - 🛡️ **Data-protection gate.** Before the draft can leave your machine it is scanned for
@@ -418,8 +419,9 @@ environment variables take precedence over any file.
 The CLI reads its settings from the first of these that exists:
 
 1. the `.env` named by `PROMPT_WORKFLOW_ENV`, if set. That file alone is used, as before.
-2. `config.toml` in the config folder: `~/.config/prompt-workflow/` (`%APPDATA%\prompt-workflow\`
-   on Windows). Once it exists, it is the saved configuration and no `.env` is read, so an old
+2. `config.toml` in the config folder: `~/.config/prompt-workflow/`, or
+   `$XDG_CONFIG_HOME/prompt-workflow/` when `XDG_CONFIG_HOME` is set (macOS and Linux);
+   `%APPDATA%\prompt-workflow\` on Windows, which ignores `XDG_CONFIG_HOME`. Once it exists, it is the saved configuration and no `.env` is read, so an old
    `.env` can never override a saved value.
 3. the `.env` in the repository the CLI was installed from, for an editable install only
    (the [Development](#development) scripts); a wheel install never reads a checkout;
@@ -528,8 +530,8 @@ A profile is a system prompt in [`src/prompt_workflow/prompts/`](src/prompt_work
 
 **Your own profiles** live outside the package, so an upgrade never replaces them:
 `~/.config/prompt-workflow/profiles/<name>.md` (`%APPDATA%\prompt-workflow\profiles\<name>.md`
-on Windows; `$XDG_CONFIG_HOME/prompt-workflow/profiles/` when that is set), next to the user
-`.env`. The file holds the system prompt as plain text, may use `{{PERSONA_RULE}}` like the
+on Windows; `$XDG_CONFIG_HOME/prompt-workflow/profiles/` when that is set on macOS or Linux),
+in the config folder next to `config.toml` and the user `.env`. The file holds the system prompt as plain text, may use `{{PERSONA_RULE}}` like the
 built-ins, and is selected by its name: `--profile <name>`, `PROMPT_PROFILE` or
 `PROMPT_PRO_PROFILE`. A name is lower-case letters, digits, `-` and `_` (no dots or spaces, not a Windows device name such as `con`), and the file must be named exactly `<name>.md`.
 

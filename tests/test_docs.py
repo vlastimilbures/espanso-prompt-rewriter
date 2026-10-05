@@ -49,6 +49,18 @@ def test_documented_bench_outdirs_are_ignored():
         assert ignored.returncode == 0, outdir
 
 
+# CONTRIBUTING's project tree names every module of the package (commands/ and tui/ are listed
+# as folders), so a new module cannot be left out of the map.
+def test_contributing_tree_lists_every_module():
+    contributing = (REPO / "CONTRIBUTING.md").read_text("utf-8")
+    tree = contributing[contributing.index("├── src/prompt_workflow/") :]
+    tree = tree[: tree.index("├── scripts/")]
+    package = REPO / "src" / "prompt_workflow"
+    modules = [*package.glob("*.py"), *(package / "providers").glob("*.py")]
+    missing = [p.name for p in modules if p.stem != "__init__" and f"── {p.name} " not in tree]
+    assert missing == [], f"add {missing} to the project tree in CONTRIBUTING.md"
+
+
 _FENCE = re.compile(r"^```[^\n]*\n(.*?)^```", re.MULTILINE | re.DOTALL)
 _INVOCATION = re.compile(r"(?<![\w/\\-])prompt-workflow(?![\w:-])([^`\n#]*)")
 _FLAG = re.compile(r"(?<![\w-])(--?[a-zA-Z][\w-]*)")

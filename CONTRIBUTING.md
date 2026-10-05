@@ -26,7 +26,8 @@ install the release wheel instead.
 
 ## Checks
 
-Run these before opening a pull request. CI runs the same.
+Run these before opening a pull request. CI runs the same, except that it runs the tests as
+`uv run pytest --cov`, which fails below 95 % coverage (`fail_under` in `pyproject.toml`).
 
 ```bash
 uv run pytest                                   # unit tests, no network
@@ -181,6 +182,7 @@ espanso-prompt-rewriter/
 │   │                             also a bare prompt-workflow on a terminal) loads it
 │   ├── doctor.py                 the doctor report (stable JSON, never a key or persona)
 │   ├── smoke.py                  setup's smoke test: improve against a stub on 127.0.0.1
+│   ├── previous_install.py       finds an earlier checkout install whose .env this one misses
 │   ├── config.py                 Settings from the environment, config.toml or .env
 │   ├── config_files.py           reads config.toml/secrets.toml; atomic, private writes
 │   ├── config_store.py           saves settings and secrets; .env migration and rollback
@@ -230,7 +232,8 @@ espanso-prompt-rewriter/
 ### Add a profile
 
 A profile for your own use does not belong in the repo: put it in the user profile directory,
-`~/.config/prompt-workflow/profiles/<name>.md` (`%APPDATA%\prompt-workflow\profiles\` on
+`~/.config/prompt-workflow/profiles/<name>.md` (`$XDG_CONFIG_HOME/prompt-workflow/profiles/`
+when `XDG_CONFIG_HOME` is set on macOS or Linux; `%APPDATA%\prompt-workflow\profiles\` on
 Windows), where an upgrade cannot replace it. See
 [README](README.md#profiles-and-persona); a same-named file overrides a built-in only when
 `PROMPT_PROFILE_OVERRIDES` lists it. `profiles.migrate_profiles()` copies profiles a checkout
@@ -452,4 +455,4 @@ Limits of the 2026-10-02 and 2026-10 evaluations, and what to do next:
    again, show that no single wording serves both models: one prompt per tier doubles the bench
    and review work.
 6. **Watch the prompt length.** The prompt is now about 3,900 input tokens; check latency on the
-   pro tier (6–9 s) after any further additions.
+   pro tier (p50 5.6 s, p95 9.2 s in the 2026-10-04 bench) after any further additions.
