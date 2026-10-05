@@ -258,6 +258,15 @@ in README and in the CHANGELOG's Unreleased and newest release notes, and every 
   `import_check()` (the interface's Diagnostics) imports `prompt_workflow.cli` in a fresh
   interpreter (`-P`, so a module planted in the working directory never runs; the smoke test's
   child uses `-P` too) and reports its time, module count and any `HEAVY_MODULES` it loaded.
+- `previous_install.py` — finds an earlier checkout install (#110) from the launcher in the
+  deployed match files (`deploy.deployed_launchers()`) and manifest, the uv tool receipt and a
+  path the user entered; never a disk scan, and a checkout's `.env` is only checked for
+  existence. A root counts only as `<root>/.venv/bin/prompt-workflow` (or
+  `.venv\Scripts\prompt-workflow.exe`) whose `pyproject.toml` names this project and that is
+  not the running `config._PROJECT_ROOT`. Gated (D-MIG-4): nothing in legacy mode or once
+  `config.toml` or the secret store exists; a manifest does not gate. Skipped roots live in
+  `user_data_dir()/previous-install.json` (damaged = empty). `shadow()` reports a different
+  `prompt-workflow` first on PATH. Doctor's `previous_install` check; off the trigger path.
 - `smoke.py` — `setup`'s smoke test: a `ThreadingHTTPServer` on 127.0.0.1:0 answering the
   OpenAI-compatible, Anthropic and Ollama shapes, and a child `python -m prompt_workflow.cli
   improve --provider <p>` whose env points every `*_BASE_URL` at it with a placeholder key (the
