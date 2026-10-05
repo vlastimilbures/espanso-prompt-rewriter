@@ -118,31 +118,35 @@ async def fill(app: ManageApp, pilot, **values: str) -> None:
     await press(app, pilot, "#submit")
 
 
-def _record(n=2):
-    target = HistoryStore(history.history_path())
-    for _ in range(n):
-        op = {
-            "id": history.new_operation_id(),
-            "origin": "espanso_managed",
-            "trigger_id": "-i-",
-            "kind": "improve",
-            "profile_id": "default",
-            "outcome": "ok",
-            "latency_ms": 1000.0,
-        }
-        attempt = {
-            "provider": "openrouter",
-            "requested_model": "google/gemini-3.5-flash-lite",
-            "endpoint": "remote",
-            "status": 200,
-            "latency_ms": 900.0,
-            "output": 30,
-            "input_uncached": 100,
-            "charged_amount": Decimal("0.0001"),
-            "charged_unit": "credits",
-        }
-        assert target.record(op, [attempt])
-    return target
+@pytest.fixture
+def record_ops(seed_history):
+    """record_ops(n) seeds n recorded -i- calls to OpenRouter."""
+
+    def record(n=2):
+        for _ in range(n):
+            op = {
+                "id": history.new_operation_id(),
+                "origin": "espanso_managed",
+                "trigger_id": "-i-",
+                "kind": "improve",
+                "profile_id": "default",
+                "outcome": "ok",
+                "latency_ms": 1000.0,
+            }
+            attempt = {
+                "provider": "openrouter",
+                "requested_model": "google/gemini-3.5-flash-lite",
+                "endpoint": "remote",
+                "status": 200,
+                "latency_ms": 900.0,
+                "output": 30,
+                "input_uncached": 100,
+                "charged_amount": Decimal("0.0001"),
+                "charged_unit": "credits",
+            }
+            seed_history(op, [attempt])
+
+    return record
 
 
 # --- app, keys, theme ---------------------------------------------------------------------
@@ -855,8 +859,8 @@ def test_triggers_without_a_launcher(monkeypatch):
 # --- History ------------------------------------------------------------------------------
 
 
-def test_history_stats_export_prune_reset(espanso, tmp_path):
-    _record()
+def test_history_stats_export_prune_reset(espanso, tmp_path, record_ops):
+    record_ops()
     out = tmp_path / "out.json"
 
     async def scenario(app, pilot):

@@ -198,3 +198,37 @@ def history_rows(monkeypatch):
             return [dict(r) for r in conn.execute(f"SELECT * FROM {table} ORDER BY {order}")]  # noqa: S608
 
     return read
+
+
+@pytest.fixture
+def seed_history(monkeypatch):
+    """Returns seed(operation, attempts=(), store=None), which writes one record to the
+    per-test usage history (or ``store``) and fails the test if it is dropped. Tests that only
+    need rows use it instead of asserting record() directly: the write runs with a budget no
+    runner exhausts (the real one, and even history_rows' 2 s, have dropped a write on a slow
+    Windows runner, #154), and a drop names the exception and the lost-write marker instead of
+    a bare ``assert False``. The budget tests in test_history.py assert record() themselves."""
+    import sys
+
+    from prompt_workflow import history
+
+    def seed(operation, attempts=(), store=None):
+        store = store or history.HistoryStore(history.history_path())
+        errors: list[BaseException | None] = []
+        mark_lost = store._mark_lost
+
+        def capture(*args, **kwargs):
+            errors.append(sys.exception())  # record() calls it inside its except block
+            return mark_lost(*args, **kwargs)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(history, "_BUDGET", 60.0)
+            patch.setattr(history, "_WRITE_BUDGET", 30.0)
+            patch.setattr(store, "_mark_lost", capture)
+            stored = store.record(operation, attempts)
+        if not stored:
+            marker = store.lost_path.read_text("utf-8") if store.lost_path.is_file() else None
+            pytest.fail(f"history write dropped: {errors!r}; {store.lost_path.name}: {marker}")
+        return store
+
+    return seed
