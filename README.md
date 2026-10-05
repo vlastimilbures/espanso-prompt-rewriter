@@ -807,9 +807,10 @@ prompt of v0.14.0 (unchanged since):
 - `-ip-` (pro tier): `openai/gpt-6-luna` on `openai`, effort `low`: 23/24 core and 98/99 edge
   runs passed, 5.6 s median and 9.2 s p95.
 
-Prices change quickly, so re-run it before relying on these numbers. The method, all result
-tables (with cost per rewrite), the older prompts' results and how to run it are in
-[docs/benchmark.md](docs/benchmark.md).
+These runs predate the bench's persona and "None"/`[REVIEW` checks and its `INPUTS`-free
+`kept` (#48), so a later run is not directly comparable. Prices change quickly, so re-run it before relying on these numbers.
+The method, all result tables (with cost per rewrite), the older prompts' results and how to
+run it are in [docs/benchmark.md](docs/benchmark.md).
 
 ## Troubleshooting
 

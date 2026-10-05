@@ -14,10 +14,24 @@ injection, questions, pasted emails, Czech, German and Spanish drafts, a draft s
 role, code, and outside readers that are only implied. Every response is scored mechanically:
 all six sections present and correctly closed, mandatory steps verbatim, `1/ 2/ 3/` numbering,
 both branch choices right, no leaked scaffolding or `[domain]` placeholder, the draft's language
-and role respected, `OUTPUTS` matching the deliverable, sentences from the start, middle
-and end of pasted material copied word for word into `INPUTS`, no third-person context, no
-degeneration. A `kept` column reports the share of the draft's specifics carried over, and `rep`
-how many rewrites had a `<CONTEXT>…</GOAL>` slip (seen on flash-lite), which the CLI repairs
+and role respected, the configured persona in `CONTEXT` (unless the draft states its own role;
+not scored on a `--persona none` run), `OUTPUTS` matching the deliverable, sentences from the
+start, middle and end of pasted material copied word for word into `INPUTS`, no `INPUTS` or
+`OUTPUTS` that opens with "None" and then asks for something with `[REVIEW: …]`, no
+third-person context, no degeneration. Each check's name starts with its kind: `struct:` (the
+template's form and fixed wordings, the same for every draft), `branch:` (the plan and review
+choice, scored only on drafts with a label, none where either variant is defensible, and
+only on rewrites that chose exactly one variant of that step; a missing or doubled variant is
+a `struct:` failure, never a branch pass) or `draft:` (what the draft's role, language,
+deliverable and pasted material call for, the configured persona, and how `INPUTS` and
+`OUTPUTS` are filled). Besides the overall `pass` column, the report gives each kind's
+pass rate over the runs scored on it, and the overall one again, with a Wilson 95% interval: at
+3 to 6 runs per draft the interval spans tens of points, and most failures are one branch
+choice on a few borderline drafts, so compare two runs per kind and against the intervals. A
+`kept` column reports the share of the draft's specifics carried over, found at the start of a
+word (an all-caps key only in capitals). It leaves `INPUTS` out unless the draft pastes
+material: otherwise `INPUTS` is often the draft quoted as is (a non-English draft's original),
+and a key found only there was not carried into the rewrite. `rep` counts how many rewrites had a `<CONTEXT>…</GOAL>` slip (seen on flash-lite), which the CLI repairs
 before pasting; those are scored on the repaired text. Cost and token counts come from
 OpenRouter's own usage data. Every HTTP attempt's reported cost counts against `--budget`,
 failed and retried ones included; an attempt that reports no cost is counted apart and never
@@ -36,6 +50,11 @@ problem rather than a model one. By default a run renders the same fictitious pe
 `PROMPT_PERSONA`. Every run writes `meta.json` (git commit, prompt hashes, persona mode) next to
 its outputs in `bench-out/<UTC timestamp>/`. `--persona env` renders your own persona instead;
 keep those outputs to yourself.
+
+Every result below was scored before the persona and "None"/`[REVIEW` checks and the
+`INPUTS`-free `kept` were added (#48, after 0.17.0), so it is not directly comparable with a
+later run: the new checks can only lower a pass count, and `kept` can only drop. Re-run both
+prompts with the same bench before comparing them.
 
 ## Results
 
@@ -77,8 +96,9 @@ The prompt before 0.11.0, scored with the same checks, reached 12/24 and 15/60 o
 21/24 and 43/60 on gpt-6-luna. Most of the gap is emails and code given the `.md` line, drafts
 in other languages answered in that language (gpt-6-luna even translated the fixed steps), and
 flash-lite not spotting a vendor, partner or customer as an outside reader. It had scored 24/24
-on the older `core` checks. In a blind pairwise comparison of 168 rewrite pairs (Opus judges,
-A/B order randomised), the 0.11.0 prompt was preferred 117 to 32 with 19 ties: 70 to 12 on
+on the older `core` checks. In a one-off blind pairwise comparison of 168 rewrite pairs (Opus
+judges, A/B order randomised), judged by hand: no judge prompt, pairing script or verdicts
+are in the repository, so it cannot be reproduced. The 0.11.0 prompt was preferred 117 to 32 with 19 ties: 70 to 12 on
 flash-lite, 47 to 20 on gpt-6-luna, and 28 to 3 on 6 drafts written after the prompt was frozen.
 
 ### Model choice: prompt of v0.10.0 (older `core` checks)

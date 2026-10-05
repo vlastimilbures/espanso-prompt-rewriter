@@ -60,7 +60,7 @@ def _assert_rewrite(returncode: int, out: str, draft) -> None:
     assert not out.endswith("\n")
     # Model quality varies run to run; the structural checks must hold regardless.
     structural = [
-        f for f in bench.check(out, draft.plan, draft.independent) if not f.startswith("wrong ")
+        f for f in bench.check(out, draft.plan, draft.independent) if not f.startswith("branch:")
     ]
     assert structural == [], out
 

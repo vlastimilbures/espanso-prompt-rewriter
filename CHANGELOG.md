@@ -78,6 +78,17 @@ All notable changes to this project are documented here. The format follows
   latency) and links there. Each results heading now names the release whose prompt it scored
   (the current table: the prompt of v0.14.0, unchanged since), and the README's
   example output says it came from v0.7.0 on `google/gemini-3.5-flash-lite`.
+- The bench (`scripts/bench_models.py`) reports what its pass rates measure (#48). Each check's
+  name starts with its kind (`struct:`, `branch:` or `draft:`), and below the unchanged `pass`
+  column the report gives each kind's pass rate, over the runs scored on it, and the overall
+  one with a Wilson 95% interval. Two new checks: the configured persona must be in `CONTEXT`
+  unless the draft states its own role (not scored on a `--persona none` run; #49), and an
+  `INPUTS` or `OUTPUTS` that opens with "None" must not then ask for something with
+  `[REVIEW: …]`. `kept` no longer counts a key found only in `INPUTS`, unless the draft pastes
+  material. So pass counts and `kept` from earlier runs are not directly comparable with new
+  ones (`docs/benchmark.md`). The bench's note on the drafts once held out now says they are no
+  longer held out, and the benchmark notes say the blind pairwise judgement of 0.11.0 was a
+  one-off by hand whose harness is not in the repository.
 
 ### Removed
 - The unshipped candidate prompts `docs/prompt-candidates/B.md` to `I2.md` (#41). They stay in
