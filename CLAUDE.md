@@ -21,8 +21,8 @@ prompt-workflow espanso status  # missing / in sync / stale / modified / foreign
 Users install the release wheel instead (`uv tool install <wheel> -c constraints.txt`, README
 "Install"), which reads no checkout `.env`; README "Updating"/"Uninstall" document `--force`
 and detach-before-uninstall. `tests/test_docs.py` checks every `prompt-workflow …` invocation
-in README and CHANGELOG Unreleased, and every standalone `--flag` span in README, against the
-Click tree.
+in README and in the CHANGELOG's Unreleased and newest release notes, and every standalone
+`--flag` span in README, against the Click tree.
 
 ## Architecture
 
