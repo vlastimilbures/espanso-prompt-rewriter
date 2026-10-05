@@ -215,8 +215,20 @@ shim), never a versioned path an upgrade would remove; `--launcher PATH` overrid
 
 ## Updating
 
-Install the new release over the old one, with its own `constraints.txt` (`--force` replaces
-the installed tool, an editable one included), then check the result:
+**Coming from a checkout** (the install scripts, an editable install)? The wheel never reads the
+checkout's `.env`, so move your settings first:
+
+1. Update the checkout (`git pull`) and re-run the install script (see
+   [Development](#development)), so the tool's venv gets the new dependencies.
+2. Run `prompt-workflow config migrate` to move the settings to `config.toml` and the key to
+   `secrets.toml`. Or move the `.env` to the config folder (`~/.config/prompt-workflow/.env`,
+   `%APPDATA%\prompt-workflow\.env` on Windows), where the wheel reads it too, or point
+   `PROMPT_WORKFLOW_ENV` at it (set for GUI apps, since Espanso does not inherit your shell).
+   A guided path is planned (#110).
+3. Continue below.
+
+Install the new release's wheel with its own `constraints.txt`. `--force` makes uv install over
+the tool already there (the install scripts pass it too). Then check the result:
 
 ```bash
 uv tool install --force \
@@ -229,27 +241,30 @@ Upgrading the CLI does not touch the match files Espanso holds. If `doctor` repo
 `stale` (for example `prompts-template.yml: stale`), run `prompt-workflow espanso deploy` to
 bring it up to date.
 
-**Coming from a checkout** (the install scripts, an editable install): the wheel never reads the
-checkout's `.env`. Before switching, run `prompt-workflow config migrate` from the editable
-install (0.16 or later) to move the settings to `config.toml` and the key to `secrets.toml`, or
-move the `.env` to the config folder (`~/.config/prompt-workflow/.env`,
-`%APPDATA%\prompt-workflow\.env` on Windows), where the wheel reads it too. A guided path is
-planned (#110).
-
 ## Uninstall
 
 Detach before you uninstall: once the CLI is gone, every trigger that calls it fails with
 Espanso's rendering error.
 
-1. `prompt-workflow espanso detach` removes the matches that call the CLI and keeps `-prompt-`
-   and `-risk-` as static snippets (`--keep-static`, the default); `--remove-all` removes every
-   file it deployed. A file you edited is kept and reported, and the `.bak-…` backups are never
-   deleted.
-2. Optionally, and only if you want them gone: `prompt-workflow history reset` deletes the
+1. `prompt-workflow espanso detach` removes the matches that call the CLI
+   (`prompts-llm.yml`, `prompts-template.yml`) and keeps `-prompt-` and `-risk-` as static
+   snippets (`--keep-static`, the default); `--remove-all` removes every file it deployed. The
+   `.bak-…` backups are never deleted.
+2. Check with `prompt-workflow espanso status` that neither `prompts-llm.yml` nor
+   `prompts-template.yml` is left (both should be `missing`). Detach removes only files on
+   record and unedited, so:
+   - if it said `Nothing to do` (the files came from an install script before 0.16, so there is
+     no record), run `prompt-workflow espanso deploy` first: it adopts unedited files any
+     release wrote, after which `detach` removes them;
+   - a file you edited (`modified` or `foreign`) is kept: delete it from Espanso's `match/`
+     folder by hand, or remove its CLI-calling matches.
+
+   Do not uninstall while one of these files is left.
+3. Optionally, and only if you want them gone: `prompt-workflow history reset` deletes the
    usage history, and `prompt-workflow secrets remove OPENROUTER_API_KEY` (or
    `ANTHROPIC_API_KEY`) deletes a saved key. The config folder (`config.toml`, `profiles/`,
    `backups/`) and the data folder stay until you delete them.
-3. `uv tool uninstall espanso-prompt-rewriter`.
+4. `uv tool uninstall espanso-prompt-rewriter`.
 
 If the CLI is already broken or gone, install it again (see [Install](#install)), then detach.
 Or clean up by hand: `espanso-manifest.json` in the data folder lists each deployed file as
@@ -767,7 +782,7 @@ uv run python scripts/bench_models.py --profile general --suite all       # the 
 |---------|-----|
 | Trigger does not expand right after a letter, digit, `-` or `=`, or in a field you emptied with the keyboard | Triggers only fire at the start of a word, judged by what you last typed. Type a space first, or click into the field. |
 | Trigger does not expand | Run `espanso status`, then `prompt-workflow espanso status`, then `prompt-workflow espanso deploy`. |
-| `[Espanso]: An error occurred during rendering` | The CLI the matches call is gone or broken: the checkout of an editable install was moved or deleted, or the tool was uninstalled without `espanso detach`. `prompt-workflow doctor` (once a CLI runs again) reports `launcher: the deployed matches call …, which is gone`. Install it again (see [Install](#install)), then run `prompt-workflow espanso deploy`, or `espanso detach` to remove the triggers. |
+| `[Espanso]: An error occurred during rendering` | The CLI the matches call is gone or broken: the checkout of an editable install was moved or deleted, or the tool was uninstalled without `prompt-workflow espanso detach`. `prompt-workflow doctor` (once a CLI runs again) reports `launcher: the deployed matches call …, which is gone`. Install it again (see [Install](#install)), then run `prompt-workflow espanso deploy`, or `prompt-workflow espanso detach` to remove the triggers. |
 | `doctor` reports `launcher: the deployed matches call …, this install is …` | Launcher drift: the matches call another install of the CLI than the one you just ran (say, an old checkout after switching to a release wheel). Run `prompt-workflow espanso deploy` from the install you want the triggers to use. |
 | `doctor` reports `prompts-template.yml: stale` (or another match file) | The deployed match files are from an older version, so `-p-` and the `-if-` lists differ from the CLI. Run `prompt-workflow espanso deploy`. |
 | Not sure what is wrong | `prompt-workflow doctor` checks the install, settings, keys, Espanso, the match files and the history; `prompt-workflow config validate` checks the settings alone. |

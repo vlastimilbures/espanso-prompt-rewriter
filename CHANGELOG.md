@@ -7,14 +7,14 @@ All notable changes to this project are documented here. The format follows
 ## Unreleased
 
 Upgrading from the install scripts to a release wheel: the wheel never reads the checkout's
-`.env` (only an editable install looks for one in the repository it was installed from). Before
-you switch from the install scripts to the wheel, run `prompt-workflow config migrate` from the
-editable install (this version) to move your settings to `config.toml` and your key to
-`secrets.toml`, or move the `.env` to the config folder (`~/.config/prompt-workflow/.env`,
-`%APPDATA%\prompt-workflow\.env` on Windows), or keep it where it is and point
-`PROMPT_WORKFLOW_ENV` at it (set for GUI apps, since Espanso does not inherit your shell). A
-guided path is planned (#110). Then install the wheel with `uv tool install --force`, and run
-`prompt-workflow espanso deploy` so the matches call it.
+`.env` (only an editable install looks for one in the repository it was installed from). In
+order: update the checkout (`git pull`) and re-run the install script, so the tool's venv gets
+the new dependencies; run `prompt-workflow config migrate` (or move the `.env` to the config
+folder, `~/.config/prompt-workflow/.env` or `%APPDATA%\prompt-workflow\.env` on Windows, or
+point `PROMPT_WORKFLOW_ENV` at it, set for GUI apps since Espanso does not inherit your shell);
+then `uv tool install --force <wheel> -c constraints.txt`, `prompt-workflow doctor`, and
+`prompt-workflow espanso deploy` if it reports a stale match file. A guided path is planned
+(#110).
 
 ### Added
 - A full-screen interface for setting up and managing prompt-workflow (#93, #64): run
@@ -167,13 +167,15 @@ guided path is planned (#110). Then install the wheel with `uv tool install --fo
   scripts moved to Development as the contributor path (#96). New sections: First run (the
   interface, `setup`, `setup --non-interactive --api-key-stdin --deploy`), Updating (install
   the new wheel with `--force`, then `doctor` and `espanso deploy` for stale match files, #28)
-  and Uninstall (`espanso detach` first, then optionally `history reset` and `secrets remove`,
-  then `uv tool uninstall espanso-prompt-rewriter`; a broken launcher is reinstalled first or
+  and Uninstall (`espanso detach` first, `espanso status` to check no CLI-calling file is left,
+  then optionally `history reset` and `secrets remove`, then `uv tool uninstall
+  espanso-prompt-rewriter`; a broken launcher is reinstalled first or
   cleaned up from the deploy manifest, #38). The usage history gains its export, prune and reset
   commands, `stats` its caveats (credits are not USD, BYOK upstream costs stay out of the totals,
   unknown is not 0), Configuration the `config migrate`/`rollback` commands and legacy mode,
   and Troubleshooting rows for launcher drift, stale match files and Espanso's rendering error.
-  A test checks every `prompt-workflow` command and option the README names against the CLI.
+  A test checks every `prompt-workflow …` invocation in the README and these notes, and every
+  standalone option the README names, against the CLI.
 
 ### Security
 - A clipboard item that a password manager marked as concealed is refused before it is read,
