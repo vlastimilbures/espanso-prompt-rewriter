@@ -607,8 +607,10 @@ def test_stats_text_states_the_caveats_and_the_history(monkeypatch):
     assert "reported 0.0002 credits" in result.stdout
 
 
-def test_stats_help_states_the_caveats():
-    out = " ".join(_run("stats", "--help").stdout.split())
+def test_stats_help_states_the_caveats(monkeypatch):
+    # Help panels wrap at the terminal width, which differs on CI runners (Windows too).
+    monkeypatch.setenv("COLUMNS", "400")
+    out = " ".join(re.sub(r"\x1b\[[0-9;]*m|[│╭╮╰╯─]", " ", _run("stats", "--help").stdout).split())
     assert "not provider billing" in out
     assert "rendered does not mean pasted" in out
     assert "ignore PROMPT_PROVIDER" in out
