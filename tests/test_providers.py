@@ -731,8 +731,9 @@ def test_retry_fits_the_time_limit(fake_http):
     assert _remote(timeout=30).generate("d", "s") == "ok"
     first, second = (kwargs["timeout"] for kwargs in fake_http.client_kwargs[1:])
     assert first == httpx.Timeout(30, connect=10)
-    # The wait comes off the budget; Windows' coarse clock may see no other time pass.
-    assert second.read <= 29
+    # The wait comes off the budget; Windows' coarse clock may see no other time pass, and
+    # adding back the observer's time (#87) can leave a float rounding error.
+    assert second.read <= 29 + 1e-6
 
 
 @contextmanager

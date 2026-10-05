@@ -1,0 +1,242 @@
+name: release
+# Builds the sdist, the wheel and constraints.txt (the runtime pins from uv.lock), installs the
+# wheel with those pins into a clean venv on every OS, then attests the files and creates the
+# annotated tag v<version> and a GitHub Release with that version's CHANGELOG notes.
+#
+# A release happens only for the current head of main, when its pyproject version has no
+# published Release yet:
+# - manual dispatch with dry-run unticked (dry-run is the default: it builds and tests, nothing more);
+# - a push to main, only while the repository variable RELEASE_ON_PUSH is "true", so merging
+#   a branch never releases by surprise.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: "Build and test the artifacts only: no attestation, tag or Release"
+        type: boolean
+        default: true
+permissions: {}
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      build: ${{ steps.plan.outputs.build }}
+      release: ${{ steps.plan.outputs.release }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Decide whether to release
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          DRY_RUN: ${{ inputs.dry-run }}
+          RELEASE_ON_PUSH: ${{ vars.RELEASE_ON_PUSH }}
+        run: |
+          # Fails unless the newest CHANGELOG section is the pyproject version, dated.
+          version=$(python3 scripts/release_notes.py version)
+          tag="v$version"
+          # A draft is invisible to this read-only token; the release job picks it up again.
+          if published=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft \
+              --jq '.isDraft | not' 2> "$RUNNER_TEMP/err"); then :
+          elif grep -q "release not found" "$RUNNER_TEMP/err"; then published=false
+          else cat "$RUNNER_TEMP/err" >&2; exit 1
+          fi
+          head=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
+          build=false
+          release=false
+          if [ "$EVENT" = workflow_dispatch ]; then build=true; fi
+          if [ "$published" = true ]; then
+            echo "::notice::$tag is already released; nothing to release."
+          elif [ "$GITHUB_REF" != refs/heads/main ] || [ "$GITHUB_SHA" != "$head" ]; then
+            echo "::notice::$tag is released only from the head of main ($head), not $GITHUB_REF at $GITHUB_SHA."
+          elif [ "$EVENT" = workflow_dispatch ] && [ "$DRY_RUN" = true ]; then
+            echo "::notice::Dry run: $tag is built and tested, not released."
+          elif [ "$EVENT" = workflow_dispatch ]; then
+            release=true
+          elif [ "$EVENT" = push ] && [ "$RELEASE_ON_PUSH" = true ]; then
+            build=true
+            release=true
+          else
+            echo "::notice::$tag is not released yet: run the release workflow with dry-run unticked."
+          fi
+          {
+            echo "version=$version"
+            echo "build=$build"
+            echo "release=$release"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      # No cache in a workflow that publishes: a poisoned cache could reach the artifacts.
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          python-version: "3.12"
+          enable-cache: false
+      - name: Build sdist, wheel and constraints
+        run: |
+          uv build --out-dir dist
+          uv export --frozen --no-dev --no-emit-project --no-hashes --output-file dist/constraints.txt
+      - name: Upload the artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  # The wheel goes into a clean venv outside the checkout, pinned by the constraints.txt being
+  # released, so the check covers what a user installs (see the wheel job in test.yml).
+  test-artifacts:
+    needs: [plan, build]
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.12", "3.14"]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: false
+      - name: Download the artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: dist
+          path: ${{ runner.temp }}/dist
+      - name: Install the wheel with the constraints into a clean venv and check it
+        working-directory: ${{ runner.temp }}
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+          PYTHON_VERSION: ${{ matrix.python-version }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $dist = Join-Path $env:RUNNER_TEMP "dist"
+          $wheel = (Get-ChildItem "$dist/*.whl" | Select-Object -First 1).FullName
+          $constraints = Join-Path $dist "constraints.txt"
+          $venv = Join-Path $env:RUNNER_TEMP "wheel-venv"
+          uv venv --python $env:PYTHON_VERSION $venv
+          uv pip install --python $venv $wheel -c $constraints
+          $python = if ($IsWindows) { "$venv/Scripts/python.exe" } else { "$venv/bin/python" }
+          $cli = if ($IsWindows) { "$venv/Scripts/prompt-workflow.exe" } else { "$venv/bin/prompt-workflow" }
+          $installed = & $cli --version
+          if ($installed -ne $env:VERSION) { throw "installed $installed, expected $env:VERSION" }
+          & $python "$env:GITHUB_WORKSPACE/scripts/check_wheel.py" --repo $env:GITHUB_WORKSPACE --wheel $wheel --constraints $constraints
+
+  release:
+    needs: [plan, build, test-artifacts]
+    if: needs.plan.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # One release at a time, never cancelled half way between the tag and the Release.
+    concurrency:
+      group: release
+      cancel-in-progress: false
+    # The only job that can write: the tag, the Release and the attestations.
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download the artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: dist
+          path: dist
+      - name: Attest build provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6  # v4.2.2
+        with:
+          subject-path: dist/*
+      # The tag is made through the API, so no git credentials are stored in the checkout.
+      # The Release starts as a draft and is published once every file is attached: with
+      # immutable releases enabled in the repository, publishing is what locks it. A run that
+      # failed half way can be re-run: an annotated tag already on this commit and a draft
+      # Release are reused.
+      - name: Create the annotated tag and the Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          tag="v$VERSION"
+          repo="$GITHUB_REPOSITORY"
+          head=$(gh api "repos/$repo/commits/main" --jq .sha)
+          if [ "$GITHUB_SHA" != "$head" ]; then
+            echo "::error::main moved on to $head while $GITHUB_SHA was tested; not releasing."
+            exit 1
+          fi
+          python3 scripts/release_notes.py notes > "$RUNNER_TEMP/notes.md"
+
+          ref=$(gh api "repos/$repo/git/matching-refs/tags/$tag" \
+            --jq "map(select(.ref == \"refs/tags/$tag\")) | .[0] // empty | .object.type + \" \" + .object.sha")
+          if [ -z "$ref" ]; then
+            tag_sha=$(gh api "repos/$repo/git/tags" -f tag="$tag" -f message="Release $VERSION" \
+              -f object="$GITHUB_SHA" -f type=commit --jq .sha)
+            gh api "repos/$repo/git/refs" -f ref="refs/tags/$tag" -f sha="$tag_sha" > /dev/null
+          else
+            read -r type sha <<< "$ref"
+            target=""
+            if [ "$type" = tag ]; then target=$(gh api "repos/$repo/git/tags/$sha" --jq .object.sha); fi
+            if [ "$target" != "$GITHUB_SHA" ]; then
+              echo "::error::$tag already exists as a $type ($sha), not an annotated tag of $GITHUB_SHA."
+              exit 1
+            fi
+            echo "::notice::Reusing the annotated tag $tag."
+          fi
+
+          if draft=$(gh release view "$tag" --repo "$repo" --json isDraft --jq .isDraft 2> "$RUNNER_TEMP/err"); then :
+          elif grep -q "release not found" "$RUNNER_TEMP/err"; then draft=none
+          else cat "$RUNNER_TEMP/err" >&2; exit 1
+          fi
+          case "$draft" in
+            none)
+              gh release create "$tag" --repo "$repo" --verify-tag --draft \
+                --title "$tag" --notes-file "$RUNNER_TEMP/notes.md" dist/* ;;
+            true)
+              echo "::notice::Reusing the draft Release $tag."
+              gh release edit "$tag" --repo "$repo" --title "$tag" --notes-file "$RUNNER_TEMP/notes.md"
+              gh release upload "$tag" --repo "$repo" --clobber dist/* ;;
+            *)
+              echo "::error::$tag is already published."
+              exit 1 ;;
+          esac
+
+          # Latest only if no published Release has a higher version.
+          newest=$( { gh release list --repo "$repo" --exclude-drafts --limit 1000 \
+            --json tagName --jq '.[].tagName'; echo "$tag"; } | sort -V | tail -n 1)
+          latest=false
+          if [ "$newest" = "$tag" ]; then latest=true; fi
+          gh release edit "$tag" --repo "$repo" --draft=false --latest="$latest"

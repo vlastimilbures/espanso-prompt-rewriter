@@ -19,6 +19,11 @@ def _block_message(findings: list[str], hard: list[str], allow_flagged: bool, na
     return message + f"Remove it, or use {local}."
 
 
+class GateBlocked(ProviderError):
+    """A data-protection refusal: the gate's scan, PROMPT_LOCAL_ONLY or a cloud base URL that
+    is not https (factory.py). The usage history records each as ``gate_blocked``."""
+
+
 class GatedProvider:
     """Wraps a provider that can send the draft off this machine and refuses to transmit
     sensitive drafts. factory.make_provider() applies it, so no code path can skip it.
@@ -49,6 +54,6 @@ class GatedProvider:
             hard = [f for f in findings if f not in SOFT_FINDINGS]
             if hard or not self._allow_flagged:
                 message = _block_message(findings, hard, self._allow_flagged, self._name)
-                raise ProviderError(message)
+                raise GateBlocked(message)
             self.sent_despite = tuple(findings)
         return self._inner.generate(prompt, system_prompt)

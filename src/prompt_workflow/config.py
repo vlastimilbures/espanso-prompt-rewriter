@@ -3,11 +3,13 @@ from __future__ import annotations
 import math
 import os
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 from typing import Any
 
+from . import config_files
+from .config_files import CONFIG_VERSION, VERSION_KEY, ConfigFileError, SecretStoreError
 from .redaction import safe_repr
 
 
@@ -26,26 +28,61 @@ def _parse_value(raw: str) -> str:
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
-def _user_config_dir() -> Path:
+def _user_config_dir(environ: Mapping[str, str] = os.environ) -> Path:
     if os.name == "nt":
-        return Path(os.getenv("APPDATA") or Path.home() / "AppData" / "Roaming") / "prompt-workflow"
-    return Path(os.getenv("XDG_CONFIG_HOME") or Path.home() / ".config") / "prompt-workflow"
+        appdata = environ.get("APPDATA")
+        return Path(appdata or Path.home() / "AppData" / "Roaming") / "prompt-workflow"
+    return Path(environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "prompt-workflow"
 
 
-def _env_file_candidates() -> list[Path]:
+def user_data_dir(environ: Mapping[str, str] = os.environ) -> Path:
+    """Per-device data (the usage history): never roamed or synced with the settings, since
+    it describes this machine's calls. %LOCALAPPDATA% on Windows, $XDG_DATA_HOME or
+    ~/.local/share elsewhere."""
+    if os.name == "nt":
+        local = environ.get("LOCALAPPDATA")
+        return Path(local or Path.home() / "AppData" / "Local") / "prompt-workflow"
+    return (
+        Path(environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share") / "prompt-workflow"
+    )
+
+
+def settings_file(environ: Mapping[str, str] = os.environ) -> Path:
+    """The user TOML settings file (non-secret settings): once it exists it is the saved
+    source, and no .env is read (unless PROMPT_WORKFLOW_ENV names one)."""
+    return _user_config_dir(environ) / config_files.SETTINGS_FILE
+
+
+def _env_file_candidates(environ: Mapping[str, str] = os.environ) -> list[Path]:
     """Where .env may live, in priority order.
 
     Deliberately never the current directory or its parents: running the CLI inside an
     untrusted checkout must not let a planted .env redirect OPENROUTER_BASE_URL (and so the
     API key) or switch on ALLOW_CLOUD_OVERRIDE.
     """
-    explicit = os.getenv("PROMPT_WORKFLOW_ENV")
+    explicit = environ.get("PROMPT_WORKFLOW_ENV")
     if explicit:
         return [Path(explicit).expanduser()]
-    candidates = [_user_config_dir() / ".env"]
+    candidates = [_user_config_dir(environ) / ".env"]
     if (_PROJECT_ROOT / "pyproject.toml").is_file():
         candidates.insert(0, _PROJECT_ROOT / ".env")
     return candidates
+
+
+def _parse_env_text(text: str) -> tuple[dict[str, str], list[int]]:
+    """KEY=VALUE pairs of .env text, and the numbers of the lines skipped for lacking `=`."""
+    pairs = {}
+    skipped = []
+    for number, raw in enumerate(text.splitlines(), start=1):
+        line = raw.strip().removeprefix("export ")
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            skipped.append(number)
+            continue
+        key, _, value = line.partition("=")
+        pairs[key.strip()] = _parse_value(value)
+    return pairs, skipped
 
 
 def read_env_file(path: Path) -> dict[str, str] | None:
@@ -54,68 +91,160 @@ def read_env_file(path: Path) -> dict[str, str] | None:
         raw_text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return None
-    pairs = {}
-    for raw in raw_text.splitlines():
-        line = raw.strip().removeprefix("export ")
-        if not line or line.startswith("#") or "=" not in line:
+    return _parse_env_text(raw_text)[0]
+
+
+def _find_env_file(
+    environ: Mapping[str, str], note: Callable[[str, str], None]
+) -> tuple[Path, dict[str, str]] | None:
+    """The first readable .env candidate and its pairs, or None when there is none. A
+    candidate that exists but cannot be read is skipped, as is a line without `=`; each is
+    passed to ``note`` (by line number, never content)."""
+    for candidate in _env_file_candidates(environ):
+        source = f"file:{candidate}"
+        try:
+            raw_text = candidate.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            note(source, ".env is not UTF-8 text; it was skipped")
             continue
-        key, _, value = line.partition("=")
-        pairs[key.strip()] = _parse_value(value)
-    return pairs
+        except OSError:
+            if config_files.lexists(candidate):
+                note(source, ".env cannot be read; it was skipped")
+            continue
+        pairs, skipped = _parse_env_text(raw_text)
+        for number in skipped:
+            note(source, f"line {number} of .env has no '=' and was ignored")
+        return candidate, pairs
+    return None
 
 
-def _load_dotenv() -> None:
-    """Load the first readable .env found, without overriding existing env.
+def _saved_layer(
+    path: Path,
+    fail: Callable[[str, str], None],
+    note: Callable[[str, str], None],
+) -> Layer | None:
+    """The settings in config.toml, or None when it does not exist. A file that exists but
+    cannot be parsed still returns a layer (an empty one), so saved mode stays on and a .env
+    never steps in for a broken config.toml."""
+    source = f"file:{path}"
+    name = config_files.SETTINGS_FILE
+    try:
+        loaded = config_files.load_toml(path)
+    except ConfigFileError as exc:
+        fail(source, str(exc))
+        return Layer(source, {})
+    if loaded is None:
+        if config_files.lexists(path):
+            note(source, f"{name} is not a file; it was ignored")
+        return None
+    table = loaded[0]
+    version = table.get(VERSION_KEY, CONFIG_VERSION)
+    if not isinstance(version, int) or isinstance(version, bool) or version < 1:
+        fail(source, f"{VERSION_KEY} in {name} must be a whole number above 0")
+    elif version > CONFIG_VERSION:
+        note(
+            source,
+            f"{name} has {VERSION_KEY} {version}, newer than this version reads "
+            f"({CONFIG_VERSION}); it is read-only here",
+        )
+    known, secrets = env_names(), secret_names()
+    values = {}
+    for key, value in table.items():
+        if key == VERSION_KEY:
+            continue
+        if key not in known:
+            note(source, f"{safe_repr(key)} in {name} is not a setting; it was ignored")
+            continue
+        text = config_files.scalar_text(value)
+        if text is None:
+            fail(source, f"{key} in {name} must be text, a number or true/false")
+            continue
+        if key in secrets:
+            note(source, f"{key} is a secret; move it from {name} to the secret store")
+        values[key] = text
+    return Layer(source, values)
 
-    This is intentionally dependency-free so it works even when GUI-launched
-    Espanso does not inherit the interactive shell environment. Only the settings this
-    package reads are exported: any other key (HTTP_PROXY, SSL_CERT_FILE, ...) would
-    change how httpx connects, which is not what a settings file is for.
-    """
-    known = set(env_names())
-    for candidate in _env_file_candidates():
-        pairs = read_env_file(candidate)
-        if pairs is not None:
-            _reject_merged_lines(pairs)
-            for key, value in pairs.items():
-                if key in known:
-                    os.environ.setdefault(key, value)
-            return
+
+def _secrets_layer(
+    directory: Path,
+    strict: bool,
+    fail: Callable[[str, str], None],
+    note: Callable[[str, str], None],
+) -> Layer | None:
+    """The API keys in the secret store, or None when it holds none. A store that fails
+    fails the settings: there is no fallback to another store."""
+    store = config_files.secret_store(directory)
+    try:
+        values = store.read()
+    except SecretStoreError as exc:
+        fail(store.source, str(exc))
+        return None
+    path = getattr(store, "path", None)
+    if not strict and path and config_files.lexists(path) and not config_files.is_file(path):
+        note(store.source, f"{path.name} is not a file; it was ignored")
+    if not values:
+        return None
+    secrets = secret_names()
+    for key in values:
+        if key not in secrets:
+            note(store.source, f"{safe_repr(key)} is not a secret setting; it was ignored")
+    exposed = getattr(store, "exposed", None)
+    if not strict and exposed is not None and exposed():
+        note(store.source, "the secrets file can be read by other users; make it private (600)")
+    return Layer(store.source, {k: v for k, v in values.items() if k in secrets})
 
 
-def _reject_merged_lines(pairs: dict[str, str]) -> None:
-    """Refuse a value that holds another assignment (a setting name in any case, or any
+def _merged_lines(pairs: Mapping[str, str]) -> list[str]:
+    """Keys whose value holds another assignment (a setting name in any case, or any
     `UPPER_CASE` name, then `=`): a .env saved without the newline between two lines, whose
     rest would otherwise become part of this setting's value. PROMPT_EXTRA_PATTERNS is
     exempt, since a user regex may well match such text."""
-    names = env_names()
-    known = "|".join(re.escape(name) for name in names)
+    known = "|".join(re.escape(name) for name in env_names())
     assignment = re.compile(rf"(?:(?i:{known})|[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)\s*=")
-    for key, value in pairs.items():
-        if key != "PROMPT_EXTRA_PATTERNS" and assignment.search(value):
-            shown = key if key in names else safe_repr(key)
-            raise ValueError(f"{shown} in .env runs into the next line; add the missing newline")
+    return [
+        key
+        for key, value in pairs.items()
+        if key != "PROMPT_EXTRA_PATTERNS" and assignment.search(value)
+    ]
+
+
+def _merged_line_error(key: str) -> str:
+    # An unknown key is shown only through safe_repr: a key line merged in front of it
+    # would otherwise be repeated.
+    shown = key if key in env_names() else safe_repr(key)
+    return f"{shown} in .env runs into the next line; add the missing newline"
+
+
+def _parse_setting(name: str, parse: Callable[[str], Any], raw: str) -> Any:
+    try:
+        return parse(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be {exc}, got {safe_repr(raw)}") from None
 
 
 def _env(
     name: str, default: str, parse: Callable[[str], Any] = str, *, secret: bool = False
 ) -> Any:
-    """A dataclass field read from env var `name` when Settings() is instantiated. A
-    ``secret`` stays out of repr(), so a traceback or test failure cannot print it."""
+    """A dataclass field read from env var `name` when Settings() is instantiated (no .env:
+    Settings.load() builds from ConfigLayers instead). A ``secret`` stays out of repr(), so
+    a traceback or test failure cannot print it."""
 
     def read() -> Any:
-        raw = os.getenv(name, default)
-        try:
-            return parse(raw)
-        except ValueError as exc:
-            raise ValueError(f"{name} must be {exc}, got {safe_repr(raw)}") from None
+        return _parse_setting(name, parse, os.getenv(name, default))
 
-    return field(default_factory=read, repr=not secret, metadata={"env": name})
+    metadata = {"env": name, "default": default, "parse": parse, "secret": secret}
+    return field(default_factory=read, repr=not secret, metadata=metadata)
 
 
 def env_names() -> tuple[str, ...]:
     """Every environment variable Settings reads, in field order."""
     return tuple(f.metadata["env"] for f in fields(Settings))
+
+
+def secret_names() -> tuple[str, ...]:
+    """The settings that hold a secret (API keys): saved only in the secret store, never in
+    config.toml, and kept out of repr()."""
+    return tuple(f.metadata["env"] for f in fields(Settings) if f.metadata["secret"])
 
 
 # Parsers raise ValueError(what the value must be); _env and _override name the setting.
@@ -146,6 +275,23 @@ def _number(
 _positive_int = _number(int, "a whole number above 0", lambda v: v > 0)
 _positive_float = _number(float, "a number above 0", lambda v: v > 0)
 _non_negative_float = _number(float, "a number of 0 or more", lambda v: v >= 0)
+# Longest usage-history retention, 100 years: a longer one overflows the date arithmetic.
+MAX_RETENTION_DAYS = 36500
+_retention_days = _number(
+    int, f"a whole number from 1 to {MAX_RETENTION_DAYS}", lambda v: 0 < v <= MAX_RETENTION_DAYS
+)
+
+
+def _builtin_profiles(raw: str) -> tuple[str, ...]:
+    """A comma-separated list of built-in profile names, duplicates dropped."""
+    names = tuple(dict.fromkeys(name.strip() for name in raw.split(",") if name.strip()))
+    if not names:
+        return ()
+    from .prompt_builder import PROFILES  # deferred: prompt_builder imports this module
+
+    if any(name not in PROFILES for name in names):
+        raise ValueError(f"empty or a comma-separated list of {', '.join(PROFILES)}")
+    return names
 
 
 TIERS = ("standard", "pro")
@@ -231,6 +377,9 @@ class Settings:
     # Profile for the pro tier; empty (the default) uses PROMPT_PROFILE, so both tiers send
     # the same prompt. An escape hatch for a prompt tuned to OPENROUTER_PRO_MODEL.
     pro_profile: str = _env("PROMPT_PRO_PROFILE", "")
+    # Built-in profiles that a same-named file in the user profile directory replaces
+    # (prompt_builder.user_profiles_dir()). Empty: such a file is ignored, never a silent swap.
+    profile_overrides: tuple[str, ...] = _env("PROMPT_PROFILE_OVERRIDES", "", _builtin_profiles)
     lmstudio_base_url: str = _env("LMSTUDIO_BASE_URL", "http://localhost:1234/v1")
     lmstudio_model: str = _env("LMSTUDIO_MODEL", "local-model")
     anthropic_base_url: str = _env("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
@@ -244,12 +393,18 @@ class Settings:
     # Extra `;`-separated regexes the data-protection gate blocks on, e.g. internal project
     # code names or customer-ID formats. Compiled by redaction.compile_extra().
     extra_patterns: str = _env("PROMPT_EXTRA_PATTERNS", "")
+    # Local usage history (history.py): metadata only, never prompt, clipboard, output,
+    # persona or key text, kept in user_data_dir() on this device. false records nothing.
+    history: bool = _env("PROMPT_HISTORY", "true", _bool)
+    # Days a history record is kept; HistoryStore.prune() deletes older ones.
+    history_retention_days: int = _env("PROMPT_HISTORY_RETENTION_DAYS", "365", _retention_days)
 
     @classmethod
     def load(cls) -> Settings:
-        """Load .env (without overriding real env) then build settings."""
-        _load_dotenv()
-        return cls()
+        """Settings from ConfigLayers.resolve(): default < config.toml or .env < secret store
+        < real environment. Each call reads the files again, and os.environ is never
+        written."""
+        return ConfigLayers.resolve().settings()
 
     def for_tier(self, tier: str) -> Settings:
         """Settings for a quality tier: `standard` as-is, `pro` with the OPENROUTER_PRO_*
@@ -318,3 +473,144 @@ class Settings:
         if seconds is not None:
             changes["timeout"] = seconds
         return replace(self, **changes) if changes else self
+
+
+# Provenance of a setting value: a built-in default, a settings file (`file:<path>`: a .env,
+# config.toml or secrets.toml) or the real environment.
+DEFAULT_SOURCE = "default"
+ENV_SOURCE = "env"
+
+
+@dataclass(frozen=True)
+class Layer:
+    """One source of setting values, as unparsed strings, keyed by env var name."""
+
+    source: str
+    values: Mapping[str, str] = field(repr=False)
+
+
+@dataclass(frozen=True)
+class Entry:
+    """A setting's effective value and the layer it came from. ``shadows`` lists the other
+    layers (not the default) that also set it and lost, e.g. a .env value overridden by a
+    real environment variable. ``rejected`` lists the higher layers whose value repair mode
+    refused (see ConfigLayers.findings), so the value fell back to this one."""
+
+    value: str = field(repr=False)  # may be an API key
+    source: str
+    shadows: tuple[str, ...] = ()
+    rejected: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class Finding:
+    """A problem repair mode skipped instead of raising; ``message`` is strict mode's error."""
+
+    source: str
+    message: str
+
+
+@dataclass(frozen=True)
+class ConfigLayers:
+    """The layers that make up the settings, lowest precedence first, and the effective
+    value of every setting in env_names().
+
+    A pure merge: building it reads the environment mapping and the .env file but never
+    writes os.environ, so a second resolve sees an edited file and child processes inherit
+    nothing from it.
+    """
+
+    layers: tuple[Layer, ...]
+    entries: Mapping[str, Entry]
+    findings: tuple[Finding, ...] = ()
+
+    @classmethod
+    def resolve(
+        cls, environ: Mapping[str, str] | None = None, *, strict: bool = True
+    ) -> ConfigLayers:
+        """Merge default < saved settings < secret store < ``environ`` (os.environ by default).
+
+        The saved settings are, in order of preference: the .env named by PROMPT_WORKFLOW_ENV
+        (legacy mode: that file alone, no config.toml or secret store, exactly as before);
+        config.toml in the user config dir once it exists (a .env elsewhere is then ignored,
+        so it can never shadow a saved value); else the first readable .env candidate. The
+        secret store (secrets.toml) is read outside legacy mode.
+
+        Only env_names() keys are taken from either source: any other key (HTTP_PROXY,
+        SSL_CERT_FILE, ...) would change how httpx connects, which is not what a settings
+        file is for. Strict mode (``improve``, ``persona``) raises the first problem as a
+        ValueError. Repair mode records each as a Finding instead and falls back to the next
+        lower layer, so management commands still run on a broken config. Repair mode also
+        notes what strict mode skips silently: a .env that exists but cannot be read, and a
+        line without `=` (by number, never its text).
+        """
+        environ = os.environ if environ is None else environ
+        findings: list[Finding] = []
+
+        def note(source: str, message: str) -> None:
+            # Repair mode only: strict mode has always skipped these silently.
+            if not strict:
+                findings.append(Finding(source, message))
+
+        def fail(source: str, message: str) -> None:
+            if strict:
+                raise ValueError(message)
+            findings.append(Finding(source, message))
+
+        known = env_names()
+        defaults = {f.metadata["env"]: f.metadata["default"] for f in fields(Settings)}
+        layers = [Layer(DEFAULT_SOURCE, defaults)]
+        legacy = bool(environ.get("PROMPT_WORKFLOW_ENV"))
+        saved = None if legacy else _saved_layer(settings_file(environ), fail, note)
+        if saved is not None:
+            layers.append(saved)
+            if not strict:
+                for candidate in _env_file_candidates(environ):
+                    if config_files.is_file(candidate):
+                        note(
+                            f"file:{candidate}",
+                            f".env is ignored: settings are saved in {config_files.SETTINGS_FILE}",
+                        )
+        elif (found := _find_env_file(environ, note)) is not None:
+            path, pairs = found
+            source = f"file:{path}"
+            merged = _merged_lines(pairs)
+            for key in merged:
+                fail(source, _merged_line_error(key))
+            values = {k: v for k, v in pairs.items() if k in known and k not in merged}
+            layers.append(Layer(source, values))
+        if not legacy and (
+            secrets := _secrets_layer(_user_config_dir(environ), strict, fail, note)
+        ):
+            layers.append(secrets)
+        layers.append(Layer(ENV_SOURCE, {k: environ[k] for k in known if k in environ}))
+
+        entries: dict[str, Entry] = {}
+        for f in fields(Settings):
+            name = f.metadata["env"]
+            setters = [layer for layer in reversed(layers) if name in layer.values]
+            rejected: list[str] = []
+            for index, layer in enumerate(setters):
+                raw = layer.values[name]
+                try:
+                    _parse_setting(name, f.metadata["parse"], raw)
+                except ValueError as exc:
+                    fail(layer.source, str(exc))
+                    rejected.append(layer.source)
+                    continue
+                lost = setters[index + 1 :]
+                shadows = tuple(s.source for s in lost if s.source != DEFAULT_SOURCE)
+                entries[name] = Entry(raw, layer.source, shadows, tuple(rejected))
+                break
+        return cls(tuple(layers), entries, tuple(findings))
+
+    def settings(self) -> Settings:
+        """Settings built from the effective values."""
+        return Settings(
+            **{
+                f.name: _parse_setting(
+                    f.metadata["env"], f.metadata["parse"], self.entries[f.metadata["env"]].value
+                )
+                for f in fields(Settings)
+            }
+        )

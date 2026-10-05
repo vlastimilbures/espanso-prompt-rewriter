@@ -20,6 +20,10 @@ uv sync                  # the project plus its dev tools
 uv run pre-commit install
 ```
 
+To run your checkout from Espanso, install it as an editable tool with
+`./scripts/install_macos.sh` or `.\scripts\install_windows.ps1` (README, "Development"); users
+install the release wheel instead.
+
 ## Checks
 
 Run these before opening a pull request. CI runs the same.
@@ -29,6 +33,13 @@ uv run pytest                                   # unit tests, no network
 uv run ruff check . && uv run ruff format --check .
 uv run mypy                                     # strict, src and scripts
 uv run pre-commit run --all-files               # also YAML checks, gitleaks and zizmor
+```
+
+If you change a screen of the interface (`src/prompt_workflow/tui/`), its SVG snapshots fail
+until you regenerate them, review the new SVGs and commit them (Linux or macOS):
+
+```bash
+UPDATE_SNAPSHOTS=1 uv run pytest tests/test_tui_snapshots.py
 ```
 
 If you change a prompt, a provider or anything on the request path, also run the opt-in live
@@ -44,6 +55,10 @@ uv run pytest -m live
   as `[prompt-workflow: …]` with exit code 0. Espanso cannot show stderr or exit codes, so a
   traceback or a blank line reaches the user as a silent failure. Print only through
   `cli._emit()`, which strips control and invisible characters from whatever gets pasted.
+  `tests/test_trigger_contract.py` compares the whole stdout of `improve` and `persona` byte
+  for byte; a change there is a change to what every trigger pastes. On Windows each newline
+  in the output is printed as CRLF (Python's standard streams translate it there); the test
+  expects that.
 - **The gate.** Build providers only through `factory.make_provider()`. It wraps every provider
   that can send the draft off the machine in `GatedProvider`: the cloud ones always, a local one
   when its base URL is not loopback or the Ollama model is a cloud model.
@@ -60,43 +75,151 @@ uv run pytest -m live
   `fix:`, `docs:`, `refactor:`, `test:`, `chore:`, `ci:`.
 - **Changelog.** Add a line under *Unreleased* in [CHANGELOG.md](CHANGELOG.md) for anything a user
   would notice.
+- **Releases.** After tagging `vX.Y.Z`, run `uv run python scripts/update_match_history.py` and
+  commit any change, so deploy keeps recognising every released match file.
+
+## Releasing
+
+Releases are cut by `.github/workflows/release.yml`, never by hand-made tags.
+
+1. Open a `chore(release): X.Y.Z` pull request that sets `version` in `pyproject.toml`, runs
+   `uv lock` (which updates the project's version in `uv.lock`), and renames `## Unreleased` in
+   CHANGELOG.md to `## X.Y.Z - YYYY-MM-DD` (the release date). Leave no empty *Unreleased*
+   heading behind; the next change adds it back. `tests/test_release.py` fails unless the newest
+   CHANGELOG version is the `pyproject.toml` version and every version heading is dated.
+2. Merge it, then run the **release** workflow on `main` (Actions tab, or
+   `gh workflow run release.yml --ref main -f dry-run=false`). It builds the sdist, the wheel and
+   `constraints.txt` (`uv export --frozen --no-dev --no-emit-project --no-hashes`), installs the
+   wheel with those constraints into a clean venv on macOS, Windows and Linux and runs
+   `scripts/check_wheel.py --constraints`, then attests the files, creates the annotated tag
+   `vX.Y.Z` and publishes the Release with that CHANGELOG section as its notes. *dry-run* is on by
+   default and stops after the artifact tests; untick it to release. A dry run attests nothing,
+   so it leaves no provenance record for files that were never released. The workflow releases
+   only the current head of `main`, checked again just before tagging, and does nothing for a
+   version that already has a published Release. If a release run fails half way, re-run it: an
+   annotated tag already on the same commit and a draft Release are reused, while a tag on any
+   other commit, or a lightweight one, stops it. The Release is marked *Latest* only when no
+   published Release has a higher version.
+3. Check the result: `gh release download vX.Y.Z` and `gh attestation verify <file> -R
+   vlastimilbures/espanso-prompt-rewriter` for each file. The first real release is also the
+   first check that attestation works end to end.
+
+With the repository variable `RELEASE_ON_PUSH` set to `true`, step 2 also happens on every push
+to `main` whose version has no published Release yet. It is off by default, so merging a branch
+never releases by surprise. Only the workflow's last job can write (`contents`, `id-token`,
+`attestations`). Release builds use the build backend pinned by `build-constraint-dependencies`
+in `pyproject.toml`; bump that pin by hand.
+The Release is created as a draft and published once every file is attached, so with
+[immutable releases](https://docs.github.com/en/code-security/supply-chain-security/understanding-your-software-supply-chain/immutable-releases)
+enabled in the repository settings, the published Release cannot be changed.
+
+One exception predates the workflow: 0.10.0 (commit `a15a2af`) never got a tag or a Release.
+The owner backfills it once, by hand, from a checkout of `main`:
+
+```bash
+git tag -a v0.10.0 a15a2af -m "Release 0.10.0"
+git push origin v0.10.0
+python3 scripts/release_notes.py notes --release 0.10.0 > notes-0.10.0.md
+gh release create v0.10.0 --verify-tag --latest=false --title v0.10.0 --notes-file notes-0.10.0.md
+```
+
+## Trigger start-up budget
+
+Espanso starts a fresh `prompt-workflow` process for every trigger, so everything `cli.py`
+imports is paid on each expansion. Measured on 2026-10-04 on an Apple M5 MacBook (macOS, load
+average about 14, so on the high side), CLI 0.15.0:
+
+| Measure | Python 3.12 | Python 3.14 |
+| --- | --- | --- |
+| `import prompt_workflow.cli`, cumulative (`-X importtime`) | 128–138 ms | 164–207 ms |
+| `prompt-workflow persona`, wall time (median of 15) | 185 ms | 238 ms |
+| Modules the guarded trigger runs add to a bare interpreter | 293 | 294 |
+| The same with the usage history recording (#89, 2026-10-05) | 307 | 306 |
+
+The largest parts of the import are `importlib.metadata` (about 50 ms, for `__version__` in
+`prompt_workflow/__init__.py`), httpx (about 30 ms) and Typer (about 19 ms). CI runner numbers
+(Linux, Windows) are still to be recorded from a CI run.
+
+Re-measure with:
+
+```bash
+uv run python -X importtime -c "import prompt_workflow.cli" 2>&1 | sort -t'|' -k2 -n | tail
+uv run python -c "import subprocess, sys, time; t = time.perf_counter(); \
+  subprocess.run([sys.executable, '-m', 'prompt_workflow.cli', 'persona'], check=True); \
+  print(f'\n{(time.perf_counter() - t) * 1000:.0f} ms')"
+```
+
+The second line runs through `python -m`, as the installed `prompt-workflow` script does
+apart from the launcher. Run either several times on an idle machine and take the median.
+
+`tests/test_trigger_contract.py` guards the budget without timing anything, since wall-clock
+tests flake on a loaded machine. It runs `improve` and `persona` in a fresh interpreter
+(clipboard and argument input, a local and a cloud provider, a provider error and a settings
+error) and fails if any of them imports `textual`, `rich.console`, `tomli_w`, `tomlkit`,
+`keyring` or the deploy module, or if they add more than `MODULE_CEILING` (400) modules. It runs
+them with the usage history on and off: on, the run is recorded after its output, so
+`sqlite3` loads (307 modules on 3.12, 306 on 3.14); off (`PROMPT_HISTORY=false`), `sqlite3` and
+`history` must not load at all (296). A new heavy
+dependency belongs behind a lazy import in the command that needs it, never on the trigger
+path. Raise the ceiling only with new measurements here.
 
 ## Project layout
 
 ```text
 espanso-prompt-rewriter/
-├── espanso/                      deployed into Espanso by the installers
-│   ├── match/
+├── espanso/                      deployed into Espanso by `prompt-workflow espanso deploy`
+│   ├── match/                    also shipped in the wheel, see assets.py
 │   │   ├── prompts-llm.yml       -i- -ip- -if- -iok- -il- -ilm- (-ic-): call the CLI
 │   │   ├── prompts-core.yml      -prompt- -risk-: static snippets and forms
 │   │   └── prompts-template.yml  -p-: the empty golden template, opens with your persona
-│   └── config/
-│       └── default.yml           optional Espanso settings (--with-config / -WithConfig)
 ├── src/prompt_workflow/          the prompt-workflow CLI
-│   ├── cli.py                    improve and persona commands, the single output sink
-│   ├── config.py                 Settings from the environment and .env
+│   ├── cli.py                    improve and persona commands, the single output sink;
+│   │                             mounts the management commands lazily
+│   ├── commands/                 setup, config, secrets, profiles, stats, history, doctor, ui:
+│   │                             thin Typer wrappers over the services (common.py: exit codes)
+│   ├── tui/                      the full-screen Textual interface; only `ui` (commands/ui.py,
+│   │                             also a bare prompt-workflow on a terminal) loads it
+│   ├── doctor.py                 the doctor report (stable JSON, never a key or persona)
+│   ├── smoke.py                  setup's smoke test: improve against a stub on 127.0.0.1
+│   ├── config.py                 Settings from the environment, config.toml or .env
+│   ├── config_files.py           reads config.toml/secrets.toml; atomic, private writes
+│   ├── config_store.py           saves settings and secrets; .env migration and rollback
 │   ├── factory.py                make_provider(): builds providers, decides which are gated
 │   ├── gate.py                   GatedProvider: scans every draft that can leave the machine
 │   ├── clipboard_guard.py        refuses password-manager (concealed) clipboard items
 │   ├── redaction.py              the gate's sensitive-content patterns
-│   ├── prompt_builder.py         loads profiles, fills in the persona rule
+│   ├── history.py                local usage history (SQLite, metadata only, fail-open)
+│   ├── recorder.py               records each improve/persona run in the usage history
+│   ├── prompt_builder.py         loads built-in and user profiles, fills in the persona rule
+│   ├── profiles.py               migrate a checkout's own profiles to the user directory
+│   ├── assets.py                 the packaged Espanso match files (importlib.resources)
+│   ├── deploy.py                 espanso deploy/status/detach: manifest, states, stable launcher
+│   ├── match_history.py          generated: digests of every released match file source
 │   ├── prompts/
 │   │   ├── default.md            golden-template rewrite (-i-, -ip-, -if-)
 │   │   └── general.md            lighter "make this precise" rewrite (local triggers)
 │   └── providers/
 │       ├── base.py               HTTP call, error mapping, <think> stripping
+│       ├── usage.py              per-attempt tokens and cost (AttemptUsage) for an observer
 │       ├── openai_compatible.py  OpenRouter and LM Studio
 │       ├── anthropic.py          Anthropic Messages API
 │       └── ollama.py             Ollama /api/chat
 ├── scripts/
-│   ├── install_macos.sh          install the CLI and deploy the match files
+│   ├── install_macos.sh          contributor install pinned to uv.lock, then espanso deploy
 │   ├── install_windows.ps1       the same for Windows
-│   └── bench_models.py           score models on template fidelity, latency, cost
+│   ├── check_tool_lock.py        the tool venv's packages match uv.lock (#34)
+│   ├── update_match_history.py   regenerate match_history.py from the release tags
+│   ├── bench_models.py           score models on template fidelity, latency, cost
+│   ├── check_wheel.py            CI: what an installed wheel really contains
+│   └── release_notes.py          release: the version and its CHANGELOG notes
 ├── tests/                        unit tests, no network (fake_http in conftest.py)
 │   ├── test_live.py              opt-in real OpenRouter calls (pytest -m live)
+│   ├── test_trigger_contract.py  exact trigger output, imports and module budget
+│   ├── test_tui.py               the interface, driven headless with Textual's Pilot
+│   ├── test_tui_snapshots.py     SVG snapshots of each tab (snapshots/, UPDATE_SNAPSHOTS=1)
 │   └── test_docs.py              README and .env.example list every setting
 ├── .github/                      CI (tests, gitleaks), Dependabot, issue and PR templates
-├── .env.example                  every setting with its default; copy to .env
+├── .env.example                  key and persona; every other setting commented out
 ├── CONTRIBUTING.md               setup, checks, how to add a profile/trigger/provider
 ├── SECURITY.md                   how to report a gate bypass or other vulnerability
 └── CHANGELOG.md                  release notes
@@ -106,8 +229,19 @@ espanso-prompt-rewriter/
 
 ### Add a profile
 
+A profile for your own use does not belong in the repo: put it in the user profile directory,
+`~/.config/prompt-workflow/profiles/<name>.md` (`%APPDATA%\prompt-workflow\profiles\` on
+Windows), where an upgrade cannot replace it. See
+[README](README.md#profiles-and-persona); a same-named file overrides a built-in only when
+`PROMPT_PROFILE_OVERRIDES` lists it. `profiles.migrate_profiles()` copies profiles a checkout
+added or edited under `src/prompt_workflow/prompts/` into that directory (it never deletes or
+overwrites).
+
+To ship a new built-in profile:
+
 1. Add `src/prompt_workflow/prompts/<name>.md` containing the system prompt as plain prose. It is
-   picked up automatically.
+   picked up automatically. The name must match `prompt_builder.PROFILE_NAME` (lower-case
+   letters, digits, `-`, `_`).
 2. Optionally include `{{PERSONA_RULE}}` where the user's persona should be applied (see
    `prompt_builder.render()`).
 3. Add a test in `tests/test_prompts.py`.
@@ -115,7 +249,7 @@ espanso-prompt-rewriter/
 ### Add a trigger
 
 Add a match to `espanso/match/prompts-llm.yml`. Shell commands start with the quoted
-`__PROMPT_WORKFLOW__` placeholder, which the install scripts replace with the absolute CLI path.
+`__PROMPT_WORKFLOW__` placeholder, which `prompt-workflow espanso deploy` replaces with the absolute CLI path.
 Quote nothing else: `cmd.exe` mangles a command line holding more than one quoted part.
 Set `force_mode: clipboard` on every match that runs the CLI, so Espanso pastes the output
 instead of typing short replies key by key.
@@ -132,6 +266,20 @@ instead of typing short replies key by key.
         cmd: "\"__PROMPT_WORKFLOW__\" improve --provider ollama --profile regulation --source clipboard"
 ```
 
+A match of your own runs without `--trigger-id`: the managed matches' ids are a fixed
+allowlist, so the usage history records your trigger as `direct` (or, if you pass an id that
+is not on it, as an unattributed managed run). A new managed trigger adds
+its id to `recorder.TRIGGER_IDS` (the test fails until each CLI match passes its own).
+
+Any change to a file in `espanso/match/` needs
+`uv run python scripts/update_match_history.py` (also run it at every release, after tagging):
+it records the source's digest in `src/prompt_workflow/match_history.py` (together with every
+digest already listed, which is never dropped, each release tag's version and the file at every
+commit that changed it on this branch and on the default branch, since an editable install
+runs an untagged commit), so `espanso deploy`
+later recognises a file this version wrote as its own (stale) rather than foreign, and
+`tests/test_deploy.py` fails until it is run.
+
 `tests/test_yaml.py` checks the placeholder, quoting and `force_mode`, and that the profile and
 provider exist. Add the trigger's expected provider, profile and tier to `EXPECTED` in
 `tests/test_triggers.py`, which replays every trigger's command line through the CLI. Pass
@@ -141,8 +289,10 @@ pro tier's profile.
 ### Add a setting
 
 Add a field to `Settings` in `src/prompt_workflow/config.py` with `_env("NAME", "default")`, then
-document it in the README configuration table and in `.env.example`. `tests/test_docs.py` fails
-until both are done.
+document it in the README configuration table and in `.env.example` (commented out with its
+default: `# NAME=default`). `tests/test_docs.py` fails until both are done. A setting that holds
+a secret takes `secret=True`: it then stays out of `repr()`, is saved only in the secret store,
+and is never written to `config.toml`.
 
 ### Add a static snippet or form
 
@@ -156,8 +306,10 @@ Snippets that need no model go in `espanso/match/prompts-core.yml`, as plain Esp
    `src/prompt_workflow/providers/`. Use `post_json()` and `finalize_content()` from
    `providers/base.py` so transport errors and `<think>` stripping behave like the other providers.
    Pass the response's raw stop reason to `finalize_content(..., stop_reason=...)`, so a cut-off,
-   failed or filtered reply is marked instead of pasted as complete.
-2. Add it to `PROVIDER_NAMES` and `make_provider()` in `factory.py`. If it can send data off the
+   failed or filtered reply is marked instead of pasted as complete. Take an optional
+   `observer` and, when it is set, pass `post_json(..., meter=Meter(...))` with a parser in
+   `providers/usage.py` that maps the body's tokens and cost (a missing cost stays `None`).
+2. Add it to `PROVIDER_NAMES` and `make_provider()` in `factory.py`, passing `observer`. If it can send data off the
    machine, return it through `_gate()`, as the other providers do, and make `_leaves_machine()`
    report it, so the gate and `PROMPT_LOCAL_ONLY` both cover it.
 3. Add wire-format and error-path cases to `tests/test_providers.py`, and a factory test.

@@ -9,6 +9,10 @@ requires-python = ">=3.12"
 dependencies = [
   "httpx>=0.27,<1",
   "pyperclip>=1.9,<2",
+  # The full-screen interface (`prompt-workflow` on a terminal, `ui`); imported only there.
+  "textual>=8.2.8,<9",
+  # Writes config.toml and secrets.toml; imported only when saving, never by a trigger.
+  "tomli-w>=1.2,<2",
   "typer>=0.12,<1",
 ]
 
@@ -34,8 +38,18 @@ dev = [
 requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
+[tool.uv]
+# The exact build backend for `uv build`, so a release wheel does not depend on whichever
+# hatchling is newest on the day. Bump it by hand to a release at least a week old.
+build-constraint-dependencies = ["hatchling==1.32.4"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/prompt_workflow"]
+
+# The Espanso match files ship in the wheel (read by prompt_workflow.assets); espanso/ in the
+# repo stays their source. espanso/config/ is deliberately not shipped.
+[tool.hatch.build.targets.wheel.force-include]
+"espanso/match" = "prompt_workflow/espanso/match"
 
 [tool.ruff]
 line-length = 100

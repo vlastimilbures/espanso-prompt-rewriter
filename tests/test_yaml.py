@@ -6,6 +6,7 @@ import yaml
 from prompt_workflow.config import EFFORTS, KEEP, TIERS, split_model_spec
 from prompt_workflow.factory import PROVIDER_NAMES
 from prompt_workflow.prompt_builder import PROFILES
+from prompt_workflow.recorder import TRIGGER_IDS
 
 ESPANSO_ROOT = Path(__file__).parents[1] / "espanso"
 MATCH_FILES = sorted((ESPANSO_ROOT / "match").glob("*.yml"))
@@ -105,6 +106,32 @@ def test_cli_matches_paste_via_clipboard():
     assert not [p.name for p in MATCH_FILES if "global_vars" in _load(p)]
     for match in cli_matches:
         assert match.get("force_mode") == "clipboard", f"{match['trigger']} must set force_mode"
+
+
+def _cli_commands(match: dict) -> list[str]:
+    return [
+        str(var["params"]["cmd"])
+        for var in match.get("vars", [])
+        if "__PROMPT_WORKFLOW__" in str(var.get("params", {}).get("cmd", ""))
+    ]
+
+
+# Every match that runs the CLI, the commented-out -ic- included, names itself for the usage
+# history with one literal --trigger-id: its own trigger without the dashes, from the CLI's
+# allowlist. Never a {{form}} value or any other variable, and never shared, so two triggers
+# cannot be counted as one.
+def test_cli_matches_pass_their_own_trigger_id():
+    matches = [m for path in MATCH_FILES for m in _load(path)["matches"]]
+    matches += [m for path in MATCH_FILES for m in _commented_matches(path)]
+    seen = set()
+    for match in (m for m in matches if _calls_cli(m)):
+        trigger = match["trigger"]
+        (cmd,) = _cli_commands(match)
+        ids = re.findall(r"--trigger-id(?:\s+|=)(\S+)", cmd)
+        assert ids == [trigger.strip("-")], f"{trigger} must pass --trigger-id {trigger.strip('-')}"
+        assert ids[0] in TRIGGER_IDS, f"{trigger}: {ids[0]!r} is not on the allowlist"
+        seen.add(ids[0])
+    assert seen == set(TRIGGER_IDS)
 
 
 # Every --profile passed to the CLI is a profile prompt_builder.PROFILES actually defines,

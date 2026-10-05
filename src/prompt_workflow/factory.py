@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 from .config import Settings
-from .gate import GatedProvider
+from .gate import GateBlocked, GatedProvider
 from .providers.anthropic import AnthropicProvider
 from .providers.base import Provider, ProviderError, is_loopback
 from .providers.ollama import OllamaProvider
 from .providers.openai_compatible import OpenAICompatibleProvider
+from .providers.usage import UsageObserver
 from .redaction import compile_extra, safe_repr
 
 PROVIDER_NAMES = ("ollama", "lmstudio", "openrouter", "anthropic")
@@ -58,7 +60,7 @@ def _require_https(url: str, env_name: str) -> str:
     scheme = urlsplit(url).scheme
     if scheme == "https" or (scheme == "http" and is_loopback(url)):
         return url
-    raise ProviderError(f"{env_name} must be an https:// URL")
+    raise GateBlocked(f"{env_name} must be an https:// URL")
 
 
 def _is_ollama_cloud(model: str) -> bool:
@@ -79,13 +81,52 @@ def _leaves_machine(name: str, cfg: Settings) -> bool:
     return name in ("openrouter", "anthropic")
 
 
+# The key setting each provider needs; the local ones need none.
+PROVIDER_KEYS = {"openrouter": "OPENROUTER_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
+
+
+@dataclass(frozen=True)
+class Route:
+    """Where a provider would send a draft, as the settings say: for a screen to show, not
+    to call. ``remote`` is _leaves_machine(); ``refused`` is PROMPT_LOCAL_ONLY refusing it."""
+
+    name: str
+    # The settings that hold the model and the base URL, so a screen can show their values
+    # the way `config show` does (a URL with a password in it only as set).
+    model_setting: str
+    url_setting: str
+    key: str | None
+    remote: bool
+    refused: bool
+
+
+def routes(cfg: Settings) -> list[Route]:
+    """Every provider in PROVIDER_NAMES with its model and base URL settings, key setting and
+    whether it can send the draft off this machine. Builds no provider and makes no call."""
+    found = []
+    for name in PROVIDER_NAMES:
+        prefix = name.upper()
+        remote = _leaves_machine(name, cfg)
+        found.append(
+            Route(
+                name,
+                f"{prefix}_MODEL",
+                f"{prefix}_BASE_URL",
+                PROVIDER_KEYS.get(name),
+                remote,
+                remote and cfg.local_only,
+            )
+        )
+    return found
+
+
 def _gate(
     inner: Provider, cfg: Settings, allow_flagged: bool = False, name: str = "openrouter"
 ) -> GatedProvider:
     # make_provider refuses earlier with a clearer message; this keeps the guarantee for any
     # provider added later that returns through _gate().
     if cfg.local_only:
-        raise ProviderError(
+        raise GateBlocked(
             "PROMPT_LOCAL_ONLY=true: this provider would send the draft off this machine"
         )
     return GatedProvider(
@@ -105,6 +146,7 @@ def make_provider(
     extra_body: dict[str, object] | None = None,
     on_response: Callable[[dict[str, object]], None] | None = None,
     title: str = APP_TITLE,
+    observer: UsageObserver | None = None,
 ) -> Provider:
     """Build the named provider from settings. Anything that can send the draft off this
     machine (see _leaves_machine) comes wrapped in the data-protection gate, and with
@@ -117,12 +159,16 @@ def make_provider(
     ``extra_body``, ``on_response`` and ``title`` only apply to OpenRouter; they let
     scripts/bench_models.py request usage/cost data through the same construction path.
 
+    ``observer`` goes to every provider, inside the gate, and receives one AttemptUsage per
+    HTTP attempt (providers/usage.py); a draft the gate blocks makes no attempt, so no record.
+    A loopback Ollama or LM Studio that is not a cloud model reports cost ``not_applicable``.
+
     The ``-> Provider`` return type is also what makes mypy check that every provider class
     conforms to the Provider protocol.
     """
     remote = _leaves_machine(name, cfg)
     if remote and cfg.local_only:
-        raise ProviderError(f"PROMPT_LOCAL_ONLY=true: {name} would send the draft off this machine")
+        raise GateBlocked(f"PROMPT_LOCAL_ONLY=true: {name} would send the draft off this machine")
     if name == "ollama":
         ollama = OllamaProvider(
             base_url=cfg.ollama_base_url,
@@ -130,6 +176,8 @@ def make_provider(
             timeout=cfg.timeout,
             think=cfg.ollama_think,
             temperature=cfg.temperature,
+            observer=observer,
+            local=not remote,
         )
         return _gate(ollama, cfg, allow_flagged, name) if remote else ollama
     if name == "lmstudio":
@@ -139,6 +187,9 @@ def make_provider(
             timeout=cfg.timeout,
             temperature=cfg.temperature,
             label="LM Studio",
+            observer=observer,
+            name=name,
+            local=not remote,
         )
         return _gate(lmstudio, cfg, allow_flagged, name) if remote else lmstudio
     if name == "openrouter":
@@ -154,6 +205,8 @@ def make_provider(
                 label="OpenRouter",
                 extra_body={**openrouter_body(cfg), **(extra_body or {})},
                 on_response=on_response,
+                observer=observer,
+                name=name,
             ),
             cfg,
             allow_flagged,
@@ -168,6 +221,7 @@ def make_provider(
                 timeout=cfg.timeout,
                 max_tokens=cfg.anthropic_max_tokens,
                 temperature=cfg.temperature,
+                observer=observer,
             ),
             cfg,
             allow_flagged,

@@ -13,20 +13,40 @@ from prompt_workflow.providers import base
 def isolated_env(tmp_path, monkeypatch):
     """Prevent the real .env / shell environment from leaking into tests.
 
-    Without this, Settings.load()'s os.environ.setdefault(...) permanently
-    pollutes the test process on whichever test happens to run first
-    alphabetically, making later assertions depend on the developer's
-    real .env contents.
+    Settings.load() reads the real environment and the first .env it finds (it never
+    writes os.environ), so without this a test's result would depend on the developer's
+    shell and real .env contents.
     """
     for key in env_names():
         monkeypatch.delenv(key, raising=False)
     monkeypatch.chdir(tmp_path)
     # Point the loader at a per-test file so the developer's real repo .env never loads.
     monkeypatch.setenv("PROMPT_WORKFLOW_ENV", str(tmp_path / ".env"))
+    # ...and its real user profile directory is never read either (prompt_builder).
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("APPDATA", str(tmp_path / "config"))
+    # The usage history and price table go to per-test dirs, never the developer's real ones.
+    for key in ("XDG_DATA_HOME", "LOCALAPPDATA"):
+        monkeypatch.setenv(key, str(tmp_path / "data"))
+    # The home the config dir would derive from, and the editable-install root, are per-test
+    # temp dirs too: a test that unsets PROMPT_WORKFLOW_ENV can never read, write or migrate
+    # the developer's real files (config.toml, secrets.toml, a repository .env).
+    for name in ("HOME", "USERPROFILE"):
+        monkeypatch.setenv(name, str(tmp_path / "home"))
+    from prompt_workflow import config
+
+    monkeypatch.setattr(config, "_PROJECT_ROOT", tmp_path / "project")
     # Never probe the developer's real clipboard: a concealed item there would fail tests.
     import prompt_workflow.cli as cli
 
     monkeypatch.setattr(cli, "is_concealed", lambda: None)
+    # ...nor run the real espanso, uv or brew: a deploy test passes or patches in its own.
+    import prompt_workflow.deploy as deploy
+
+    def refuse(argv):
+        raise AssertionError(f"a test ran a real command: {argv}")
+
+    monkeypatch.setattr(deploy, "run_command", refuse)
 
 
 # Headers httpx adds to every request on its own; calls[i]["headers"] leaves them out so a
@@ -148,3 +168,28 @@ def stub_provider(monkeypatch):
     stub = StubProvider()
     monkeypatch.setattr(cli, "make_provider", stub)
     return stub
+
+
+@pytest.fixture
+def history_rows(monkeypatch):
+    """Gives history writes a generous time budget (the real ~0.25 s drops writes on a loaded
+    CI runner) and returns a reader: history_rows("operations") lists that table of the
+    per-test usage history as dicts, [] when nothing was written."""
+    import sqlite3
+    from contextlib import closing
+
+    from prompt_workflow import history
+
+    monkeypatch.setattr(history, "_BUDGET", 2.25)
+    monkeypatch.setattr(history, "_WRITE_BUDGET", 2.0)
+
+    def read(table: str) -> list[dict]:
+        path = history.history_path()
+        if not path.is_file():
+            return []
+        with closing(sqlite3.connect(path)) as conn:
+            conn.row_factory = sqlite3.Row
+            order = "occurred_at_utc" if table == "operations" else "operation_id, seq"
+            return [dict(r) for r in conn.execute(f"SELECT * FROM {table} ORDER BY {order}")]  # noqa: S608
+
+    return read

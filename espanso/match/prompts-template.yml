@@ -10,7 +10,7 @@ matches:
       - name: persona
         type: shell
         params:
-          cmd: "\"__PROMPT_WORKFLOW__\" persona"
+          cmd: "\"__PROMPT_WORKFLOW__\" persona --trigger-id p"
     force_mode: clipboard
     replace: |
       <CONTEXT>
