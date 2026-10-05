@@ -1,4 +1,5 @@
 import base64
+import re
 import time
 
 import pytest
@@ -112,6 +113,112 @@ def test_detects_vendor_keys(text, name):
 def test_vendor_keys_are_not_double_reported_as_openai():
     assert "openai_key" not in scan("sk-or-v1-" + "0123456789abcdef" * 4)
     assert "openai_key" not in scan("sk-ant-api03-" + _BODY)
+
+
+# The longest real-shaped secrets are still caught now that every repeat is bounded: a JWS
+# whose header carries an x5c certificate chain (App Store Server API style, ~5.5k chars), a
+# large payload, an RS512/4096-bit signature, and long vendor keys and bearer tokens.
+@pytest.mark.parametrize(
+    ("text", "name"),
+    [
+        (
+            ".".join(["eyJ" + "a1B2-c3_D" * 600, "eyJ" + "x9Y8z7" * 2_000, "s1-G_" * 137]),
+            "jwt",
+        ),
+        ("sk-or-v1-" + "0123456789abcdef" * 4, "openrouter_key"),
+        ("sk-ant-api03-" + _BODY * 3 + "-AAAA", "anthropic_key"),
+        ("sk-proj-" + _BODY * 5, "openai_key"),
+        ("github_pat_11" + _BODY * 3, "github_token"),
+        ("Bearer " + _BODY * 60, "bearer_token"),
+        ("Bearer " + "a" * 3_000 + "-" + "b" * 3_000, "bearer_token"),
+    ],
+    ids=["jwt-x5c", "openrouter", "anthropic", "openai-proj", "github-pat", "bearer", "bearer-6k"],
+)
+def test_detects_longest_real_secrets(text, name):
+    assert name in scan(f"use {text} please")
+
+
+# The bounded jwt, bearer_token and pem_private_key patterns flag everything the unbounded
+# ones before #36 flagged, at any length: a bound only stops the traversal of what search()
+# does not need, and a run longer than a bound counts as a match.
+_UNBOUNDED = {
+    "jwt": r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b",
+    "bearer_token": r"(?i)\bBearer\s+[A-Za-z0-9._-]{16,}\b",
+    "pem_private_key": r"-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----",
+}
+_SIG = "s1-G_" * 137
+
+
+@pytest.mark.parametrize(
+    ("text", "name"),
+    [
+        ("Bearer " + "a" * 5_000, "bearer_token"),
+        ("Bearer" + " " * 40 + _BODY, "bearer_token"),
+        ("Bearer\n" + "\t" * 200 + _BODY, "bearer_token"),
+        (".".join(["eyJ" + "a1B2" * 10, "eyJ" + "x9Y8" * 4_300, _SIG]), "jwt"),
+        (".".join(["eyJ" + "a1B2" * 2_250, "eyJ" + "x9Y8" * 10, _SIG]), "jwt"),
+        ("Bearer " + ".".join(["eyJ" + "a1B2" * 10, "eyJ" + "x9Y8" * 4_300, _SIG]), "jwt"),
+        ("-----BEGIN " + "ENCRYPTED " * 7 + "PRIVATE KEY-----", "pem_private_key"),
+    ],
+    ids=[
+        "bearer-5k-alnum",
+        "bearer-40-spaces",
+        "bearer-200-tabs",
+        "jwt-17k-payload",
+        "jwt-9k-header",
+        "bearer-jwt-17k",
+        "pem-70-label",
+    ],
+)
+def test_bounded_patterns_flag_what_unbounded_ones_did(text, name):
+    assert re.search(_UNBOUNDED[name], text)
+    assert name in scan(f"use {text} please")
+
+
+# Every repeat in a built-in pattern has an upper bound, as the comment on _PATTERNS says:
+# an unbounded one is tried at every start position and makes a long run quadratic.
+def test_builtin_patterns_have_no_unbounded_repeat():
+    import re._constants as sre
+    import re._parser as parser
+
+    from prompt_workflow.redaction import _PATTERNS
+
+    def unbounded(items) -> bool:
+        for op, av in items:
+            if op in (sre.MAX_REPEAT, sre.MIN_REPEAT, sre.POSSESSIVE_REPEAT):
+                if av[1] == sre.MAXREPEAT or unbounded(av[2]):
+                    return True
+            elif op in (sre.SUBPATTERN, sre.ASSERT, sre.ASSERT_NOT):
+                if unbounded(av[-1]):
+                    return True
+            elif (op is sre.ATOMIC_GROUP and unbounded(av)) or (
+                op is sre.BRANCH and any(unbounded(b) for b in av[1])
+            ):
+                return True
+        return False
+
+    flagged = [n for n, p in _PATTERNS.items() if unbounded(parser.parse(p.pattern, p.flags))]
+    assert flagged == []
+
+
+# The short jwt and bearer_token patterns add no false positives of their own: a JWT's payload
+# is base64url JSON too (eyJ), and a Bearer token holds a letter, digit or underscore within
+# its first 16 characters.
+_B64_JSON = "eyJ" + "a1B2" * 5
+
+
+@pytest.mark.parametrize(
+    ("text", "name"),
+    [
+        (f"cache file {_B64_JSON}.jsonl_backup saved", "jwt"),
+        (f"{_B64_JSON}.payload_here_xx", "jwt"),
+        ("Bearer\n----------------", "bearer_token"),
+        ("Bearer ................ 12", "bearer_token"),
+    ],
+    ids=["jsonl-backup", "plain-payload", "bearer-dashes", "bearer-dots"],
+)
+def test_short_patterns_add_no_false_positive(text, name):
+    assert name not in scan(text)
 
 
 # Short or prose-like near misses are not flagged as keys.
@@ -306,6 +413,12 @@ def test_custom_pattern_matches_raw_text():
         "\n- confidential " * 12_000,
         "tài liệu " * 25_000,
         "[confidential " * 15_000,
+        "eyJ-" * 50_000,
+        "eyJa.eyJb." * 20_000,
+        "sk-" * 66_000,
+        "ghp_" * 50_000,
+        "xoxb-" * 40_000,
+        "Bearer -" * 25_000,
     ],
     ids=[
         "dots",
@@ -344,6 +457,12 @@ def test_custom_pattern_matches_raw_text():
         "label-lines",
         "vn-label",
         "brackets",
+        "jwt-starts",
+        "jwt-segments",
+        "key-prefixes",
+        "github-prefixes",
+        "slack-prefixes",
+        "bearer-dashes",
     ],
 )
 def test_scan_is_fast_on_adversarial_input(text):

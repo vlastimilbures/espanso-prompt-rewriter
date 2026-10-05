@@ -12,10 +12,12 @@ from collections.abc import Callable
 # once with --allow-flagged (-iok-), but false negatives are expected and the patterns
 # should not be treated as a compliance control on their own.
 #
-# Every repeat that can run across ordinary text is bounded ({1,64}, not +): scan() tries
-# each pattern at every position, so an unbounded class there makes a large clipboard
+# Every repeat is bounded ({1,64}, not +; tests/test_redaction.py checks each pattern): scan()
+# tries each pattern at every position, so an unbounded class there makes a large clipboard
 # quadratic and stalls Espanso before any request timeout applies. A value is matched only for
-# its existence ({8}, not {8,}): search() needs no more.
+# its existence ({8}, not {8,}): search() needs no more, and nothing uses a match's span. A run
+# that must be read whole (a JWT header, a PEM label) and is longer than its bound counts as a
+# match, so a bound never hides a secret the unbounded pattern would have found.
 #
 # A secret name starts at a non-alphanumeric character; in camelCase, at an upper-case letter
 # after a lower-case letter or digit (clientSecret, dbPassword); or, for the words that end a
@@ -66,22 +68,32 @@ _PATTERNS: dict[str, re.Pattern[str]] = {
     "email": re.compile(r"\b[\w.+-]{1,64}@[\w-]{1,63}\.[\w.-]{1,253}\b"),
     # Vendor keys contain '-'/'_' after a short prefix (sk-or-v1-, sk-ant-api03-, sk-proj-),
     # so the key bodies allow both.
-    "openrouter_key": re.compile(r"\bsk-or-v1-[0-9a-f]{32,}"),
-    "anthropic_key": re.compile(r"\bsk-ant-[A-Za-z0-9_-]{20,}"),
-    "openai_key": re.compile(r"\bsk-(?!or-|ant-)[A-Za-z0-9_-]{20,}"),
-    "stripe_key": re.compile(r"\b[spr]k_(?:live|test)_[A-Za-z0-9]{16,}"),
-    "github_token": re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})"),
-    "gitlab_token": re.compile(r"\bglpat-[A-Za-z0-9_-]{20,}"),
-    "huggingface_token": re.compile(r"\bhf_[A-Za-z0-9]{34,}"),
-    "slack_token": re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}"),
+    "openrouter_key": re.compile(r"\bsk-or-v1-[0-9a-f]{32}"),
+    "anthropic_key": re.compile(r"\bsk-ant-[A-Za-z0-9_-]{20}"),
+    "openai_key": re.compile(r"\bsk-(?!or-|ant-)[A-Za-z0-9_-]{20}"),
+    "stripe_key": re.compile(r"\b[spr]k_(?:live|test)_[A-Za-z0-9]{16}"),
+    "github_token": re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22})"),
+    "gitlab_token": re.compile(r"\bglpat-[A-Za-z0-9_-]{20}"),
+    "huggingface_token": re.compile(r"\bhf_[A-Za-z0-9]{34}"),
+    "slack_token": re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10}"),
     "google_api_key": re.compile(r"\bAIza[0-9A-Za-z_-]{35}"),
-    "xai_key": re.compile(r"\bxai-[A-Za-z0-9]{20,}"),
+    "xai_key": re.compile(r"\bxai-[A-Za-z0-9]{20}"),
     # AKIA: long-term keys; ASIA: temporary (STS) keys.
     "aws_access_key": re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
-    "jwt": re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"),
+    # header.payload is enough: the header's run must end at its dot, so it is read whole
+    # (possessive: no backtracking into it), and one longer than the bound counts as a match.
+    # Past the dot, a payload that is base64url JSON too (eyJ + 7) shows it exists; the
+    # signature is not needed.
+    "jwt": re.compile(r"\beyJ[A-Za-z0-9_-]{10,8192}+(?:\.eyJ[A-Za-z0-9_-]{7}|[A-Za-z0-9_-])"),
     # PEM, OpenSSH and PGP (`-----BEGIN PGP PRIVATE KEY BLOCK-----`) private keys.
-    "pem_private_key": re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----"),
-    "bearer_token": re.compile(r"\bBearer\s+[A-Za-z0-9._-]{16,}\b", re.IGNORECASE),
+    # A label longer than the bound counts as a match.
+    "pem_private_key": re.compile(
+        r"-----BEGIN (?:[A-Z ]{0,64}PRIVATE KEY(?: BLOCK)?-----|[A-Z ]{65})"
+    ),
+    # The token's first 16 characters, one of them a letter, digit or underscore.
+    "bearer_token": re.compile(
+        r"\bBearer\s{1,256}(?=[.-]{0,15}[A-Za-z0-9_])[A-Za-z0-9._-]{16}", re.IGNORECASE
+    ),
     # scheme://user:password@host
     "url_credentials": re.compile(
         r"\b[a-z][a-z0-9+.-]{0,31}://[^\s/:@]{0,256}:[^\s/@]{1,256}@", re.IGNORECASE
@@ -293,15 +305,27 @@ _VALIDATORS: dict[str, Callable[[re.Match[str]], bool]] = {
 EXTRA_SEPARATOR = ";"
 
 
+class InvalidExtraPattern(ValueError):
+    """A PROMPT_EXTRA_PATTERNS entry that is not a valid regex. It names the position, never
+    the pattern, which may itself describe sensitive data."""
+
+    def __init__(self, entry: int) -> None:
+        super().__init__(f"PROMPT_EXTRA_PATTERNS entry {entry} is not a valid regex")
+        self.entry = entry
+
+
 def compile_extra(spec: str) -> tuple[re.Pattern[str], ...]:
-    """Compile PROMPT_EXTRA_PATTERNS (`;`-separated regexes, case-insensitive)."""
+    """Compile PROMPT_EXTRA_PATTERNS (`;`-separated regexes, case-insensitive). Settings
+    already rejects an invalid one (config._regexes); this check stays for a Settings built
+    without its parsers."""
     patterns = []
     for i, raw in enumerate((p.strip() for p in spec.split(EXTRA_SEPARATOR) if p.strip()), 1):
         try:
             patterns.append(re.compile(raw, re.IGNORECASE))
-        except re.error as exc:
-            # Name the position, not the pattern: it may itself describe sensitive data.
-            raise ValueError(f"PROMPT_EXTRA_PATTERNS entry {i} is not a valid regex") from exc
+        # A repeat count past the engine's limit raises OverflowError, deep nesting
+        # RecursionError: invalid entries too.
+        except (re.error, OverflowError, RecursionError) as exc:
+            raise InvalidExtraPattern(i) from exc
     return tuple(patterns)
 
 

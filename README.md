@@ -604,7 +604,13 @@ ollama.com). The gate blocks drafts containing:
   *căn cước*, *hộ chiếu*, *passport*, *national ID* or *ID card*
 - your own patterns from `PROMPT_EXTRA_PATTERNS`, for example
   `PROMPT_EXTRA_PATTERNS="project[- ]falcon;CUST-\d{6}"` (case-insensitive; reported as
-  `custom_1`, `custom_2`, … so the pattern itself never appears in the message)
+  `custom_1`, `custom_2`, … so the pattern itself never appears in the message). An entry
+  that is not a valid regex is rejected when settings load: `config validate`, `config set`
+  and `doctor` report it by position, and every trigger prints a marker until it is fixed.
+  Keep each pattern simple: it runs on every draft and on each value written to the usage
+  history, and Python's regex engine can take exponential time on a pattern with nested
+  quantifiers such as `(\w+\s?)+` or `(a|aa)+`. Prefer a literal word, a character class with
+  a fixed count (`CUST-\d{6}`) or a bounded repeat (`\w{1,20}`).
 
 > [!WARNING]
 > The gate is a heuristic safety net, not a compliance control. It misses things (names,

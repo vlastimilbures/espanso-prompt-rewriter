@@ -395,6 +395,40 @@ def test_load_allows_assignments_in_extra_patterns(tmp_path):
     assert Settings.load().extra_patterns == "OPENROUTER_API_KEY=\\S+;DB_PASS"
 
 
+# An invalid PROMPT_EXTRA_PATTERNS regex is rejected when settings load, so `config validate`,
+# `config set`, doctor and the interface report it, not only a trigger. The message names the
+# entry, never the pattern text, which may describe the data it guards.
+# A repeat count too large for the engine (OverflowError) or nesting too deep to compile
+# (RecursionError) is an invalid entry too, not an unexpected error.
+_TOO_BIG = "a{99999999999}"
+_TOO_DEEP = "(" * 2_000 + "a" + ")" * 2_000
+
+
+@pytest.mark.parametrize(
+    ("raw", "entry"),
+    [("(", 1), ("falcon;secret[", 2), ("a;;(?P<x", 2), (f"ok;{_TOO_BIG}", 2), (_TOO_DEEP, 1)],
+    ids=["paren", "bracket", "group", "overflow", "recursion"],
+)
+def test_invalid_extra_pattern_is_rejected(monkeypatch, raw, entry):
+    monkeypatch.setenv("PROMPT_EXTRA_PATTERNS", raw)
+    with pytest.raises(ValueError, match=r"^PROMPT_EXTRA_PATTERNS must be") as caught:
+        Settings()
+    message = str(caught.value)
+    assert f"entry {entry} is not" in message
+    for text in (raw, "falcon", "secret"):
+        assert text not in message
+
+
+@pytest.mark.parametrize(
+    "raw", ["ok;(", f"ok;{_TOO_BIG}", _TOO_DEEP], ids=["paren", "overflow", "recursion"]
+)
+def test_invalid_extra_pattern_is_a_repair_finding(tmp_path, raw):
+    (tmp_path / ".env").write_text(f"PROMPT_EXTRA_PATTERNS={raw}\n")
+    layers = ConfigLayers.resolve(strict=False)
+    assert any("PROMPT_EXTRA_PATTERNS must be" in f.message for f in layers.findings)
+    assert layers.settings().extra_patterns == ""
+
+
 # A space pasted along with an API key is dropped.
 def test_api_keys_are_stripped(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", f" {FAKE_KEY} ")

@@ -6,6 +6,29 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Security
+- Every repeat in the gate's built-in patterns is now bounded, as the code comment already
+  claimed (#36). The JWT pattern's three unbounded segments made a 50,000-character draft of
+  `eyJ-` repeats take about 0.29 s of CPU to scan (and 4.5 s at 200,000 characters); the worst
+  50,000-character case found now takes about 0.05 s. A pattern now reads only what it needs
+  to know a secret is there: a vendor key's minimum length, a JWT's header and the start of
+  its payload (`eyJ` and 7 more characters; the signature is no longer required), and a
+  Bearer token's first 16 characters, one of them a letter, digit or underscore (no word
+  boundary required after it). A JWT header longer than 8,192 characters or a private-key
+  label longer than 64 counts as a match. So the gate flags what it flagged before, plus a
+  JWT without its signature, a very long `eyJ…` run and a long upper-case `-----BEGIN` label,
+  with three exceptions it no longer flags: a "JWT" whose payload does not start with `eyJ`
+  (real payloads are JSON objects, so they always do), a Bearer token whose first 16
+  characters are only dots and hyphens, and more than 256 whitespace characters between
+  `Bearer` and its token. A test checks that no built-in pattern has an unbounded repeat.
+- An invalid `PROMPT_EXTRA_PATTERNS` regex (including a repeat count too large for the regex
+  engine, or nesting too deep to compile) is now rejected when settings load, naming the
+  entry but never the pattern (#36). `config validate`, `config set`, `doctor` and the
+  interface report it instead of only the cloud triggers, and every trigger, local ones too,
+  prints a marker until it is fixed (before, the local triggers ran and the usage history
+  silently dropped each record). README and `.env.example` now warn against patterns with
+  nested quantifiers, which can take exponential time on every draft.
+
 ### Changed
 - README "Privacy and data protection" has a new "What is sent, and to whom" section (#29): the
   system prompt, including your `PROMPT_PERSONA`, goes with every call and is not scanned by the
