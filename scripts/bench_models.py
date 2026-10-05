@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -571,7 +572,9 @@ DRAFTS: dict[str, Draft] = {
         keys=(("SQL",), ("3 missed", "three missed", "more than 3"), ("6 months", "six months")),
         outputs="code",
     ),
-    # Held-out drafts written after the round-2 candidates, so no candidate was tuned on them.
+    # Written after the round-2 candidates and held out from them at first. Later revisions
+    # were tuned on every draft, these included, and default.md now quotes `landlord`, so
+    # none is held out any more (CONTRIBUTING, "Next steps for the default prompt").
     "vendor-review": Draft(
         "compare the three bids we got for the new collections dialer (Talkdesk, Genesys and a "
         "local vendor, VNCall): pricing sheets, the security questionnaire answers and the "
@@ -687,6 +690,16 @@ DEFAULT_OUTPUTS = "structured .md, well formatted with clear headings/subheading
 # Letters that only a rewrite left in the draft's language would contain.
 LANGUAGE_LETTERS = {"Czech": "ěščřžůťďňĚŠČŘŽŮŤĎŇ", "German": "äöüßÄÖÜ", "Spanish": "ñáéíóú¿¡"}
 PLACEHOLDER = re.compile(r"\[(?:domain|XXX|xxx)\]")
+# INPUTS or OUTPUTS that says "None" (nothing is needed) and then asks for something anyway;
+# "None of the files is attached" is a sentence, not that answer.
+NONE_THEN_REVIEW = re.compile(r"\A(?:-\s*)?None\b(?!\s+of\b).*?\[REVIEW", re.DOTALL)
+
+# Each check name starts with its kind, so the report can split the pass rate (#48):
+# `struct`: the template's form and fixed wordings, the same for every draft; `branch`: the
+# plan/review choice, scored only on a draft with a label and only where the rewrite made that
+# choice; `draft`: what this draft (its role, language, deliverable, pasted material) and the
+# configured persona call for, and how the rewrite fills INPUTS and OUTPUTS.
+KINDS = ("struct", "branch", "draft")
 
 
 def bench_persona(mode: str, cfg: Settings) -> str:
@@ -725,54 +738,57 @@ def check(
 
     for tag in TAGS:
         if f"<{tag}>" not in text:
-            failed.append(f"no <{tag}>")
+            failed.append(f"struct: no <{tag}>")
         if f"</{tag}>" not in text:
-            failed.append(f"no </{tag}>")
+            failed.append(f"struct: no </{tag}>")
     if not text.rstrip().endswith("</OUTPUTS>"):
-        failed.append("trailing content after </OUTPUTS>")
+        failed.append("struct: trailing content after </OUTPUTS>")
 
     # A section must be closed by its own tag, not by whichever tag comes to mind.
     opened = re.findall(r"<(/?)(" + "|".join(TAGS) + r")>", text)
     stack = [t for slash, t in opened if not slash]
     closed = [t for slash, t in opened if slash]
     if stack != closed:
-        failed.append("mismatched closing tag")
+        failed.append("struct: mismatched closing tag")
 
     leaked = sorted({t for t in re.findall(r"</?([a-z_]+)(?=[\s>])", text) if t in scaffold})
     if leaked:
-        failed.append("scaffolding tag " + ", ".join(leaked))
+        failed.append("struct: scaffolding tag " + ", ".join(leaked))
     if PLACEHOLDER.search(text):
-        failed.append("unreplaced placeholder")
+        failed.append("struct: unreplaced placeholder")
 
     for name, needle in MANDATORY.items():
         if needle not in text:
-            failed.append(f"missing {name} step")
+            failed.append(f"struct: missing {name} step")
 
     steps = re.findall(r"^\s*(\d+)/", text, re.MULTILINE)
     if [int(s) for s in steps] != list(range(1, len(steps) + 1)):
-        failed.append("step numbering")
+        failed.append("struct: step numbering")
     if len(steps) < 5:
-        failed.append("fewer than 5 steps")
+        failed.append("struct: fewer than 5 steps")
     if re.search(r"^\s*\d+\.\s", text, re.MULTILINE):
-        failed.append("used 1. instead of 1/")
+        failed.append("struct: used 1. instead of 1/")
 
     got_plan = PLAN_FIRST in text
     got_execute = EXECUTE_NOW in text
     if got_plan == got_execute:
-        failed.append("planning branch absent or both emitted")
+        failed.append("struct: planning branch absent or both emitted")
     elif wants_plan is not None and got_plan != wants_plan:
-        failed.append("wrong planning branch")
+        failed.append("branch: wrong planning branch")
 
     got_independent = INDEPENDENT in text
     got_self = SELF_REVIEW in text
     if got_independent == got_self:
-        failed.append("review branch absent or both emitted")
+        failed.append("struct: review branch absent or both emitted")
     elif wants_independent is not None and got_independent != wants_independent:
-        failed.append("wrong review branch")
+        failed.append("branch: wrong review branch")
 
     context = text.split("</CONTEXT>")[0]
     if "the user" in context.lower():
-        failed.append("third-person CONTEXT")
+        failed.append("struct: third-person CONTEXT")
+
+    if any(NONE_THEN_REVIEW.search(section(text, tag)) for tag in ("INPUTS", "OUTPUTS")):
+        failed.append("draft: None followed by [REVIEW")
 
     return failed + degeneration(text)
 
@@ -781,10 +797,10 @@ def degeneration(text: str) -> list[str]:
     """Failures of a reply that fell apart, whatever the profile."""
     failed = []
     if re.search(r"[一-鿿]", text):
-        failed.append("CJK degeneration")
+        failed.append("struct: CJK degeneration")
     lines = [ln.strip() for ln in text.splitlines() if len(ln.strip()) > 10]
     if lines and max(lines.count(ln) for ln in set(lines)) > 3:
-        failed.append("repetition loop")
+        failed.append("struct: repetition loop")
     return failed
 
 
@@ -877,70 +893,89 @@ def _carried_over(pattern: str, text: str) -> bool:
     )
 
 
+def template_kinds(failed: list[str], draft: Draft) -> list[str]:
+    """The KINDS a template rewrite was scored on: the branch only where the draft has a label
+    and the rewrite chose exactly one variant of that step, so a missing or doubled variant
+    (an empty reply too) counts as a struct failure, never as a branch pass."""
+    made = [
+        wanted is not None and f"struct: {step} branch absent or both emitted" not in failed
+        for step, wanted in (("planning", draft.plan), ("review", draft.independent))
+    ]
+    return ["struct", "branch", "draft"] if any(made) else ["struct", "draft"]
+
+
 def check_general(text: str, draft: Draft) -> list[str]:
     """Failures of a rewrite by a profile without the golden template (`general`): the
     output contract (a prompt, nothing around it), the draft-as-data rule, the draft's
     language and its pasted material."""
     if not text.strip():
-        return ["empty reply"]
+        return ["struct: empty reply"]
     failed = []
     if ANSWERED.search(text) or any(re.search(p, text) for p in draft.answer):
-        failed.append("answered the draft instead of rewriting it")
+        failed.append("struct: answered the draft instead of rewriting it")
     if PREAMBLE.search(text) or COMMENTARY.search(text):
-        failed.append("preamble or commentary")
+        failed.append("struct: preamble or commentary")
     if draft.role is None and INVENTED_ROLE.search(text):
-        failed.append("invented role")
+        failed.append("draft: invented role")
     # A quote of the pasted material may repeat an injected sentence; anything else may not.
     outside = _without(text, _material(draft))
     failed += [
-        f"carried over an injected instruction ({p})"
+        f"draft: carried over an injected instruction ({p})"
         for p in draft.forbidden
         if _carried_over(p, outside)
     ]
     if draft.guard and not any(re.search(p, outside, re.IGNORECASE) for p in draft.guard):
-        failed.append("no guard against instructions in the pasted material")
+        failed.append("draft: no guard against instructions in the pasted material")
     if draft.language:
         own = _without(text, draft.text.splitlines()).lower()
         words = re.findall(r"\w+", own)
         common = sum(w in LANGUAGE_WORDS[draft.language] for w in words)
         letters = sum(own.count(c) for c in set(LANGUAGE_LETTERS[draft.language].lower()))
         if common < 3 and letters < 3:
-            failed.append(f"not in the draft's language ({draft.language})")
+            failed.append(f"draft: not in the draft's language ({draft.language})")
     flat = " ".join(text.split())
     if any(" ".join(m.split()) not in flat for m in draft.material):
-        failed.append("pasted material not copied")
+        failed.append("draft: pasted material not copied")
     return failed + degeneration(text)
 
 
+def _flat(text: str) -> str:
+    return " ".join(text.split()).lower()
+
+
 def check_draft(text: str, draft: Draft, persona: str = "") -> list[str]:
-    """Failures of the expectations specific to this draft: role, language, OUTPUTS format,
-    pasted material."""
+    """Failures of the expectations specific to this draft and run: role or configured
+    persona, language, OUTPUTS format, pasted material."""
     failed = []
     context = section(text, "CONTEXT")
     if draft.role:
         if draft.role not in context[:200].lower():
-            failed.append("draft's role not in CONTEXT")
+            failed.append("draft: draft's role not in CONTEXT")
         if persona and persona[:40].lower() in context.lower():
-            failed.append("configured persona despite the draft's role")
+            failed.append("draft: configured persona despite the draft's role")
+    elif persona and _flat(persona)[:40] not in _flat(context)[:200]:
+        # The profile tells the model to open CONTEXT with the persona (#49). Without one
+        # there is nothing to check, so a `--persona none` run never fails this.
+        failed.append("draft: configured persona not in CONTEXT")
 
     if draft.language:
         # The original draft quoted in INPUTS is kept on purpose; the rest must be English.
         rest = text.replace(section(text, "INPUTS"), "")
         if sum(rest.count(c) for c in LANGUAGE_LETTERS[draft.language]) > 3:
-            failed.append(f"not rewritten in English ({draft.language})")
+            failed.append(f"draft: not rewritten in English ({draft.language})")
         if draft.language.lower() not in section(text, "CONSTRAINTS").lower():
-            failed.append("no language constraint")
+            failed.append("draft: no language constraint")
 
     outputs = section(text, "OUTPUTS")
     if draft.outputs == "doc" and DEFAULT_OUTPUTS not in outputs:
-        failed.append("document without the .md OUTPUTS line")
+        failed.append("draft: document without the .md OUTPUTS line")
     elif draft.outputs and draft.outputs != "doc" and DEFAULT_OUTPUTS in outputs:
-        failed.append(f"{draft.outputs} given the .md OUTPUTS line")
+        failed.append(f"draft: {draft.outputs} given the .md OUTPUTS line")
 
     # Re-wrapped lines still count as a copy; a summary or a one-line description does not.
     inputs = " ".join(section(text, "INPUTS").split())
     if any(" ".join(m.split()) not in inputs for m in draft.material):
-        failed.append("pasted material not copied")
+        failed.append("draft: pasted material not copied")
     return failed
 
 
@@ -952,9 +987,16 @@ def key_found(key: str, text: str) -> bool:
 
 
 def retention(text: str, draft: Draft) -> float:
-    """Share of the draft's specifics the rewrite carries over (a metric, not a check)."""
+    """Share of the draft's specifics the rewrite carries over (a metric, not a check).
+
+    INPUTS is left out unless the draft pastes material (`Draft.material`): there the rewrite
+    often quotes the draft itself (a non-English draft's original), so a key found only in
+    INPUTS says nothing about the rewrite. Pasted material belongs in INPUTS, so for those
+    drafts it counts."""
     if not draft.keys:
         return 1.0
+    if not draft.material:
+        text = re.sub(r"<INPUTS>.*?</INPUTS>", "", text, flags=re.DOTALL)
     return sum(any(key_found(k, text) for k in alts) for alts in draft.keys) / len(draft.keys)
 
 
@@ -979,6 +1021,7 @@ class Result:
     fenced: bool = False  # the CLI stripped a code fence around the reply (counted, not failed)
     retention: float = 0.0
     failed: list[str] = field(default_factory=list)
+    scored: list[str] = field(default_factory=list)  # the KINDS this run was scored on
     error: str | None = None
     skipped: bool = False
 
@@ -1225,10 +1268,12 @@ def _run_one(
             text = repair_template_tags(text)
         failed = check(text, draft.plan, draft.independent, scaffold_tags(sys_prompt))
         failed += check_draft(text, draft, persona)
+        scored = template_kinds(failed, draft)
     else:
         failed = check_general(text, draft)
+        scored = ["struct", "draft"]  # no template, so no branch to choose
     if finish_reason == "length":
-        failed.insert(0, "truncated")
+        failed.insert(0, "struct: truncated")
 
     slug = spec.replace("/", "_").replace("@", "__at__").replace("~", "__effort__")
     (outdir / f"{slug}__{draft_name}__{run}.txt").write_text(text, encoding="utf-8")
@@ -1245,6 +1290,7 @@ def _run_one(
         fenced=fenced,
         retention=retention(text, draft),
         failed=failed,
+        scored=scored,
     )
 
 
@@ -1263,6 +1309,28 @@ def _p95(values: list[float]) -> float | None:
 
 def _cell(value: float | None, spec: str) -> str:
     return "-" if value is None else format(value, spec)
+
+
+WILSON_Z = 1.959963984540054  # two-sided 95%
+
+
+def wilson(passed: int, runs: int, z: float = WILSON_Z) -> tuple[float, float]:
+    """Wilson score interval of a pass rate. Unlike p +- z*SE it stays within 0..1 and is not
+    zero-width at 0/n or n/n, which matters at the bench's 3 to 6 runs per draft."""
+    if runs <= 0:
+        raise ValueError("a pass rate needs at least one run")
+    p = passed / runs
+    scale = 1 + z * z / runs
+    centre = (p + z * z / (2 * runs)) / scale
+    half = z * math.sqrt(p * (1 - p) / runs + z * z / (4 * runs * runs)) / scale
+    return max(0.0, centre - half), min(1.0, centre + half)
+
+
+def _rate(passed: int, runs: int) -> str:
+    if not runs:
+        return "-"
+    low, high = wilson(passed, runs)
+    return f"{passed}/{runs} {low:.2f}-{high:.2f}"
 
 
 def write_results(path: Path, results: list[Result]) -> None:
@@ -1416,6 +1484,21 @@ def report(results: list[Result], budget: Budget, meta: dict[str, object] | None
             ds = [r for r in by_model[model] if r.draft == d and not r.skipped]
             cells.append(f"{sum(r.ok for r in ds)}/{len(ds)}" if ds else "-")
         print(f"{d[:18]:18s}" + "".join(f"{c:>7s}" for c in cells))
+
+    # Read a delta per kind and against its interval: most failures are one branch choice on
+    # a few borderline drafts, and at 3 to 6 runs per draft an interval spans tens of points.
+    # Each kind counts only the runs scored on it; `all` is the pass column.
+    print("\npasses by kind, Wilson 95% interval (models numbered as above):")
+    print(f"{'':6s}" + "".join(f"{k:>19s}" for k in (*KINDS, "all")))
+    for i, model in enumerate(labels, 1):
+        rs = by_model[model]
+        cells = []
+        for kind in KINDS:
+            scored = [r for r in rs if kind in r.scored]
+            passing = [r for r in scored if not any(f.startswith(f"{kind}:") for f in r.failed)]
+            cells.append(_rate(len(passing), len(scored)))
+        cells.append(_rate(sum(r.ok for r in rs), sum(not r.skipped for r in rs)))
+        print(f"{f'[{i}]':6s}" + "".join(f"{c:>19s}" for c in cells))
 
     print("\nfailures:")
     any_failure = False

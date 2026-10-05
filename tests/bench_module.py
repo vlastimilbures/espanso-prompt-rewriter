@@ -15,7 +15,7 @@ _spec.loader.exec_module(bench)
 
 # A rewrite that satisfies every check for a plan-first, independent-review draft.
 GOOD = """<CONTEXT>
-I am working as a Head of Data. I want a board paper.
+I am working as a Head of Data at Example Corp. I want a board paper.
 </CONTEXT>
 
 <GOAL>
