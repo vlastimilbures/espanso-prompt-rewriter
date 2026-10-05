@@ -1,0 +1,323 @@
+"""The switch from an earlier checkout install (#110): a checklist over what detection found,
+each step previewed in a dialog whose Cancel has the focus, then done through the same
+service as its headless command (`config migrate --from`, `profiles migrate --checkout`,
+`espanso deploy`, `config retire --from`). Keys appear by name only, never their value."""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from pathlib import Path
+from typing import TYPE_CHECKING, ClassVar, cast
+
+from textual import on, work
+from textual.app import ComposeResult
+from textual.binding import Binding, BindingType
+from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.screen import Screen
+from textual.widgets import Button, Footer, Header, Static
+
+from .. import config_store, previous_install
+from ..commands import common
+from .modals import ConfirmModal, Field, FormModal
+from .panes import EXPECTED, TriggersPane, _error, copy_profiles, previous_root
+from .state import State
+
+if TYPE_CHECKING:
+    from .app import ManageApp
+
+INTRO = (
+    "An earlier install ran from a checkout of this project. This install never reads that "
+    "checkout's .env or profiles, so copy what you need, in this order. Each step shows a "
+    "preview first; nothing is deleted, and `prompt-workflow config rollback` undoes the copy."
+)
+GATED = {
+    previous_install.LEGACY: "PROMPT_WORKFLOW_ENV is set, so that file holds the settings",
+    previous_install.SAVED: "settings are already saved in config.toml",
+    previous_install.SECRETS: "a key is already saved in the secret store",
+}
+
+
+def wants_offer(found: previous_install.Detection) -> bool:
+    """Open the screen by itself: a checkout to copy from, or a copy whose old .env is still
+    in place and was not skipped."""
+    if found.candidates:
+        return True
+    pending = found.pending
+    return pending is not None and str(pending.root) not in previous_install.skipped_roots()
+
+
+# Step button id -> label, in the order to do them.
+STEPS = {
+    "previous-copy": "Copy settings and keys…",
+    "previous-profiles": "Copy edited profiles…",
+    "previous-deploy": "Deploy the match files…",
+    "previous-retire": "Retire the old .env…",
+}
+
+
+class PreviousInstallScreen(Screen[None]):
+    # The digit in each step's label is its key, as on the tabs.
+    BINDINGS: ClassVar[list[BindingType]] = [
+        *(Binding(str(n), f"step('{step}')", show=False) for n, step in enumerate(STEPS, 1)),
+        Binding("escape", "close", "Close"),
+    ]
+
+    last_message = ""
+
+    def __init__(self) -> None:
+        super().__init__()
+        # The path typed into "Enter a path…": detected again with it on every refresh.
+        self.entered: Path | None = None
+        self.found = previous_install.Detection()
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        with VerticalScroll():
+            yield Static(INTRO, classes="note", markup=False)
+            yield Static("Looking…", markup=False, id="previous-found")
+            with Vertical(id="previous-steps"):
+                for n, (id_, label) in enumerate(STEPS.items(), 1):
+                    with Horizontal(classes="step"):
+                        yield Button(f"{n} {label}", id=id_)
+                        yield Static("", markup=False, id=f"{id_}-state", classes="step-state")
+            yield Horizontal(
+                Button("Enter a path…", id="previous-enter"),
+                Button("Skip this checkout", id="previous-skip"),
+                Button("Close", id="previous-close"),
+                classes="buttons",
+            )
+            yield Static("", classes="result", markup=False)
+        yield Footer()
+
+    @property
+    def manage(self) -> ManageApp:
+        return cast("ManageApp", self.app)
+
+    def on_mount(self) -> None:
+        if self.manage.state is not None:
+            self.show(self.manage.state)
+
+    # --- What is shown --------------------------------------------------------------------
+
+    def show(self, state: State) -> None:
+        """Fill the screen from a fresh State; with an entered path, detect again with it."""
+        if self.entered is None:
+            self.render_found(state.previous, state.previous_error)
+        else:
+            self._detect(self.entered)
+
+    @work(thread=True, group="previous", exclusive=True, exit_on_error=False)
+    def _detect(self, entered: Path) -> None:
+        try:
+            found = previous_install.detect(entered=entered)
+        except EXPECTED as exc:
+            self.app.call_from_thread(self.render_found, previous_install.Detection(), str(exc))
+            return
+        self.app.call_from_thread(self.render_found, found, None)
+
+    def render_found(self, found: previous_install.Detection, error: str | None) -> None:
+        self.found = found
+        best = previous_install.best(found.candidates)
+        pending = found.pending
+        lines: list[str] = []
+        if error:
+            lines.append(f"Could not look for a previous install: {error}")
+        for candidate in found.candidates:
+            signals = ", ".join(sorted(candidate.signals))
+            env = ".env present" if candidate.env_file else "no .env"
+            lines.append(f"Previous install: {candidate.root} ({signals}); {env}")
+        if pending is not None:
+            lines.append(f"Settings copied from {pending.root}; its .env is still in place.")
+        if not found.candidates and pending is None:
+            if found.gated:
+                lines.append(f"Nothing to look for: {GATED.get(found.gated, found.gated)}.")
+            else:
+                lines.append(
+                    "No previous install found. If you ran it from a checkout, enter its path."
+                )
+        if found.shadow:
+            lines.append(
+                f"`prompt-workflow` on PATH is {found.shadow.path}, not {found.shadow.launcher}: "
+                f"{found.shadow.hint}"
+            )
+        self.query_one("#previous-found", Static).update("\n".join(lines))
+
+        inside = (best.launchers_in_root if best else ()) or (
+            pending.launchers_in_root if pending else ()
+        )
+        copied = pending is not None
+        steps = {
+            "previous-copy": (
+                (False, "done: the settings were copied")
+                if copied
+                else (True, f"to do: from {best.env_file}")
+                if best and best.env_file
+                else (False, "nothing to copy: no .env")
+            ),
+            "previous-profiles": (
+                (True, f"from {best.profiles_dir if best else previous_root(found)}")
+                if (best and best.profiles_dir) or (best is None and pending is not None)
+                else (False, "no profiles folder")
+            ),
+            "previous-deploy": (
+                (True, f"to do: the match files still run {', '.join(inside)}")
+                if inside
+                else (True, "the match files no longer run the old CLI")
+            ),
+            "previous-retire": (
+                (True, f"ready: {pending.env_file}")
+                if pending is not None and not pending.launchers_in_root
+                else (False, "after steps 1 and 3")
+                if best or pending
+                else (False, "nothing to retire")
+            ),
+        }
+        for id_, (enabled, text) in steps.items():
+            self.query_one(f"#{id_}", Button).disabled = not enabled
+            self.query_one(f"#{id_}-state", Static).update(text)
+        self.query_one("#previous-skip", Button).disabled = best is None and pending is None
+
+    def report(self, message: str, *, error: bool = False) -> None:
+        self.last_message = message
+        self.query_one(".result", Static).update(message)
+        self.app.notify(message, severity="error" if error else "information", markup=False)
+
+    def attempt(self, action: Callable[[], str], *, reload: bool = True) -> None:
+        """Run a change; show its message, or the error a headless command would print."""
+        try:
+            message = action()
+        except Exception as exc:
+            self.report(_error(exc), error=True)
+            return
+        self.report(message)
+        if reload:
+            self.manage.reload()
+
+    # --- Steps ----------------------------------------------------------------------------
+
+    def action_step(self, step: str) -> None:
+        button = self.query_one(f"#{step}", Button)
+        if not button.disabled:
+            button.press()
+
+    def _ask(self, title: str, preview: str, confirm: str, action: Callable[[], str]) -> None:
+        def done(yes: bool | None) -> None:
+            if yes:
+                self.attempt(action)
+
+        self.app.push_screen(ConfirmModal(title, preview, confirm=confirm), done)
+
+    @on(Button.Pressed, "#previous-copy")
+    def _copy(self) -> None:
+        best = previous_install.best(self.found.candidates)
+        if best is None:
+            return
+        root = best.root
+        try:
+            plan = config_store.plan_migration(source=root)
+        except EXPECTED as exc:
+            self.report(_error(exc), error=True)
+            return
+        if plan.status != "ready":
+            self.report("\n".join(plan.describe()))
+            return
+        preview = "\n".join(
+            [*plan.describe(), "", "A backup is kept; `prompt-workflow config rollback` undoes it."]
+        )
+
+        def apply() -> str:
+            result = config_store.apply_migration(source=root, consent=plan.token)
+            return (
+                f"Copied; backup in {result.backup}. Next: deploy the match files (step 3), "
+                "so the triggers use these settings."
+            )
+
+        self._ask(f"Copy the settings of {root}?", preview, "Copy", apply)
+
+    @on(Button.Pressed, "#previous-profiles")
+    def _profiles(self) -> None:
+        root = previous_root(self.found)
+        if root is not None:
+            copy_profiles(self, root)
+
+    @on(Button.Pressed, "#previous-deploy")
+    def _deploy(self) -> None:
+        triggers = self.manage.main.query_one("#triggers-pane", TriggersPane)
+        best = previous_install.best(self.found.candidates)
+        if best is None or best.env_file is None or self.found.pending is not None:
+            triggers.start_deploy()
+            return
+
+        def done(yes: bool | None) -> None:
+            if yes:
+                triggers.start_deploy()
+
+        # As setup's deploy step (#110): deploying before the copy leaves the triggers with
+        # neither the old settings nor the new ones.
+        self.app.push_screen(
+            ConfirmModal(
+                f"The settings of {best.root} are not copied yet. Deploy anyway?",
+                "Deploying now points the triggers at this install, which has none of those "
+                "settings and no key. Copy them first (step 1).",
+                confirm="Deploy anyway",
+            ),
+            done,
+        )
+
+    @on(Button.Pressed, "#previous-retire")
+    def _retire(self) -> None:
+        pending = self.found.pending
+        if pending is None:
+            return
+        root = pending.root
+        try:
+            plan = config_store.plan_retire(root)
+        except EXPECTED as exc:
+            self.report(_error(exc), error=True)
+            return
+
+        def apply() -> str:
+            place = config_store.apply_retire(root, consent=plan.token)
+            return f"Retired: {plan.env_file} -> {place}"
+
+        self._ask(f"Retire the old .env of {root}?", "\n".join(plan.describe()), "Retire", apply)
+
+    @on(Button.Pressed, "#previous-enter")
+    def _enter(self) -> None:
+        fields = [Field("previous-path", "The checkout's folder", placeholder="~/Projects/…")]
+        self.app.push_screen(
+            FormModal("Where did you run it from?", fields, submit="Look"), self._entered
+        )
+
+    def _entered(self, values: dict[str, str] | None) -> None:
+        if values is None:
+            return
+        text = values["previous-path"].strip()
+        try:
+            common.no_key(text, "the path")
+        except EXPECTED as exc:
+            self.report(_error(exc), error=True)
+            return
+        if not text:
+            self.report("No path entered.", error=True)
+            return
+        self.entered = Path(text).expanduser()
+        self._detect(self.entered)
+
+    @on(Button.Pressed, "#previous-skip")
+    def _skip(self) -> None:
+        roots = [c.root for c in self.found.candidates]
+        if self.found.pending is not None:
+            roots.append(self.found.pending.root)
+        try:
+            for root in roots:
+                previous_install.skip(root)
+        except OSError as exc:
+            self.report(_error(exc), error=True)
+            return
+        self.app.notify("Skipped; Home > Previous install… opens this again.", markup=False)
+        self.dismiss()
+
+    @on(Button.Pressed, "#previous-close")
+    def action_close(self) -> None:
+        self.dismiss()

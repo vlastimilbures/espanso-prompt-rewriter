@@ -11,7 +11,7 @@ import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from datetime import timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import typer
 from rich.text import Text
@@ -20,7 +20,7 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, VerticalScroll
 from textual.widgets import Button, DataTable, Select, Static
 
-from .. import config_store, deploy, doctor, history, smoke
+from .. import config_store, deploy, doctor, history, previous_install, smoke
 from .. import profiles as profile_service
 from ..commands import common, usage
 from ..commands import doctor as doctor_cmd
@@ -34,6 +34,8 @@ from .modals import ConfirmModal, Field, FormModal, TextModal
 from .state import State, current_plan
 
 if TYPE_CHECKING:
+    from textual.widget import Widget
+
     from .app import ManageApp
 
 # What a save, a deletion or a deploy may raise for the person to read: the same errors the
@@ -144,7 +146,16 @@ def _error(exc: Exception) -> str:
 
 # --- Home ---------------------------------------------------------------------------------
 
-HOME_CHECKS = ("version", "install", "config", "keys", "espanso", "match_files", "launcher")
+HOME_CHECKS = (
+    "version",
+    "install",
+    "config",
+    "keys",
+    "espanso",
+    "match_files",
+    "launcher",
+    "previous_install",
+)
 
 
 class HomePane(Pane):
@@ -157,7 +168,7 @@ class HomePane(Pane):
         )
         yield Static("Checking…", markup=False, id="home-checks")
         yield Static("", markup=False, id="home-history")
-        yield _buttons(("home-reload", "Check again"))
+        yield _buttons(("home-reload", "Check again"), ("home-previous", "Previous install…"))
         yield self.result()
 
     def show(self, state: State) -> None:
@@ -167,6 +178,10 @@ class HomePane(Pane):
     @on(Button.Pressed, "#home-reload")
     def _reload(self) -> None:
         self.manage.reload()
+
+    @on(Button.Pressed, "#home-previous")
+    def _previous(self) -> None:
+        self.manage.open_previous()
 
 
 # --- Providers & keys ---------------------------------------------------------------------
@@ -492,40 +507,64 @@ class ProfilesPane(Pane):
 
     @on(Button.Pressed, "#migrate-profiles")
     def _migrate(self) -> None:
-        try:
-            root = profiles_cmd._checkout(None)
-            source = root / profile_service.PROMPTS_PATH
-            pristine = profile_service.git_pristine_profiles(root)
-            changed = profile_service.changed_profiles(source, pristine)
-        except EXPECTED as exc:
-            self.report(f"error: {exc}", error=True)
-            return
-        if not changed:
-            self.report("No added or edited profiles; nothing to copy.")
-            return
-        dest = user_profiles_dir()
-        preview = "\n".join(
-            f"{name}.md ({change}) -> {dest / f'{name}.md'}" for name, change in changed.items()
+        # The earlier checkout detection found (#110), else this editable install's own.
+        root = previous_root(self.state.previous) if self.state else None
+        copy_profiles(self, root)
+
+
+def previous_root(found: previous_install.Detection) -> Path | None:
+    """The earlier checkout to offer: the best candidate, else the one a copy left pending."""
+    best = previous_install.best(found.candidates)
+    if best is not None:
+        return best.root
+    return found.pending.root if found.pending else None
+
+
+class Reporter(Protocol):
+    def report(self, message: str, *, error: bool = False) -> None: ...
+
+    def attempt(self, action: Callable[[], str], *, reload: bool = True) -> None: ...
+
+
+def copy_profiles(owner: Reporter, root: Path | None) -> None:
+    """Preview the profiles added or edited in the checkout at ``root`` (None: this editable
+    install's), then copy them on Yes, as `profiles migrate --checkout` does."""
+    try:
+        root = profiles_cmd._checkout(None if root is None else str(root))
+        source = root / profile_service.PROMPTS_PATH
+        pristine = profile_service.git_pristine_profiles(root)
+        changed = profile_service.changed_profiles(source, pristine)
+    except EXPECTED as exc:
+        owner.report(f"error: {exc}", error=True)
+        return
+    if not changed:
+        owner.report("No added or edited profiles; nothing to copy.")
+        return
+    dest = user_profiles_dir()
+    preview = "\n".join(
+        [f"From {root}:"]
+        + [f"{name}.md ({change}) -> {dest / f'{name}.md'}" for name, change in changed.items()]
+    )
+
+    def done(yes: bool | None) -> None:
+        if yes:
+            owner.attempt(lambda: _copy(source, pristine, dest, "default" in changed))
+
+    cast("Widget", owner).app.push_screen(
+        ConfirmModal("Copy these profiles? (copies only, never overwrites)", preview), done
+    )
+
+
+def _copy(source: Path, pristine: dict[str, str], dest: Path, default: bool) -> str:
+    lines = [
+        f"{item.name}: {item.status}"
+        for item in profile_service.migrate_profiles(source, pristine, dest)
+    ]
+    if default:
+        lines.append(
+            "A copied default.md is used only once PROMPT_PROFILE_OVERRIDES includes default."
         )
-
-        def done(yes: bool | None) -> None:
-            if yes:
-                self.attempt(lambda: self._copy(source, pristine, dest, "default" in changed))
-
-        self.app.push_screen(
-            ConfirmModal("Copy these profiles? (copies only, never overwrites)", preview), done
-        )
-
-    def _copy(self, source: Path, pristine: dict[str, str], dest: Path, default: bool) -> str:
-        lines = [
-            f"{item.name}: {item.status}"
-            for item in profile_service.migrate_profiles(source, pristine, dest)
-        ]
-        if default:
-            lines.append(
-                "A copied default.md is used only once PROMPT_PROFILE_OVERRIDES includes default."
-            )
-        return "\n".join(lines)
+    return "\n".join(lines)
 
 
 # --- Triggers -----------------------------------------------------------------------------
@@ -596,6 +635,11 @@ class TriggersPane(Pane):
 
     @on(Button.Pressed, "#deploy")
     def _deploy(self) -> None:
+        self.start_deploy()
+
+    def start_deploy(self) -> None:
+        """Read the plan in a worker, then preview it in a dialog (also the previous install
+        screen's step 3)."""
         if self.claim():
             self.report("Reading the match files…")
             self.background(lambda: self.app.call_from_thread(self._ask_deploy, current_plan()))

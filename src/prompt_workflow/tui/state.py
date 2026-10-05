@@ -3,9 +3,9 @@ moment. It is read again after every change, so no screen keeps a stale value (#
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-from .. import assets, deploy, doctor, history
+from .. import assets, deploy, doctor, history, previous_install
 from ..commands import common
 from ..commands.usage import store
 from ..config import ConfigLayers, Settings
@@ -25,6 +25,10 @@ class State:
     group_by: str
     stats: list[history.StatsRow]
     stats_error: str | None
+    # An earlier checkout install to switch from (#110), with previous_error saying why
+    # nothing could be looked for.
+    previous: previous_install.Detection = field(default_factory=previous_install.Detection)
+    previous_error: str | None = None
 
 
 def current_plan() -> deploy.Plan:
@@ -37,7 +41,8 @@ def current_plan() -> deploy.Plan:
 
 def gather(group_by: str = "trigger") -> State:
     """Everything the screens show. Read-only: doctor without the clipboard, the deploy plan,
-    the profiles and the usage stats, each failure kept to show instead of raised."""
+    the profiles, the usage stats and an earlier checkout install, each failure kept to show
+    instead of raised."""
     layers, settings = common.load_layers()
     report = doctor.run(clipboard=False)
     plan: deploy.Plan | None = None
@@ -52,6 +57,12 @@ def gather(group_by: str = "trigger") -> State:
         stats = store(settings).stats(group_by)
     except (history.HistoryError, OSError, ValueError) as exc:
         stats_error = str(exc) or type(exc).__name__
+    previous = previous_install.Detection()
+    previous_error = None
+    try:
+        previous = previous_install.detect()
+    except (deploy.DeployError, OSError, ValueError) as exc:
+        previous_error = str(exc) or type(exc).__name__
     return State(
         layers=layers,
         settings=settings,
@@ -63,4 +74,6 @@ def gather(group_by: str = "trigger") -> State:
         group_by=group_by,
         stats=stats,
         stats_error=stats_error,
+        previous=previous,
+        previous_error=previous_error,
     )

@@ -288,6 +288,12 @@ def manifest_launchers() -> set[str]:
     return {e.launcher for e in manifest.entries.values() if not deploy.is_gone(e)}
 
 
+def best(candidates: tuple[Candidate, ...]) -> Candidate | None:
+    """The candidate to offer first: the one the user entered, else the first with a .env."""
+    ranked = sorted(candidates, key=lambda c: (ENTERED not in c.signals, c.env_file is None))
+    return ranked[0] if ranked else None
+
+
 def detect(
     environ: Mapping[str, str] | None = None,
     *,

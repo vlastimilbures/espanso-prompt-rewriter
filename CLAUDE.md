@@ -254,7 +254,14 @@ in README and in the CHANGELOG's Unreleased and newest release notes, and every 
   crashing; base URLs and models are shown through `common.shown_value()`. No provider call except the explicit
   "Test call" (`smoke.run()`); doctor runs without the clipboard. Bindings are letters and digits
   only (on `MainScreen`, so none fires under a dialog); `t` switches to the high-contrast theme;
-  Textual honours `NO_COLOR`; exit is `sys.exit(app.return_code or 0)`. `tests/test_tui.py`
+  Textual honours `NO_COLOR`; exit is `sys.exit(app.return_code or 0)`. `tui/previous.py`'s
+  `PreviousInstallScreen` (#110) opens by itself once per session when `State.previous`
+  (`previous_install.detect()`) has a candidate or an unskipped pending copy, and from Home's
+  "Previous install…": four steps (copy via `plan_migration(source=)`, profiles via
+  `panes.copy_profiles()`, deploy via `TriggersPane.start_deploy()`, retire via
+  `plan_retire()`, enabled only once no launcher points into the checkout), digits 1-4 as keys,
+  "Enter a path…" (detected again with `entered=`) and "Skip" (the skip marker, pending root
+  too). `tests/test_tui.py`
   drives each tab with Pilot (`asyncio.run`, no pytest-asyncio); `tests/test_tui_snapshots.py`
   compares SVG exports with `tests/snapshots/` (Linux and macOS; `UPDATE_SNAPSHOTS=1`
   regenerates them, and the Home one is `docs/interface.svg`).
@@ -277,7 +284,10 @@ in README and in the CHANGELOG's Unreleased and newest release notes, and every 
   the gate) is a copy from `migration.json` whose `.env` is not retired yet: doctor WARNs
   (`retire_pending`) once no launcher points into it. `setup` offers the copy at the start of
   its Settings step (`--migrate-from PATH`), then the profiles, and the retire after the
-  deploy step. Doctor's `previous_install` check; off the trigger path.
+  deploy step; a broken `.env` in a checkout it found by itself (not entered) is a to-do and
+  setup then writes nothing, since config.toml or a key would close the gate. `best()` picks the
+  candidate setup and the interface offer. Doctor's `previous_install` check; off the trigger
+  path.
 - `smoke.py` — `setup`'s smoke test: a `ThreadingHTTPServer` on 127.0.0.1:0 answering the
   OpenAI-compatible, Anthropic and Ollama shapes, and a child `python -m prompt_workflow.cli
   improve --provider <p>` whose env points every `*_BASE_URL` at it with a placeholder key (the

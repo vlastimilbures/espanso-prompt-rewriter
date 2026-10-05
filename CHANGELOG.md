@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+Upgrading from the install scripts (an editable checkout install) to the release wheel: you no
+longer need to migrate from the old install first. Install the wheel, then run
+`prompt-workflow setup` (or open the interface): it finds the checkout, copies its settings,
+key and edited profiles with your consent, and deploys the match files. If it finds nothing,
+name the checkout: `prompt-workflow setup --migrate-from PATH`. The checkout's `.env` stays in
+place until `prompt-workflow config retire --from PATH`.
+
 ### Added
 - `prompt-workflow doctor` has a new `previous_install` check (#110). Before any setting is
   saved (no `config.toml`, no secret store, not in `PROMPT_WORKFLOW_ENV` mode) it looks for an
@@ -26,7 +33,16 @@ All notable changes to this project are documented here. The format follows
   CLI. Both show a preview first, and `config rollback` undoes either. `prompt-workflow setup`
   offers the copy (and the checkout's edited profiles) when it finds such a checkout, or the
   one `--migrate-from PATH` names, and the retire after the deploy step; `doctor` warns while
-  a copied `.env` is still in place.
+  a copied `.env` is still in place. A broken `.env` in a checkout setup found by itself is a
+  to-do, not a failure, and setup then saves nothing, so the offer stays open.
+- The interface (`prompt-workflow ui`) opens a "Previous install" checklist once per session
+  when it finds such a checkout, or a copied `.env` still in place (#110): copy the settings
+  and key, copy the edited profiles, deploy the match files, then retire the old `.env`. Each
+  step shows its preview in a dialog whose Cancel has the focus and runs the same service as
+  its command; keys are named, never shown. "Enter a path…" looks at a checkout you name, and
+  "Skip this checkout" stops the offer for it. Home has a "Previous install…" button and the
+  `previous_install` check, and the Profiles tab's "Migrate from checkout" uses the checkout
+  found.
 
 ## 0.16.1 - 2026-10-05
 

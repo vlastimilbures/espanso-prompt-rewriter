@@ -219,18 +219,27 @@ judge its launcher.
 ## Updating
 
 **Coming from a checkout** (the install scripts, an editable install)? The wheel never reads the
-checkout's `.env`, so move your settings first:
+checkout's `.env` or its profiles, but it can copy them. Leave the checkout and its `.env` where
+they are, so the old triggers keep working until the match files are deployed again:
 
-1. Update the checkout (`git pull`) and re-run the install script (see
-   [Development](#development)), so the tool's venv gets the new dependencies.
-2. Run `prompt-workflow config migrate` to move the settings to `config.toml` and the key to
-   `secrets.toml`. Or move the `.env` to the config folder (`~/.config/prompt-workflow/.env`,
-   `%APPDATA%\prompt-workflow\.env` on Windows), where the wheel reads it too, or point
-   `PROMPT_WORKFLOW_ENV` at it (set for GUI apps, since Espanso does not inherit your shell).
-   A guided path is planned (#110).
-3. If you added or edited profiles under the checkout's `src/prompt_workflow/prompts/`, run
-   `prompt-workflow profiles migrate` too: the wheel ships only the built-in profiles.
-4. Continue below.
+1. Install the wheel as shown below, then run `prompt-workflow setup` (or open the interface,
+   `prompt-workflow`, which shows a "Previous install" checklist). It finds the checkout through
+   the deployed match files, the deploy manifest or uv's receipt, and offers to copy the
+   settings and key (only those still at their default here) and the profiles you edited, then
+   to deploy the match files. If it finds nothing (a `--force` install overwrites uv's receipt,
+   and a uv launcher does not point into the checkout), name the checkout:
+   `prompt-workflow setup --migrate-from PATH`. Without setup: `prompt-workflow config migrate
+   --from PATH` and `prompt-workflow profiles migrate --checkout PATH`, then
+   `prompt-workflow espanso deploy`.
+2. Once the match files no longer run the checkout's CLI, `prompt-workflow config retire --from
+   PATH` moves the old `.env` into the backup. `prompt-workflow config rollback` undoes the copy
+   and the retire.
+3. If `doctor` says `prompt-workflow` on `PATH` is the checkout's, run `deactivate` (its `.venv`
+   is active) or take it off `PATH`.
+
+Or keep a `.env`: move it to the config folder (`~/.config/prompt-workflow/.env`,
+`%APPDATA%\prompt-workflow\.env` on Windows), where the wheel reads it too, or point
+`PROMPT_WORKFLOW_ENV` at it (set for GUI apps, since Espanso does not inherit your shell).
 
 Install the new release's wheel with its own `constraints.txt`. `--force` makes uv install over
 the tool already there (the install scripts pass it too). Then check the result:

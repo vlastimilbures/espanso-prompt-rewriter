@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from prompt_workflow import assets, deploy, doctor
+from prompt_workflow import assets, deploy, doctor, previous_install
 from prompt_workflow.config import ConfigLayers
 from prompt_workflow.history import StatsRow
 from prompt_workflow.prompt_builder import UserProfile
@@ -52,6 +52,7 @@ _MESSAGES = {
     "sqlite": (doctor.OK, "SQLite 3.51.3"),
     "clipboard": (doctor.INFO, "skipped (--no-clipboard)"),
     "profiles": (doctor.OK, "PROMPT_PROFILE default resolves"),
+    "previous_install": (doctor.OK, "settings are in place; nothing to look for"),
 }
 _DATA = {
     "history": {"lost_writes": 0, "last_lost_utc": None, "tracking_incomplete": False},
@@ -109,7 +110,9 @@ def _stats() -> list[StatsRow]:
     ]
 
 
-def fixed_state(group_by: str = "trigger") -> State:
+def fixed_state(
+    group_by: str = "trigger", previous: previous_install.Detection | None = None
+) -> State:
     environ = {
         "XDG_CONFIG_HOME": f"{HOME}/.config",
         "HOME": HOME,
@@ -142,7 +145,22 @@ def fixed_state(group_by: str = "trigger") -> State:
         group_by=group_by,
         stats=_stats(),
         stats_error=None,
+        previous=previous or previous_install.Detection(),
     )
+
+
+def previous_state(group_by: str = "trigger") -> State:
+    """An earlier checkout install found through the old match files (#110)."""
+    root = Path(f"{HOME}/Projects/espanso-prompt-rewriter")
+    launcher = f"{root}/.venv/bin/prompt-workflow"
+    candidate = previous_install.Candidate(
+        root=root,
+        signals=frozenset({previous_install.LAUNCHER, previous_install.RECEIPT}),
+        env_file=root / ".env",
+        launchers_in_root=(launcher,),
+        profiles_dir=root / "src" / "prompt_workflow" / "prompts",
+    )
+    return fixed_state(group_by, previous_install.Detection(candidates=(candidate,)))
 
 
 @pytest.fixture(autouse=True)
@@ -173,8 +191,8 @@ def _check(name: str, svg: str, *also: Path) -> None:
         )
 
 
-def _shoot(key: str, theme: str | None = None) -> str:
-    app = ManageApp(loader=fixed_state)
+def _shoot(key: str | None, theme: str | None = None, loader=fixed_state) -> str:
+    app = ManageApp(loader=loader)
     # The active tab's underline slides into place; a snapshot must not catch it midway.
     app.animation_level = "none"
     shots = []
@@ -186,7 +204,8 @@ def _shoot(key: str, theme: str | None = None) -> str:
                 await app.workers.wait_for_complete()
             if theme:
                 app.theme = theme
-            await pilot.press(key)
+            if key:
+                await pilot.press(key)
             await pilot.pause()
             shots.append(app.export_screenshot(title="prompt-workflow"))
 
@@ -211,3 +230,7 @@ def test_snapshot(name, key):
 
 def test_snapshot_high_contrast():
     _check("home-high-contrast", _shoot("1", HIGH_CONTRAST.name))
+
+
+def test_snapshot_previous_install():
+    _check("previous-install", _shoot(None, loader=previous_state))

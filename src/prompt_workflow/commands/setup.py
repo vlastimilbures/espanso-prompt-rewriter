@@ -74,11 +74,7 @@ def _previous_install(
         typer.echo(f"    {env_file}; profiles folder: {'yes' if candidate.profiles_dir else 'no'}")
         for deployed in candidate.launchers_in_root:
             typer.echo(f"    the match files still run {deployed}")
-    ranked = sorted(
-        found.candidates,
-        key=lambda c: (previous_install.ENTERED not in c.signals, c.env_file is None),
-    )
-    return ranked[0]
+    return previous_install.best(found.candidates)
 
 
 def _settings_writable(
@@ -101,8 +97,12 @@ def _settings_writable(
             steps.fail("settings", f"{exc}")
             return False
         # A checkout setup found by itself never fails setup: it is offered, not asked for.
-        steps.later(f"its settings were not copied: {exc}")
-        return _settings_writable(steps, interactive)
+        # Nothing is written either: config.toml or a key would close the offer for good.
+        steps.later(
+            f"its settings were not copied: {exc}; then run "
+            f"`prompt-workflow config migrate --from {copy_from}`"
+        )
+        return False
     if plan.status != "ready":
         if copy_from is not None:
             typer.echo(f"  Nothing was copied from {copy_from}: {plan.describe()[0]}")
