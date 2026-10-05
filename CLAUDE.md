@@ -287,7 +287,8 @@ Rules for agents:
   too). `tests/test_tui.py`
   drives each tab with Pilot (`asyncio.run`, no pytest-asyncio); `tests/test_tui_snapshots.py`
   compares SVG exports with `tests/snapshots/` (Linux and macOS; `UPDATE_SNAPSHOTS=1`
-  regenerates them, and the Home one is `docs/interface.svg`).
+  regenerates them, and the Home one is `docs/interface.svg`). The header shows
+  `prompt-workflow <version>` (#112); the snapshots pin the version, so a release changes none.
 - `doctor.py` — `run()` returns a `Report` of the fixed `CHECK_IDS` (JSON `schema_version` 1:
   only add ids/keys). Read-only: `espanso path config`/`espanso status` and the launcher lookup
   via `run_command`; keys as set/not set; the clipboard only as a length (never read when

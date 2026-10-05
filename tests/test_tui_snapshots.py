@@ -24,6 +24,7 @@ from prompt_workflow import assets, deploy, doctor, previous_install
 from prompt_workflow.config import ConfigLayers
 from prompt_workflow.history import StatsRow
 from prompt_workflow.prompt_builder import UserProfile
+from prompt_workflow.tui import app as app_module
 from prompt_workflow.tui.app import HIGH_CONTRAST, ManageApp
 from prompt_workflow.tui.state import State
 
@@ -38,9 +39,11 @@ SIZE = (110, 36)
 HOME = "/home/me"
 ESPANSO = Path(f"{HOME}/.config/espanso")
 LAUNCHER = f"{HOME}/.local/bin/prompt-workflow"
+# The header's version (#112), pinned so a release regenerates no snapshot.
+VERSION = "0.16.0"
 
 _MESSAGES = {
-    "version": (doctor.INFO, "prompt-workflow 0.16.0"),
+    "version": (doctor.INFO, f"prompt-workflow {VERSION}"),
     "cli": (doctor.INFO, f"running {LAUNCHER}"),
     "install": (doctor.OK, f"uv: {LAUNCHER}"),
     "config": (doctor.OK, f"valid (saved: {HOME}/.config/prompt-workflow/config.toml)"),
@@ -165,7 +168,9 @@ def previous_state(group_by: str = "trigger") -> State:
 
 @pytest.fixture(autouse=True)
 def fixed_paths(monkeypatch):
-    """The paths a pane reads itself (the history file, the profile folder) are fixed too."""
+    """The paths a pane reads itself (the history file, the profile folder) are fixed too,
+    and so is the version in the header."""
+    monkeypatch.setattr(app_module, "__version__", VERSION)
     monkeypatch.delenv("PROMPT_WORKFLOW_ENV")
     monkeypatch.setenv("XDG_CONFIG_HOME", f"{HOME}/.config")
     monkeypatch.setenv("XDG_DATA_HOME", f"{HOME}/.local/share")

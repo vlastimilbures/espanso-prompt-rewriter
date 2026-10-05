@@ -171,6 +171,24 @@ def test_digits_switch_tabs_and_t_toggles_contrast(espanso):
     assert seen == [True] * 8
 
 
+def test_header_shows_the_name_and_installed_version(espanso, monkeypatch):
+    """#112: the header names the tool and its version on every screen."""
+    from textual.widgets._header import HeaderTitle
+
+    from prompt_workflow.tui import app as app_module
+
+    monkeypatch.setattr(app_module, "__version__", "9.8.7")
+    seen = []
+
+    async def scenario(app, pilot):
+        seen.append(str(app.main.query_one(HeaderTitle).render()))
+        await pilot.press("6")
+        seen.append(str(app.main.query_one(HeaderTitle).render()))
+
+    drive(scenario)
+    assert seen == ["prompt-workflow 9.8.7 — set up and manage"] * 2
+
+
 def test_a_failing_load_is_shown_not_raised(espanso):
     def broken(group_by):
         raise RuntimeError("boom")

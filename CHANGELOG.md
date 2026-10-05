@@ -35,6 +35,10 @@ All notable changes to this project are documented here. The format follows
   draft it blocks pastes `[prompt-workflow: Blocked call to the local server …]`.
 
 
+### Added
+- The interface's header now shows the installed version next to the name
+  (`prompt-workflow 0.17.0 — set up and manage`) on every screen (#112).
+
 ### Changed
 - README and `.env.example` say that an `http://` Ollama or LM Studio base URL on another
   machine sends the draft in clear text over the network (only the cloud providers require
