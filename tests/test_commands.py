@@ -424,6 +424,8 @@ def _commands(espanso: Path) -> dict[tuple[str, ...], list[list[str]]]:
         ("espanso", "detach"): [["espanso", "detach", "--yes"]],
         ("improve",): [["improve", "--source", "argument", "--text", "a draft"]],
         ("persona",): [["persona"]],
+        # Without a terminal (as here) the interface exits 3 before reading anything.
+        ("ui",): [["ui"]],
     }
 
 

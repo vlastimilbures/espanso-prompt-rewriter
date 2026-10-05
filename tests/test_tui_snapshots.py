@@ -1,0 +1,213 @@
+"""SVG snapshots of every tab of the interface (#93), from a fixed State at a fixed terminal
+size and theme, compared with the committed SVGs in tests/snapshots/. The Home snapshot is
+also the README's screenshot (docs/interface.svg).
+
+After an intended change, regenerate and review them:
+
+    UPDATE_SNAPSHOTS=1 uv run pytest tests/test_tui_snapshots.py
+
+Linux and macOS only: Windows renders the same screens, but its snapshots were never checked,
+so its Pilot tests (tests/test_tui.py) cover it instead.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import os
+import sys
+from decimal import Decimal
+from pathlib import Path
+
+import pytest
+
+from prompt_workflow import assets, deploy, doctor
+from prompt_workflow.config import ConfigLayers
+from prompt_workflow.history import StatsRow
+from prompt_workflow.prompt_builder import UserProfile
+from prompt_workflow.tui.app import HIGH_CONTRAST, ManageApp
+from prompt_workflow.tui.state import State
+
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32", reason="snapshots are kept for Linux and macOS only (#93)"
+)
+
+REPO = Path(__file__).resolve().parents[1]
+SNAPSHOTS = Path(__file__).parent / "snapshots"
+README_SHOT = REPO / "docs" / "interface.svg"
+SIZE = (110, 36)
+HOME = "/home/me"
+ESPANSO = Path(f"{HOME}/.config/espanso")
+LAUNCHER = f"{HOME}/.local/bin/prompt-workflow"
+
+_MESSAGES = {
+    "version": (doctor.INFO, "prompt-workflow 0.16.0"),
+    "cli": (doctor.INFO, f"running {LAUNCHER}"),
+    "install": (doctor.OK, f"uv: {LAUNCHER}"),
+    "config": (doctor.OK, f"valid (saved: {HOME}/.config/prompt-workflow/config.toml)"),
+    "keys": (doctor.OK, "OPENROUTER_API_KEY: set, ANTHROPIC_API_KEY: not set"),
+    "espanso": (doctor.OK, f"running (config: {ESPANSO})"),
+    "match_files": (doctor.WARN, "some files are not ours as deployed"),
+    "launcher": (doctor.OK, f"the deployed matches call {LAUNCHER}"),
+    "history": (doctor.OK, f"57 call(s) recorded in {HOME}/.local/share/prompt-workflow"),
+    "sqlite": (doctor.OK, "SQLite 3.51.3"),
+    "clipboard": (doctor.INFO, "skipped (--no-clipboard)"),
+    "profiles": (doctor.OK, "PROMPT_PROFILE default resolves"),
+}
+_DATA = {
+    "history": {"lost_writes": 0, "last_lost_utc": None, "tracking_incomplete": False},
+    "sqlite": {"version": "3.51.3", "wal_reset_bug": False},
+}
+_STATES = {
+    "prompts-core.yml": deploy.IN_SYNC,
+    "prompts-llm.yml": deploy.MODIFIED,
+    "prompts-template.yml": deploy.IN_SYNC,
+}
+
+
+def _stats() -> list[StatsRow]:
+    def tokens(inputs: int | None, output: int | None) -> dict[str, int | None]:
+        return {
+            "input_uncached": inputs,
+            "cache_read": None,
+            "cache_write": None,
+            "output": output,
+            "reasoning": None,
+        }
+
+    return [
+        StatsRow(
+            "-i-",
+            42,
+            43,
+            "2026-10-04T09:12:31.000000Z",
+            1840.0,
+            3120.0,
+            tokens(52_400, 9_150),
+            reported={"credits": Decimal("0.0412")},
+        ),
+        StatsRow(
+            "-ip-",
+            9,
+            9,
+            "2026-10-03T16:40:02.000000Z",
+            6210.0,
+            9480.0,
+            tokens(11_300, 6_020),
+            reported={"credits": Decimal("0.0870")},
+            unknown_cost_attempts=1,
+        ),
+        StatsRow(
+            "-il-",
+            6,
+            6,
+            "2026-10-01T08:05:44.000000Z",
+            4105.0,
+            5230.0,
+            tokens(None, None),
+            not_applicable_attempts=6,
+        ),
+    ]
+
+
+def fixed_state(group_by: str = "trigger") -> State:
+    environ = {
+        "XDG_CONFIG_HOME": f"{HOME}/.config",
+        "HOME": HOME,
+        # Built at runtime, so no key-shaped literal lands in the repo; shown only as "set".
+        "OPENROUTER_API_KEY": "-".join(("snapshot", "key")),
+    }
+    layers = ConfigLayers.resolve(environ, strict=False)
+    report = doctor.Report(
+        tuple(
+            doctor.Check(id_, status, message, _DATA.get(id_, {}))
+            for id_, (status, message) in _MESSAGES.items()
+        )
+    )
+    steps = [
+        deploy.FileStep(name, ESPANSO / "match" / name, state, None, "", True, None)
+        for name, state in _STATES.items()
+    ]
+    plan = deploy.Plan(ESPANSO, LAUNCHER, steps, None, deploy.Manifest(Path("manifest.json")))
+    profiles = [
+        UserProfile("mine", Path(f"{HOME}/.config/prompt-workflow/profiles/mine.md"), "added")
+    ]
+    return State(
+        layers=layers,
+        settings=layers.settings(),
+        report=report,
+        triggers=assets.triggers(),
+        plan=plan,
+        plan_error=None,
+        profiles=profiles,
+        group_by=group_by,
+        stats=_stats(),
+        stats_error=None,
+    )
+
+
+@pytest.fixture(autouse=True)
+def fixed_paths(monkeypatch):
+    """The paths a pane reads itself (the history file, the profile folder) are fixed too."""
+    monkeypatch.delenv("PROMPT_WORKFLOW_ENV")
+    monkeypatch.setenv("XDG_CONFIG_HOME", f"{HOME}/.config")
+    monkeypatch.setenv("XDG_DATA_HOME", f"{HOME}/.local/share")
+
+
+def _normalize(svg: str) -> str:
+    return "\n".join(line.rstrip() for line in svg.splitlines()) + "\n"
+
+
+def _check(name: str, svg: str, *also: Path) -> None:
+    svg = _normalize(svg)
+    targets = [SNAPSHOTS / f"{name}.svg", *also]
+    if os.environ.get("UPDATE_SNAPSHOTS") == "1":
+        for target in targets:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(svg, encoding="utf-8", newline="\n")
+        return
+    for target in targets:
+        assert target.is_file(), f"{target} is missing; run UPDATE_SNAPSHOTS=1"
+        assert target.read_text("utf-8") == svg, (
+            f"{target.name} differs: review the change, then regenerate with "
+            "UPDATE_SNAPSHOTS=1 uv run pytest tests/test_tui_snapshots.py"
+        )
+
+
+def _shoot(key: str, theme: str | None = None) -> str:
+    app = ManageApp(loader=fixed_state)
+    # The active tab's underline slides into place; a snapshot must not catch it midway.
+    app.animation_level = "none"
+    shots = []
+
+    async def main() -> None:
+        async with app.run_test(size=SIZE) as pilot:
+            for _ in range(3):
+                await pilot.pause()
+                await app.workers.wait_for_complete()
+            if theme:
+                app.theme = theme
+            await pilot.press(key)
+            await pilot.pause()
+            shots.append(app.export_screenshot(title="prompt-workflow"))
+
+    asyncio.run(main())
+    return shots[0]
+
+
+@pytest.mark.parametrize(
+    ("name", "key"),
+    [
+        ("home", "1"),
+        ("providers", "2"),
+        ("profiles", "3"),
+        ("triggers", "4"),
+        ("history", "5"),
+        ("diagnostics", "6"),
+    ],
+)
+def test_snapshot(name, key):
+    _check(name, _shoot(key), *([README_SHOT] if name == "home" else []))
+
+
+def test_snapshot_high_contrast():
+    _check("home-high-contrast", _shoot("1", HIGH_CONTRAST.name))

@@ -1,0 +1,17 @@
+Usage: prompt-workflow [OPTIONS] COMMAND [ARGS]...
+Espanso-invoked prompt rewriter. Keeps ``improve`` as an explicit subcommand so the Espanso match
+files and docs (``prompt-workflow improve ...``) resolve.
+Options
+--version Print the installed version and exit
+--help Show this message and exit.
+Commands
+improve Improve a draft prompt. Errors are printed inline so Espanso shows them.
+persona Print PROMPT_PERSONA for the -p- snippet, or a fill-in placeholder when unset.
+espanso Deploy the match files into Espanso, check them, or remove them.
+setup First run: settings, key, match files, and a smoke test on a local stub.
+config Show, check and change the settings (config.toml); migrate a .env to it.
+secrets Save, check or remove API keys in the secret store. Keys are never arguments.
+profiles List the rewrite profiles, or copy a checkout's edited ones to your profile folder.
+stats Calls, latency, tokens and costs from the local usage history.
+history Export, prune or reset the local usage history (metadata only, this device only).
+doctor Check the install, settings, keys, Espanso, matches and history.

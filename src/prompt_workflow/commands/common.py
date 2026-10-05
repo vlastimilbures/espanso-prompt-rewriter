@@ -177,9 +177,10 @@ def legacy_env() -> str | None:
 
 
 def refuse_in_legacy_mode(what: str) -> None:
+    """Raise CommandError when PROMPT_WORKFLOW_ENV means ``what`` would not be read."""
     path = legacy_env()
     if path:
-        fail(
+        raise CommandError(
             f"PROMPT_WORKFLOW_ENV is set ({path}), so {what} would not be read; edit that file, "
             "or unset PROMPT_WORKFLOW_ENV and run `prompt-workflow config migrate`"
         )

@@ -7,6 +7,8 @@ The repo's `espanso/match/` stays the source of truth; Hatch's force-include cop
 
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass, replace
 from importlib.resources import files
 from importlib.resources.abc import Traversable
 
@@ -35,3 +37,47 @@ def read_match(name: str) -> str:
     if name not in match_names():
         raise ValueError(f"No match file named {safe_repr(name)}")
     return (match_dir() / name).read_text(encoding="utf-8")
+
+
+# A match's trigger line, commented out or not, and the CLI call in its shell var.
+_TRIGGER = re.compile(r'^\s*(#\s*)?- trigger: "([^"]+)"')
+_CMD = re.compile(r'^\s*(?:#\s*)?cmd: "\\"__PROMPT_WORKFLOW__\\" (\w+)([^"]*)"')
+_OPTION = re.compile(r"--(provider|profile|tier) (\S+)")
+
+
+@dataclass(frozen=True)
+class Trigger:
+    """One trigger in a shipped match file. ``command`` is None for a static snippet; the
+    options are the ones its command line fixes, None when it leaves them to the settings."""
+
+    trigger: str
+    file: str
+    active: bool  # False: commented out, as -ic- ships
+    command: str | None = None
+    provider: str | None = None
+    profile: str | None = None
+    tier: str | None = None
+
+
+def triggers() -> list[Trigger]:
+    """Every trigger the match files ship, in file order, with what its CLI call fixes."""
+    found: list[Trigger] = []
+    for name in match_names():
+        current: Trigger | None = None
+        for line in read_match(name).splitlines():
+            if head := _TRIGGER.match(line):
+                if current is not None:
+                    found.append(current)
+                current = Trigger(head.group(2), name, active=not head.group(1))
+            elif current is not None and (cmd := _CMD.match(line)):
+                options = dict(_OPTION.findall(cmd.group(2)))
+                current = replace(
+                    current,
+                    command=cmd.group(1),
+                    provider=options.get("provider"),
+                    profile=options.get("profile"),
+                    tier=options.get("tier"),
+                )
+        if current is not None:
+            found.append(current)
+    return found

@@ -49,7 +49,7 @@ def _secret(name: str) -> str:
 
 def _not_a_secret(name: str, verb: str) -> None:
     if name in secret_names():
-        common.fail(
+        raise common.CommandError(
             f"{name} is a secret: {verb} it with `prompt-workflow secrets {verb} {name}` (a hidden "
             "prompt or --stdin), never as an argument",
             common.USAGE,
@@ -68,15 +68,39 @@ def _writable_config(what: str) -> None:
     common.refuse_in_legacy_mode(what)
     env_file = _env_file_in_use()
     if env_file is not None:
-        common.fail(
+        raise common.CommandError(
             f"your settings are in {env_file}; saving {config_files.SETTINGS_FILE} would stop "
             "it being read. Run `prompt-workflow config migrate` first, or edit that file"
         )
 
 
-def _env_overrides(name: str) -> None:
+def env_override(name: str) -> str | None:
+    """The warning to show after saving ``name`` while a real environment variable outranks
+    it, or None."""
     if name in os.environ:
-        common.warn(f"the environment variable {name} is set and overrides the saved value")
+        return f"the environment variable {name} is set and overrides the saved value"
+    return None
+
+
+def _env_overrides(name: str) -> None:
+    note = env_override(name)
+    if note:
+        common.warn(note)
+
+
+def save_setting(name: str, value: str) -> config_store.SavedSettings:
+    """`config set` without the printing, shared with the interface (#93): refuse a secret, a
+    value that looks like a key, legacy mode and an unmigrated .env (CommandError), then save
+    ``value`` in config.toml after checking it as the CLI would read it."""
+    _not_a_secret(name, "set")
+    if common.looks_like_a_key(value):
+        raise common.CommandError(
+            "that value looks like a key or password, which never goes in config.toml; use "
+            "`prompt-workflow secrets set NAME` for an API key",
+            common.USAGE,
+        )
+    _writable_config(config_files.SETTINGS_FILE)
+    return config_store.save_settings(config_store.read_settings(), {name: value})
 
 
 # --- config -------------------------------------------------------------------------------
@@ -152,15 +176,7 @@ def config_set(
 ) -> None:
     """Save a setting in config.toml, after checking it as the CLI would read it."""
     _setting(name)
-    _not_a_secret(name, "set")
-    if common.looks_like_a_key(value):
-        common.fail(
-            "that value looks like a key or password, which never goes in config.toml; use "
-            "`prompt-workflow secrets set NAME` for an API key",
-            common.USAGE,
-        )
-    _writable_config(config_files.SETTINGS_FILE)
-    saved = config_store.save_settings(config_store.read_settings(), {name: value})
+    saved = save_setting(name, value)
     typer.echo(f"{name} saved in {saved.path}")
     _env_overrides(name)
 

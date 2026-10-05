@@ -100,6 +100,8 @@ def run(provider: str, *, runner: Runner | None = None) -> SmokeResult:
         port = server.server_address[1]
         argv = [
             sys.executable,
+            # The working directory stays off sys.path: a planted module never runs.
+            "-P",
             "-m",
             "prompt_workflow.cli",
             "improve",

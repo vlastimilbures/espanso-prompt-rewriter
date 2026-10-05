@@ -34,9 +34,9 @@ if TYPE_CHECKING:
 
     from .deploy import Plan
 
-# The management commands (#92), each in a module under commands/: command name -> (module,
-# its Typer app). Loaded only when that command runs or --help lists it, so improve and
-# persona never import them.
+# The management commands (#92) and the interface (#93), each in a module under commands/:
+# command name -> (module, its Typer app). Loaded only when that command runs or --help lists
+# it, so improve and persona never import them.
 _LAZY_COMMANDS = {
     "setup": ("setup", "app"),
     "config": ("settings", "config_app"),
@@ -45,6 +45,7 @@ _LAZY_COMMANDS = {
     "stats": ("usage", "stats_app"),
     "history": ("usage", "history_app"),
     "doctor": ("doctor", "app"),
+    "ui": ("ui", "app"),
 }
 
 
@@ -59,6 +60,16 @@ class _LazyGroup(TyperGroup):
     def invoke(self, ctx: Context) -> Any:
         with _redacted_usage_errors():
             return super().invoke(ctx)
+
+    def parse_args(self, ctx: Context, args: list[str]) -> list[str]:
+        # D-UI-1: a bare `prompt-workflow` on a terminal opens the interface (`ui`). Anywhere
+        # else no_args_is_help prints the help and exits 2, exactly as before.
+        if not args and not ctx.resilient_parsing:
+            from .commands.ui import on_a_terminal
+
+            if on_a_terminal():
+                args = ["ui"]
+        return super().parse_args(ctx, args)
 
     def list_commands(self, ctx: Context) -> list[str]:
         return [*super().list_commands(ctx), *_LAZY_COMMANDS]

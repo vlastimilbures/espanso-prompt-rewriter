@@ -80,6 +80,7 @@ step. A quick note to yourself would get "execute now" and a self-review checkli
 - ⚙️ [How it works](#how-it-works)
 - 📋 [Requirements](#requirements)
 - 🚀 [Quick start](#quick-start)
+- 🖥️ [Set up and manage](#set-up-and-manage)
 - ⌨️ [Usage](#usage)
 - 🔧 [Configuration](#configuration)
 - 🧩 [Profiles and persona](#profiles-and-persona)
@@ -225,6 +226,21 @@ content is still what we wrote, and reports any you edited. The launcher written
 matches is the install channel's stable entry point (uv's tool bin, Homebrew's `bin/`, Scoop's
 shim), never a versioned path an upgrade would remove; `--launcher PATH` overrides it.
 
+## Set up and manage
+
+Run `prompt-workflow` in a terminal (or `prompt-workflow ui`) for a full-screen interface with
+six tabs: Home (the `doctor` summary), Providers & keys, Profiles, Triggers, History and
+Diagnostics. It does what the [management commands](#management-commands) do, through the same
+code. Keys are shown only as set or not set, removing a key, deploying, detaching, migrating or
+deleting history asks first, and no provider is called except by the Test call button, which
+runs `improve` against a stub on `127.0.0.1` with a placeholder key.
+
+![The Home tab of the prompt-workflow interface](docs/interface.svg)
+
+`1`-`6` switch tabs, `r` reloads, `t` switches to a high-contrast theme and `q` quits;
+`NO_COLOR` turns colour off. Scripts and screen readers can use the headless commands instead.
+Without a terminal, a bare `prompt-workflow` prints the help, as it always did.
+
 ## Usage
 
 ### Triggers
@@ -308,6 +324,7 @@ at its max-tokens cap, the partial rewrite is pasted with
 | Command | What it does |
 |---------|--------------|
 | `prompt-workflow --version` | Prints the installed version |
+| `prompt-workflow` / `prompt-workflow ui` | Opens the [full-screen interface](#set-up-and-manage) when stdin and stdout are a terminal. Otherwise a bare `prompt-workflow` prints the help and exits 2, and `ui` exits 3 |
 | `prompt-workflow setup` | First run: provider and default profile (saved in `config.toml`), the API key (hidden prompt), a deploy preview it applies only if you agree, and a smoke test that runs `improve` against a stub on `127.0.0.1` (never a paid call, never your real key). If your settings are in a `.env`, it offers to migrate them and changes nothing unless you say yes. `--non-interactive` asks nothing (key with `--api-key-stdin`; the deploy stays a preview unless `--deploy`) |
 | `prompt-workflow config show [--raw]` | Every setting, its value and where it comes from (default, a file or the environment), and which lower files it overrides. Keys and the persona are shown only as set or not set |
 | `prompt-workflow config get NAME` / `set NAME VALUE` / `unset NAME` | Read one setting; save it in `config.toml` after checking it as the CLI reads it; remove it so the default applies. A key is refused here |
@@ -335,7 +352,7 @@ mistyped argument that looks like a key is refused and never repeated in an erro
 | 0 | Done |
 | 1 | Failed or refused, or you declined a confirmation |
 | 2 | Usage error: an unknown option, setting or value |
-| 3 | An answer was needed but stdin is not a terminal |
+| 3 | An answer was needed but stdin is not a terminal, or `ui` ran without a terminal |
 | 4 | `doctor` or `config validate` found a problem |
 
 ## Configuration

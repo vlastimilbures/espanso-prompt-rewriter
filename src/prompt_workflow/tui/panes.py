@@ -1,0 +1,963 @@
+"""The six screens of the interface, one tab each (#93). Each shows what the headless commands
+print and acts through the same service calls; none holds logic of its own. Keys are shown
+only as set or not set, never their value."""
+
+from __future__ import annotations
+
+import os
+import shlex
+import shutil
+import subprocess
+from collections.abc import Callable, Mapping, Sequence
+from datetime import timedelta
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
+
+import typer
+from rich.text import Text
+from textual import on, work
+from textual.app import ComposeResult
+from textual.containers import Horizontal, VerticalScroll
+from textual.widgets import Button, DataTable, Select, Static
+
+from .. import config_store, deploy, doctor, history, smoke
+from .. import profiles as profile_service
+from ..commands import common, usage
+from ..commands import doctor as doctor_cmd
+from ..commands import profiles as profiles_cmd
+from ..commands import settings as settings_cmd
+from ..config import env_names, secret_names
+from ..config_files import SecretStoreError
+from ..factory import PROVIDER_NAMES, routes
+from ..prompt_builder import ADDED, ALIASES, PROFILES, user_profiles_dir
+from .modals import ConfirmModal, Field, FormModal, TextModal
+from .state import State, current_plan
+
+if TYPE_CHECKING:
+    from .app import ManageApp
+
+# What a save, a deletion or a deploy may raise for the person to read: the same errors the
+# headless commands turn into `error: …` (commands/common.guard).
+EXPECTED = (
+    common.CommandError,
+    ValueError,
+    OSError,
+    config_store.ConfigStoreError,
+    SecretStoreError,
+    deploy.DeployError,
+    history.HistoryError,
+    typer.BadParameter,
+)
+
+
+def _status(check: doctor.Check) -> Text:
+    label, color = doctor_cmd._LABEL[check.status]
+    line = Text("[")
+    line.append(f"{label:^4}", style=color)
+    line.append(f"] {check.id}: {check.message}")
+    return line
+
+
+def _checks(report: doctor.Report, ids: Sequence[str] | None = None) -> Text:
+    return Text("\n").join(_status(c) for c in report.checks if ids is None or c.id in ids)
+
+
+def _add_row(table: DataTable[Any], *cells: str, key: str | None = None) -> None:
+    """A row of plain text: a path or a value is never read as markup."""
+    table.add_row(*(Text(cell) for cell in cells), key=key)
+
+
+def _buttons(*buttons: tuple[str, str]) -> Horizontal:
+    return Horizontal(*(Button(label, id=id_) for id_, label in buttons), classes="buttons")
+
+
+class Pane(VerticalScroll):
+    """One tab. ``show()`` fills it from a fresh State; ``report()`` shows an action's result
+    on the pane and as a notification."""
+
+    last_message = ""
+    ready = False
+    # A deploy or detach dialog is open or running (TriggersPane).
+    busy = False
+
+    def on_mount(self) -> None:
+        # A State read before this pane was composed is shown now (the load runs in a thread).
+        self.setup()
+        self.ready = True
+        if self.state is not None:
+            self.show(self.state)
+
+    def setup(self) -> None:
+        """Add the table columns; called once the pane's widgets exist."""
+
+    @property
+    def manage(self) -> ManageApp:
+        return cast("ManageApp", self.app)
+
+    @property
+    def state(self) -> State | None:
+        return self.manage.state
+
+    def show(self, state: State) -> None:
+        """Fill the pane from ``state``; each tab has its own."""
+
+    def result(self) -> Static:
+        return Static("", classes="result", markup=False)
+
+    def report(self, message: str, *, error: bool = False) -> None:
+        self.last_message = message
+        self.query_one(".result", Static).update(message)
+        self.app.notify(message, severity="error" if error else "information", markup=False)
+
+    def attempt(self, action: Callable[[], str], *, reload: bool = True) -> None:
+        """Run a change; show its message, or the error a headless command would print."""
+        try:
+            message = action()
+        except Exception as exc:
+            self.report(_error(exc), error=True)
+            return
+        self.report(message)
+        if reload:
+            self.manage.reload()
+
+    @work(thread=True, group="action", exit_on_error=False)
+    def background(self, job: Callable[[], None]) -> None:
+        """Run ``job`` in a thread (it may call a command or wait on Espanso); a failure is
+        shown like attempt()'s, never a crashed screen."""
+        try:
+            job()
+        except Exception as exc:
+            self.app.call_from_thread(self.failed, exc)
+
+    def failed(self, exc: Exception) -> None:
+        self.busy = False
+        self.report(_error(exc), error=True)
+        self.manage.reload()
+
+
+def _error(exc: Exception) -> str:
+    """As commands/common.guard: a service error's own message; a bug named as unexpected."""
+    if isinstance(exc, EXPECTED):
+        return f"error: {str(exc) or type(exc).__name__}"
+    return f"error: unexpected {type(exc).__name__}: {exc}"
+
+
+# --- Home ---------------------------------------------------------------------------------
+
+HOME_CHECKS = ("version", "install", "config", "keys", "espanso", "match_files", "launcher")
+
+
+class HomePane(Pane):
+    def compose(self) -> ComposeResult:
+        yield Static(
+            "This install at a glance (the `doctor` command). The Diagnostics tab has every "
+            "check; nothing here calls a provider.",
+            classes="note",
+            markup=False,
+        )
+        yield Static("Checking…", markup=False, id="home-checks")
+        yield Static("", markup=False, id="home-history")
+        yield _buttons(("home-reload", "Check again"))
+        yield self.result()
+
+    def show(self, state: State) -> None:
+        self.query_one("#home-checks", Static).update(_checks(state.report, HOME_CHECKS))
+        self.query_one("#home-history", Static).update(_checks(state.report, ("history",)))
+
+    @on(Button.Pressed, "#home-reload")
+    def _reload(self) -> None:
+        self.manage.reload()
+
+
+# --- Providers & keys ---------------------------------------------------------------------
+
+
+class ProvidersPane(Pane):
+    def compose(self) -> ComposeResult:
+        yield Static(
+            "Keys are shown as set or not set and where they come from, never their value.",
+            classes="note",
+            markup=False,
+        )
+        yield DataTable(id="keys", cursor_type="none", zebra_stripes=True)
+        yield Static("", markup=False, id="policy")
+        yield DataTable(id="routes", cursor_type="none", zebra_stripes=True)
+        yield _buttons(
+            ("set-key", "Set key"),
+            ("remove-key", "Remove key"),
+            ("set-setting", "Change setting"),
+            ("migrate-env", "Migrate .env"),
+            ("smoke", "Test call (local stub)"),
+        )
+        yield self.result()
+
+    def setup(self) -> None:
+        self.query_one("#keys", DataTable).add_columns("Key", "State", "From", "Also set in")
+        self.query_one("#routes", DataTable).add_columns(
+            "Provider", "Model", "Base URL", "The draft", "Key"
+        )
+
+    def show(self, state: State) -> None:
+        entries = state.layers.entries
+        keys = self.query_one("#keys", DataTable)
+        keys.clear()
+        for name in secret_names():
+            entry = entries[name]
+            _add_row(
+                keys,
+                name,
+                "set" if entry.value else "not set",
+                common.source_label(entry.source) if entry.value else "",
+                ", ".join(map(common.source_label, entry.shadows)),
+            )
+        cfg = state.settings
+        policy = (
+            "on: only providers that keep the draft on this machine run"
+            if cfg.local_only
+            else "off: cloud providers run, behind the data-protection gate"
+        )
+        self.query_one("#policy", Static).update(
+            f"PROMPT_LOCAL_ONLY is {policy}.\nPROMPT_PROVIDER: {cfg.provider} (the default "
+            "of a bare `improve`; the triggers name their own provider)."
+        )
+        table = self.query_one("#routes", DataTable)
+        table.clear()
+        for route in routes(cfg):
+            where = "leaves this machine" if route.remote else "stays local"
+            if route.refused:
+                where = "refused (local only)"
+            key = "not needed"
+            if route.key:
+                key = "set" if entries[route.key].value else "not set"
+            model, url = entries[route.model_setting], entries[route.url_setting]
+            _add_row(
+                table,
+                route.name,
+                common.shown_value(route.model_setting, model),
+                common.shown_value(route.url_setting, url),
+                where,
+                key,
+            )
+
+    @on(Button.Pressed, "#set-key")
+    def _set_key(self) -> None:
+        fields = [
+            Field("key-name", "Key", secret_names()),
+            Field("key-value", "Value (hidden as you type; never shown again)", secret=True),
+        ]
+        self.app.push_screen(
+            FormModal("Save an API key in the secret store", fields), self._save_key
+        )
+
+    def _save_key(self, values: dict[str, str] | None) -> None:
+        if values is None:
+            return
+        name, value = values["key-name"], values["key-value"].strip()
+        if not value:
+            self.report(f"no value entered; {name} was not changed", error=True)
+            return
+
+        def save() -> str:
+            common.refuse_in_legacy_mode("the secret store")
+            config_store.save_secret(name, value)
+            note = settings_cmd.env_override(name)
+            saved = f"{name} saved in the secret store ({config_store.config_dir()})"
+            return f"{saved}; {note}" if note else saved
+
+        self.attempt(save)
+
+    @on(Button.Pressed, "#remove-key")
+    def _remove_key(self) -> None:
+        try:
+            common.refuse_in_legacy_mode("the secret store")
+            saved = config_store.saved_secret_names()
+        except EXPECTED as exc:
+            self.report(f"error: {exc}", error=True)
+            return
+        if not saved:
+            self.report("The secret store holds no key; nothing to do.")
+            return
+        self.app.push_screen(
+            FormModal("Remove a key", [Field("key-name", "Key", saved)], submit="Remove…"),
+            self._confirm_remove,
+        )
+
+    def _confirm_remove(self, values: dict[str, str] | None) -> None:
+        if values is None:
+            return
+        name = values["key-name"]
+
+        def done(yes: bool | None) -> None:
+            if yes:
+                self.attempt(lambda: self._delete(name))
+
+        self.app.push_screen(
+            ConfirmModal(f"Delete {name} from the secret store?", confirm="Delete"), done
+        )
+
+    def _delete(self, name: str) -> str:
+        config_store.delete_secret(name)
+        layers, _ = common.load_layers()
+        entry = layers.entries[name]
+        if entry.value:
+            still = common.source_label(entry.source)
+            return f"{name} removed from the secret store; it is still set, from {still}."
+        return f"{name} removed from the secret store."
+
+    @on(Button.Pressed, "#set-setting")
+    def _set_setting(self) -> None:
+        # Never the keys (Set key hides them) nor the persona, which no screen shows.
+        names = [n for n in env_names() if n not in secret_names() and n not in common.PRIVATE]
+        fields = [
+            Field("setting-name", "Setting", names, value="PROMPT_PROVIDER"),
+            Field("setting-value", "New value", placeholder="checked as the CLI reads it"),
+        ]
+        self.app.push_screen(FormModal("Change a setting (config.toml)", fields), self._save)
+
+    def _save(self, values: dict[str, str] | None) -> None:
+        if values is None:
+            return
+        name, value = values["setting-name"], values["setting-value"]
+
+        def save() -> str:
+            saved = settings_cmd.save_setting(name, value)
+            note = settings_cmd.env_override(name)
+            return f"{name} saved in {saved.path}" + (f"; {note}" if note else "")
+
+        self.attempt(save)
+
+    @on(Button.Pressed, "#migrate-env")
+    def _migrate(self) -> None:
+        try:
+            plan = config_store.plan_migration()
+        except EXPECTED as exc:
+            self.report(f"error: {exc}", error=True)
+            return
+        if plan.status != "ready":
+            self.report("\n".join(plan.describe()))
+            return
+        preview = "\n".join(
+            [*plan.describe(), "", "A backup is kept; `prompt-workflow config rollback` undoes it."]
+        )
+
+        def done(yes: bool | None) -> None:
+            if yes:
+                self.attempt(lambda: self._apply_migration(plan.token))
+
+        self.app.push_screen(ConfirmModal("Migrate the .env?", preview, confirm="Migrate"), done)
+
+    def _apply_migration(self, token: str) -> str:
+        result = config_store.apply_migration(consent=token)
+        lines = [f"Migrated. Backup: {result.backup}"]
+        lines += [f"{source} was not moved; it is no longer read" for source in result.left]
+        return "\n".join(lines)
+
+    @on(Button.Pressed, "#smoke")
+    def _smoke(self) -> None:
+        current = self.state.settings.provider if self.state else PROVIDER_NAMES[0]
+        preview = (
+            "Runs improve against a stub on 127.0.0.1 with a placeholder key. No provider is "
+            "called, and neither your key nor your clipboard is sent."
+        )
+        fields = [Field("provider", "Provider", PROVIDER_NAMES, value=current)]
+        self.app.push_screen(
+            FormModal("Test call", fields, submit="Run", preview=preview), self._run_smoke
+        )
+
+    def _run_smoke(self, values: dict[str, str] | None) -> None:
+        if values is not None:
+            self.report(f"Running improve --provider {values['provider']} against the stub…")
+            provider = values["provider"]
+            self.background(lambda: self._smoke_now(provider))
+
+    def _smoke_now(self, provider: str) -> None:
+        result = smoke.run(provider)
+        message = f"{'ok' if result.ok else 'failed'}: {result.message}"
+        self.app.call_from_thread(self.report, message, error=not result.ok)
+
+
+# --- Profiles -----------------------------------------------------------------------------
+
+
+def editor_command(
+    environ: Mapping[str, str] = os.environ,
+    *,
+    windows: bool = os.name == "nt",
+    which: Callable[[str], str | None] = shutil.which,
+) -> list[str]:
+    """$VISUAL or $EDITOR, else Notepad on Windows and vi elsewhere, as an argv. On Windows the
+    quotes around a token are dropped (`"C:\\Program Files\\…\\ed.exe" -w`), and the program
+    is looked up on PATH, so `code` finds code.cmd (PATHEXT)."""
+    chosen = environ.get("VISUAL") or environ.get("EDITOR")
+    if not chosen:
+        argv = ["notepad"] if windows else ["vi"]
+    else:
+        argv = shlex.split(chosen, posix=not windows)
+        if windows:
+            argv = [
+                token[1:-1] if len(token) > 1 and token[0] == token[-1] == '"' else token
+                for token in argv
+            ]
+    return [which(argv[0]) or argv[0], *argv[1:]]
+
+
+def run_editor(path: Path) -> int:
+    """Open ``path`` in the editor and wait for it; tests replace it. No timeout: a person is
+    editing."""
+    return subprocess.run([*editor_command(), str(path)], check=False).returncode  # noqa: S603
+
+
+class ProfilesPane(Pane):
+    def compose(self) -> ComposeResult:
+        yield Static("", markup=False, id="profile-settings")
+        yield DataTable(id="profiles", cursor_type="row", zebra_stripes=True)
+        yield _buttons(
+            ("set-profile", "Set default"),
+            ("edit-profile", "Edit in $EDITOR"),
+            ("migrate-profiles", "Migrate from checkout"),
+        )
+        yield self.result()
+
+    def setup(self) -> None:
+        self.query_one("#profiles", DataTable).add_columns("Profile", "Where", "State")
+
+    def show(self, state: State) -> None:
+        cfg = state.settings
+        self.query_one("#profile-settings", Static).update(
+            f"PROMPT_PROFILE: {cfg.profile}\n"
+            f"PROMPT_PRO_PROFILE: {cfg.pro_profile or '(empty: PROMPT_PROFILE)'}\n"
+            f"Your profiles: {user_profiles_dir()}"
+        )
+        table = self.query_one("#profiles", DataTable)
+        table.clear()
+        for name in PROFILES:
+            _add_row(table, name, "built in", "default" if name == cfg.profile else "", key=name)
+        for alias, target in ALIASES.items():
+            _add_row(table, alias, "built in", f"retired; means {target}", key=alias)
+        for profile in state.profiles:
+            _add_row(table, profile.name, "yours", profile.status, key=f"user:{profile.name}")
+
+    @on(Button.Pressed, "#set-profile")
+    def _set_profile(self) -> None:
+        if self.state is None:
+            return
+        own = [p.name for p in self.state.profiles if p.status == ADDED]
+        fields = [
+            Field("profile", "PROMPT_PROFILE", [*PROFILES, *own], value=self.state.settings.profile)
+        ]
+        self.app.push_screen(FormModal("Default profile", fields), self._save_profile)
+
+    def _save_profile(self, values: dict[str, str] | None) -> None:
+        if values is not None:
+            name = values["profile"]
+            self.attempt(
+                lambda: (
+                    f"PROMPT_PROFILE saved in "
+                    f"{settings_cmd.save_setting('PROMPT_PROFILE', name).path}"
+                )
+            )
+
+    def selected(self) -> Path | None:
+        table = self.query_one("#profiles", DataTable)
+        if self.state is None or not table.row_count:
+            return None
+        key = table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value or ""
+        name = key.removeprefix("user:")
+        found = [p.path for p in self.state.profiles if key.startswith("user:") and p.name == name]
+        return found[0] if found else None
+
+    @on(Button.Pressed, "#edit-profile")
+    def _edit(self) -> None:
+        from textual.app import SuspendNotSupported
+
+        path = self.selected()
+        if path is None:
+            self.report(
+                "Select one of your profiles. Built-in ones ship with the package, and an "
+                "upgrade replaces them.",
+                error=True,
+            )
+            return
+        try:
+            with self.app.suspend():
+                code = run_editor(path)
+        except SuspendNotSupported:
+            self.report("This terminal cannot hand over to an editor.", error=True)
+            return
+        except OSError as exc:
+            self.report(f"error: could not start the editor ({exc})", error=True)
+            return
+        self.report(f"{path.name}: the editor exited with {code}", error=code != 0)
+        self.manage.reload()
+
+    @on(Button.Pressed, "#migrate-profiles")
+    def _migrate(self) -> None:
+        try:
+            root = profiles_cmd._checkout(None)
+            source = root / profile_service.PROMPTS_PATH
+            pristine = profile_service.git_pristine_profiles(root)
+            changed = profile_service.changed_profiles(source, pristine)
+        except EXPECTED as exc:
+            self.report(f"error: {exc}", error=True)
+            return
+        if not changed:
+            self.report("No added or edited profiles; nothing to copy.")
+            return
+        dest = user_profiles_dir()
+        preview = "\n".join(
+            f"{name}.md ({change}) -> {dest / f'{name}.md'}" for name, change in changed.items()
+        )
+
+        def done(yes: bool | None) -> None:
+            if yes:
+                self.attempt(lambda: self._copy(source, pristine, dest, "default" in changed))
+
+        self.app.push_screen(
+            ConfirmModal("Copy these profiles? (copies only, never overwrites)", preview), done
+        )
+
+    def _copy(self, source: Path, pristine: dict[str, str], dest: Path, default: bool) -> str:
+        lines = [
+            f"{item.name}: {item.status}"
+            for item in profile_service.migrate_profiles(source, pristine, dest)
+        ]
+        if default:
+            lines.append(
+                "A copied default.md is used only once PROMPT_PROFILE_OVERRIDES includes default."
+            )
+        return "\n".join(lines)
+
+
+# --- Triggers -----------------------------------------------------------------------------
+
+
+class TriggersPane(Pane):
+    def compose(self) -> ComposeResult:
+        yield Static(
+            "Each trigger names its provider in its command line, so PROMPT_PROVIDER does not "
+            "change these. An empty PROMPT_PRO_PROFILE means PROMPT_PROFILE.",
+            classes="note",
+            markup=False,
+        )
+        yield DataTable(id="triggers", cursor_type="none", zebra_stripes=True)
+        yield Static("", markup=False, id="deploy-target")
+        yield _buttons(
+            ("show-diff", "Show diff"),
+            ("deploy", "Deploy or repair"),
+            ("detach", "Detach"),
+        )
+        yield self.result()
+
+    def setup(self) -> None:
+        self.query_one("#triggers", DataTable).add_columns(
+            "Trigger", "Provider", "Tier", "Profile", "State", "File"
+        )
+
+    def show(self, state: State) -> None:
+        states = {s.name: s.state for s in state.plan.steps} if state.plan else {}
+        table = self.query_one("#triggers", DataTable)
+        table.clear()
+        for t in state.triggers:
+            if t.command == "improve":
+                provider = t.provider or "PROMPT_PROVIDER"
+                profile = t.profile or (
+                    "PROMPT_PRO_PROFILE" if t.tier == "pro" else "PROMPT_PROFILE"
+                )
+                tier = t.tier or "standard"
+            else:
+                provider = "prints PROMPT_PERSONA" if t.command == "persona" else "static snippet"
+                profile = tier = "-"
+            where = states.get(t.file, "unknown") if t.active else "commented out"
+            _add_row(table, t.trigger, provider, tier, profile, where, t.file)
+        target = self.query_one("#deploy-target", Static)
+        if state.plan is None:
+            target.update(f"Cannot compare with Espanso: {state.plan_error}")
+        else:
+            target.update(
+                f"Espanso match folder: {state.plan.espanso_dir / 'match'}\n"
+                f"Launcher: {state.plan.launcher}"
+            )
+
+    @on(Button.Pressed, "#show-diff")
+    def _diff(self) -> None:
+        plan = self.state.plan if self.state else None
+        if plan is None:
+            self.report("No plan: Espanso's folder or this install's launcher was not found.")
+            return
+        diff = "".join(s.diff() for s in plan.steps if s.state != deploy.IN_SYNC)
+        self.app.push_screen(
+            TextModal("What deploy would change", diff or "Every match file is in sync.")
+        )
+
+    @on(Button.Pressed, "#deploy")
+    def _deploy(self) -> None:
+        if self.claim():
+            self.report("Reading the match files…")
+            self.background(lambda: self.app.call_from_thread(self._ask_deploy, current_plan()))
+
+    def claim(self) -> bool:
+        """Start a deploy or detach unless one is already open: a second dialog would apply
+        a plan the first one already changed."""
+        if self.busy:
+            self.report("A deploy or detach is already in progress; finish or cancel it first.")
+            return False
+        self.busy = True
+        return True
+
+    def _ask_deploy(self, plan: deploy.Plan) -> None:
+        if plan.is_noop:
+            self.busy = False
+            self.report("Nothing to do: every match file is in sync.")
+            return
+        lines = [f"{s.state:<9} {s.name}" for s in plan.steps]
+        if plan.legacy is not None:
+            lines.append(f"legacy    {plan.legacy.name} will be retired, with a backup")
+        diffs = [s.diff() for s in plan.steps if s.state not in (deploy.IN_SYNC, deploy.MISSING)]
+        preview = "\n".join(lines) + ("\n\n" + "".join(diffs) if diffs else "")
+        conflicts = plan.conflicts
+        fields = [
+            Field(
+                f"choice-{i}",
+                f"{s.name} is {s.state}: keep yours, take ours (yours backed up) or write ours "
+                "side by side",
+                deploy.CHOICES,
+                value=deploy.KEEP,
+            )
+            for i, s in enumerate(conflicts)
+        ]
+
+        def done(values: dict[str, str] | None) -> None:
+            if values is None:
+                self.busy = False
+                return
+            choices = {s.name: values[f"choice-{i}"] for i, s in enumerate(conflicts)}
+            self.report("Deploying…")
+            self.background(lambda: self._apply(plan, choices))
+
+        self.app.push_screen(
+            FormModal("Deploy the match files", fields, submit="Deploy", preview=preview), done
+        )
+
+    def _apply(self, plan: deploy.Plan, choices: dict[str, str]) -> None:
+        """In the worker: apply the plan the person saw, unless the files changed since."""
+        if _plan_digest(current_plan()) != _plan_digest(plan):
+            raise deploy.DeployError(
+                "the match files or the deploy record changed since the preview; nothing was "
+                "written. Press Deploy again to see the new plan"
+            )
+        outcome = deploy.apply(plan, choices)
+        lines = list(outcome.lines)
+        if outcome.changed and not deploy.restart_espanso():
+            lines.append("Could not restart Espanso; run `espanso restart` yourself.")
+        if outcome.kept:
+            names = ", ".join(p.name for p in outcome.kept)
+            lines.append(f"WARNING: kept as you have them and NOT updated: {names}.")
+        else:
+            lines.append("The match files are up to date.")
+        self.app.call_from_thread(self._done, "\n".join(lines), bool(outcome.kept))
+
+    def _done(self, message: str, error: bool) -> None:
+        self.busy = False
+        self.report(message, error=error)
+        self.manage.reload()
+
+    @on(Button.Pressed, "#detach")
+    def _ask_detach_start(self) -> None:
+        if self.claim():
+            self.background(
+                lambda: self.app.call_from_thread(
+                    self._ask_detach, deploy.Manifest.load(), deploy.espanso_dir().resolve()
+                )
+            )
+
+    def _ask_detach(self, manifest: deploy.Manifest, root: Path) -> None:
+        if not manifest.entries:
+            self.busy = False
+            self.report("Nothing to do: prompt-workflow has no deployed match files on record.")
+            return
+        preview = "Detach removes the files below that you have not edited:\n" + "\n".join(
+            f"  {target}" for target in sorted(manifest.entries)
+        )
+        fields = [
+            Field(
+                "mode",
+                "keep-static: only the matches that call the CLI; remove-all: every file",
+                ("keep-static", "remove-all"),
+            )
+        ]
+
+        def done(values: dict[str, str] | None) -> None:
+            if values is None:
+                self.busy = False
+                return
+            remove_all = values["mode"] == "remove-all"
+            self.background(lambda: self._detach_now(manifest, root, remove_all))
+
+        self.app.push_screen(FormModal("Detach", fields, submit="Detach", preview=preview), done)
+
+    def _detach_now(self, manifest: deploy.Manifest, root: Path, remove_all: bool) -> None:
+        if _manifest_digest(deploy.Manifest.load()) != _manifest_digest(manifest):
+            raise deploy.DeployError(
+                "the deploy record changed since the preview; nothing was removed. Press "
+                "Detach again"
+            )
+        outcome = deploy.detach(manifest, root, remove_all=remove_all)
+        lines = list(outcome.lines)
+        if outcome.changed and not deploy.restart_espanso():
+            lines.append("Could not restart Espanso; run `espanso restart` yourself.")
+        self.app.call_from_thread(self._done, "\n".join(lines), False)
+
+
+def _manifest_digest(manifest: deploy.Manifest) -> list[tuple[str, dict[str, Any]]]:
+    return sorted((key, vars(entry)) for key, entry in manifest.entries.items())
+
+
+def _plan_digest(plan: deploy.Plan) -> tuple[object, ...]:
+    """What a deploy preview showed: each file's state and content, the legacy file, the
+    launcher and the manifest it was compared with."""
+    return (
+        plan.espanso_dir,
+        plan.launcher,
+        plan.legacy,
+        [(s.name, s.state, s.current) for s in plan.steps],
+        _manifest_digest(plan.manifest),
+    )
+
+
+# --- History ------------------------------------------------------------------------------
+
+
+def _cost(row: history.StatsRow) -> str:
+    badges = []
+    if row.reported:
+        badges.append(f"[reported] {usage._money(dict(row.reported))}")
+    if row.estimated:
+        badges.append(f"[estimated] {usage._money(dict(row.estimated))}")
+    if row.unknown_cost_attempts:
+        badges.append(f"[unknown] {row.unknown_cost_attempts}")
+    if row.not_applicable_attempts:
+        badges.append(f"[local] {row.not_applicable_attempts}")
+    return "; ".join(badges) or "none recorded"
+
+
+class HistoryPane(Pane):
+    def compose(self) -> ComposeResult:
+        yield Static(
+            " ".join(usage.CAVEATS),
+            classes="note",
+            markup=False,
+        )
+        yield Static("", markup=False, id="disclosure")
+        yield Select(
+            [(f"By {g}", g) for g in history.GROUP_BY],
+            value="trigger",
+            allow_blank=False,
+            id="group-by",
+        )
+        yield DataTable(id="stats", cursor_type="none", zebra_stripes=True)
+        yield Static("", markup=False, id="stats-note")
+        yield _buttons(
+            ("export", "Export"),
+            ("prune", "Prune"),
+            ("reset", "Reset"),
+        )
+        yield self.result()
+
+    def setup(self) -> None:
+        self.query_one("#stats", DataTable).add_columns(
+            "Group",
+            "Calls",
+            "Requests",
+            "Last used, UTC",
+            "p50 ms",
+            "p95 ms",
+            "Tok in",
+            "Tok out",
+            "Cost",
+        )
+
+    def show(self, state: State) -> None:
+        self.query_one("#disclosure", Static).update("\n".join(usage.disclosure(state.settings)))
+        table = self.query_one("#stats", DataTable)
+        table.clear()
+        for row in state.stats:
+            tokens_in, tokens_out = usage._tokens(row)
+            _add_row(
+                table,
+                row.key or "(none)",
+                str(row.operations),
+                str(row.attempts),
+                row.last_used_utc[:16].replace("T", " "),
+                usage._ms(row.latency_p50_ms),
+                usage._ms(row.latency_p95_ms),
+                "-" if tokens_in is None else str(tokens_in),
+                "-" if tokens_out is None else str(tokens_out),
+                _cost(row),
+            )
+        note = state.stats_error and f"error: {state.stats_error}"
+        if not note and not state.stats:
+            note = "No usage recorded yet."
+        self.query_one("#stats-note", Static).update(note or "")
+
+    @on(Select.Changed, "#group-by")
+    def _group(self, event: Select.Changed) -> None:
+        if isinstance(event.value, str) and event.value != self.manage.group_by:
+            self.manage.group_by = event.value
+            self.manage.reload()
+
+    def _store(self) -> history.HistoryStore:
+        _, settings = common.load_layers()
+        return usage.store(settings)
+
+    @on(Button.Pressed, "#export")
+    def _export(self) -> None:
+        fields = [
+            Field("format", "Format", ("json", "csv")),
+            Field("path", "Write to a new file (an existing one is never replaced)"),
+        ]
+        preview = "Metadata only: no draft, rewrite, persona or key is ever recorded."
+        self.app.push_screen(
+            FormModal("Export the usage history", fields, submit="Export", preview=preview),
+            self._write_export,
+        )
+
+    def _write_export(self, values: dict[str, str] | None) -> None:
+        if values is None:
+            return
+
+        def export() -> str:
+            raw = values["path"].strip()
+            if not raw:
+                raise common.CommandError("enter the file to write")
+            common.no_key(raw, "the file")
+            path = Path(raw).expanduser()
+            fmt: Any = values["format"]
+            with path.open("x", encoding="utf-8", newline="") as out:
+                count = self._store().export(out, fmt)
+            return f"Exported {count} call(s) to {path}"
+
+        self.attempt(export, reload=False)
+
+    @on(Button.Pressed, "#prune")
+    def _prune(self) -> None:
+        days = str(self.state.settings.history_retention_days) if self.state else ""
+        fields = [Field("days", "Delete the records older than this many days", value=days)]
+        self.app.push_screen(
+            FormModal("Prune the usage history", fields, submit="Next…"), self._ask_prune
+        )
+
+    def _ask_prune(self, values: dict[str, str] | None) -> None:
+        if values is None:
+            return
+        found = usage._AGE.fullmatch(values["days"].strip())
+        if found is None:
+            self.report("error: enter a number of days, e.g. 30", error=True)
+            return
+        days = int(found.group(1))
+        cutoff = history.HistoryStore._cutoff(timedelta(days=days))[:16].replace("T", " ")
+
+        def prune() -> str:
+            deleted = self._store().prune(timedelta(days=days))
+            return f"Deleted {deleted} call(s) older than {days} day(s)."
+
+        def done(yes: bool | None) -> None:
+            if yes:
+                self.attempt(prune)
+
+        self.app.push_screen(
+            ConfirmModal(
+                f"Delete every record older than {days} day(s)?",
+                f"Everything recorded before {cutoff} UTC, with its requests, is deleted; this "
+                "cannot be undone.",
+                confirm="Delete",
+            ),
+            done,
+        )
+
+    @on(Button.Pressed, "#reset")
+    def _reset(self) -> None:
+        target = self._store()
+
+        def reset() -> str:
+            target.reset()
+            return "The usage history is empty."
+
+        def done(yes: bool | None) -> None:
+            if yes:
+                self.attempt(reset)
+
+        self.app.push_screen(
+            ConfirmModal(
+                f"Delete every usage record in {target.path}?",
+                "This also clears the lost-write counter, and cannot be undone.",
+                confirm="Delete all",
+            ),
+            done,
+        )
+
+
+# --- Diagnostics --------------------------------------------------------------------------
+
+
+class DiagnosticsPane(Pane):
+    def compose(self) -> ComposeResult:
+        yield Static("", markup=False, id="layers")
+        yield DataTable(id="settings", cursor_type="none", zebra_stripes=True)
+        yield Static("", markup=False, id="findings")
+        yield Static("", markup=False, id="all-checks")
+        yield Static("", markup=False, id="store")
+        yield _buttons(("import-check", "Check the trigger's import time"))
+        yield self.result()
+
+    def setup(self) -> None:
+        self.query_one("#settings", DataTable).add_columns("Setting", "Value", "From", "Note")
+
+    def show(self, state: State) -> None:
+        layers = state.layers
+        self.query_one("#layers", Static).update(
+            "\n".join(settings_cmd._layers_lines(layers, raw=False))
+        )
+        table = self.query_one("#settings", DataTable)
+        table.clear()
+        for name in env_names():
+            entry = layers.entries[name]
+            notes = []
+            if entry.shadows:
+                notes.append("overrides " + ", ".join(map(common.source_label, entry.shadows)))
+            if entry.rejected:
+                bad = ", ".join(map(common.source_label, entry.rejected))
+                notes.append(f"invalid value in {bad} ignored")
+            _add_row(
+                table,
+                name,
+                common.shown_value(name, entry),
+                common.source_label(entry.source),
+                "; ".join(notes),
+                key=name,
+            )
+        findings = [f"{common.source_label(f.source)}: {f.message}" for f in layers.findings]
+        self.query_one("#findings", Static).update(
+            "Findings:\n" + "\n".join(f"  {line}" for line in findings)
+            if findings
+            else "No problems found in the settings files."
+        )
+        self.query_one("#all-checks", Static).update(_checks(state.report))
+        data = {c.id: c.data for c in state.report.checks}
+        stored, sqlite = data.get("history", {}), data.get("sqlite", {})
+        lost = stored.get("lost_writes") or 0
+        last = stored.get("last_lost_utc")
+        self.query_one("#store", Static).update(
+            f"SQLite {sqlite.get('version') or 'unknown'}; WAL reset bug (before 3.51.3): "
+            f"{'yes' if sqlite.get('wal_reset_bug') else 'no'}\n"
+            f"Lost history writes: {lost}{f' (last {last})' if last else ''}; tracking "
+            f"{'incomplete' if stored.get('tracking_incomplete') else 'complete'}"
+        )
+
+    @on(Button.Pressed, "#import-check")
+    def _import_check(self) -> None:
+        self.report("Importing the CLI in a fresh interpreter…")
+        self.background(self._import_now)
+
+    def _import_now(self) -> None:
+        found = doctor.import_check()
+        self.app.call_from_thread(self.report, found.message, error=not found.ok)
