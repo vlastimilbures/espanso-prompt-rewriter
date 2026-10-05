@@ -20,7 +20,8 @@ def _block_message(findings: list[str], hard: list[str], allow_flagged: bool, na
 
 
 class GateBlocked(ProviderError):
-    """The gate refused to send a draft; the usage history records it as ``gate_blocked``."""
+    """A data-protection refusal: the gate's scan, PROMPT_LOCAL_ONLY or a cloud base URL that
+    is not https (factory.py). The usage history records each as ``gate_blocked``."""
 
 
 class GatedProvider:

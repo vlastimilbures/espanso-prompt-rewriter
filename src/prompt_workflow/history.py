@@ -67,6 +67,8 @@ _CREATE_EXTRA = 0.75
 # Most old operations an automatic prune (record(prune=True)) deletes in one write, so a
 # lowered retention is caught up over a few triggers instead of in one long transaction.
 _PRUNE_BATCH = 100
+# How many SQLite VM steps run between checks of the time budget.
+_PROGRESS_STEPS = 1000
 # A sidecar lock older than this was left by a killed process (it is held for a few ms).
 _STALE_LOCK = 10.0
 # Busy timeout for management commands (stats, export, prune, reset), which nobody pastes.
@@ -553,10 +555,11 @@ class HistoryStore:
         duplicates a row) or when history is off; False when dropped, which bumps the
         lost-write marker. Never raises.
 
-        ``prune`` also deletes up to _PRUNE_BATCH operations older than the retention, in the
-        same transaction but under a savepoint, so a prune that fails or runs out of time
-        never costs the record. The trigger recorder passes it; the index on occurred_at_utc
-        makes the check a single seek when there is nothing to delete."""
+        ``prune`` then also deletes up to _PRUNE_BATCH operations older than the retention, in
+        a second short transaction after the record committed and only while the budget
+        lasts, so a prune that fails or runs out of time never costs the record. The trigger
+        recorder passes it; the index on occurred_at_utc makes the check a single seek when
+        there is nothing to delete."""
         if not self.enabled:
             return True
         start = time.monotonic()
@@ -607,8 +610,8 @@ class HistoryStore:
 
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect(timeout=remaining_ms() / 1000) as conn:
-            # Abort a statement that runs past the budget (checked every 1000 VM steps).
-            conn.set_progress_handler(lambda: int(time.monotonic() > deadline), 1000)
+            # Abort a statement that runs past the budget (checked every _PROGRESS_STEPS VM steps).
+            conn.set_progress_handler(lambda: int(time.monotonic() > deadline), _PROGRESS_STEPS)
             conn.execute(f"PRAGMA busy_timeout = {remaining_ms()}")
             if conn.execute("PRAGMA journal_mode").fetchone()[0].lower() != "wal":
                 conn.execute("PRAGMA journal_mode = WAL")
@@ -624,13 +627,14 @@ class HistoryStore:
                     f"INSERT OR IGNORE INTO attempts VALUES ({placeholders})",  # noqa: S608
                     rows,
                 )
-                if prune_before is not None and deadline - time.monotonic() > _MARGIN:
-                    _prune_batch(conn, prune_before)
                 conn.execute("COMMIT")
             except BaseException:
                 with contextlib.suppress(Exception):
                     conn.execute("ROLLBACK")
                 raise
+            # Only after the record is committed, and only with time left.
+            if prune_before is not None and deadline - time.monotonic() > _MARGIN:
+                _prune_batch(conn, prune_before, deadline)
 
     @contextlib.contextmanager
     def _connect(self, *, timeout: float, readonly: bool = False) -> Iterator[sqlite3.Connection]:
@@ -988,22 +992,25 @@ def _break_stale(lock: Path) -> bool:
     return True
 
 
-def _prune_batch(conn: sqlite3.Connection, cutoff: str) -> None:
+def _prune_batch(conn: sqlite3.Connection, cutoff: str, deadline: float) -> None:
     """Delete up to _PRUNE_BATCH operations (their attempts cascade) older than ``cutoff``,
-    oldest first, inside the caller's transaction. A failure, the budget's progress handler
-    interrupting it included, is rolled back to the savepoint and the caller's writes stay."""
-    conn.execute("SAVEPOINT prune")
+    oldest first, in a short transaction of its own, after the caller's record committed. It
+    stops at ``deadline``: SQLite then rolls back the prune (an interrupt rolls back the whole
+    transaction, which is why the record is never in it). Never raises."""
     try:
+        conn.set_progress_handler(lambda: int(time.monotonic() > deadline), _PROGRESS_STEPS)
+        conn.execute(f"PRAGMA busy_timeout = {max(1, int((deadline - time.monotonic()) * 1000))}")
+        conn.execute("BEGIN IMMEDIATE")
         conn.execute(
             "DELETE FROM operations WHERE id IN (SELECT id FROM operations "
             "WHERE occurred_at_utc < ? ORDER BY occurred_at_utc LIMIT ?)",
             (cutoff, _PRUNE_BATCH),
         )
+        conn.execute("COMMIT")
     except Exception:
-        # Out of time: let the rollback and the caller's COMMIT run to the end.
-        conn.set_progress_handler(None, 0)
-        conn.execute("ROLLBACK TO prune")
-    conn.execute("RELEASE prune")
+        with contextlib.suppress(Exception):
+            conn.set_progress_handler(None, 0)
+            conn.execute("ROLLBACK")
 
 
 def _migrate(conn: sqlite3.Connection) -> None:

@@ -247,7 +247,8 @@ instead of typing short replies key by key.
 ```
 
 A match of your own runs without `--trigger-id`: the managed matches' ids are a fixed
-allowlist, so the usage history records your trigger as `direct`. A new managed trigger adds
+allowlist, so the usage history records your trigger as `direct` (or, if you pass an id that
+is not on it, as an unattributed managed run). A new managed trigger adds
 its id to `recorder.TRIGGER_IDS` (the test fails until each CLI match passes its own).
 
 Any change to a file in `espanso/match/` needs

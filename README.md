@@ -533,7 +533,8 @@ request it made (a retried request counts twice, in the same run). It is on by d
 (`PROMPT_HISTORY=true`), and stays on this device:
 
 - **What is stored:** metadata only, from a fixed list of columns: when a trigger ran, which
-  trigger, profile and outcome (`ok`, `error_marker`, `gate_blocked`, `validation_failed` for
+  trigger, profile and outcome (`ok`, `error_marker`, `gate_blocked` for any data-protection
+  refusal (a flagged draft, `PROMPT_LOCAL_ONLY`, a cloud URL that is not https), `validation_failed` for
   a reply whose content was rejected, `clipboard_failed`, `concealed_refused` or
   `unexpected_error`), how long it took until the output was printed,
   and per request the provider, model, HTTP status, token counts and the cost the provider
@@ -554,8 +555,9 @@ request it made (a retried request counts twice, in the same run). It is on by d
   Windows. It is never synced and never sent anywhere.
 - **Which trigger:** each managed match passes its own fixed `--trigger-id` (`i`, `iok`,
   `ip`, `if`, `il`, `ilm`, `ic`, `p`), stored as the trigger (`-i-`). A run from the terminal,
-  or from a match of your own, is recorded as `direct`, with no trigger; the trigger is never
-  guessed from the other options. `-p-` counts once, through its `persona` call.
+  or from a match of your own without `--trigger-id`, is recorded as `direct`; a match passing
+  an id that is not on that list is recorded as a managed run with no trigger (unattributed).
+  The trigger is never guessed from the other options. `-p-` counts once, through its `persona` call.
 - **How long:** 365 days by default (`PROMPT_HISTORY_RETENTION_DAYS`, at most 36500). Each
   recorded run also deletes up to 100 of the oldest records past that age, so the history
   stays within it without a separate clean-up (after lowering the setting, a large backlog goes

@@ -734,6 +734,35 @@ def test_failed_prune_keeps_the_record(store):
     assert store.health().lost_writes == 0
 
 
+# A prune the time budget interrupts is rolled back (SQLite rolls back its whole transaction
+# on an interrupt), and the record, already committed, stays. No clock: the prune is handed a
+# deadline already past and checks it at every VM step.
+def test_interrupted_prune_keeps_the_record(store, monkeypatch):
+    old = [_op(occurred_at_utc=datetime.now(UTC) - timedelta(days=400)) for _ in range(5)]
+    for op in old:
+        assert store.record(op, [_attempt()])
+    real_prune = history._prune_batch
+    calls = []
+
+    def past_deadline(conn, cutoff, deadline):
+        calls.append(cutoff)
+        real_prune(conn, cutoff, float("-inf"))
+
+    monkeypatch.setattr(history, "_prune_batch", past_deadline)
+    monkeypatch.setattr(history, "_PROGRESS_STEPS", 1)
+    new = _op()
+    assert store.record(new, [_attempt()], prune=True)
+    assert calls
+    ids = {r["id"] for r in _rows(store, "operations")}
+    assert ids == {new["id"], *(op["id"] for op in old)}
+    assert len(_rows(store, "attempts")) == 6
+    assert store.health().lost_writes == 0
+    # The connection was left usable: the next write and prune go through.
+    monkeypatch.setattr(history, "_prune_batch", real_prune)
+    assert store.record(_op(), prune=True)
+    assert store.health().operations == 2
+
+
 # The write that creates the database gets _CREATE_EXTRA on top of the budget; later ones not.
 def test_creating_write_gets_extra_time(store, monkeypatch):
     deadlines = []

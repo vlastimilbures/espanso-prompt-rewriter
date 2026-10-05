@@ -65,15 +65,16 @@ def test_direct_call_is_recorded(stub_provider, history_rows):
         ("i", "espanso_managed", "-i-"),
         ("ilm", "espanso_managed", "-ilm-"),
         ("p", "espanso_managed", "-p-"),
-        ("-i-", "direct", None),
-        ("I", "direct", None),
-        ("reg", "direct", None),
-        ("i i", "direct", None),
-        ("", "direct", None),
+        ("-i-", "espanso_managed", None),
+        ("I", "espanso_managed", None),
+        ("reg", "espanso_managed", None),
+        ("i i", "espanso_managed", None),
+        ("", "espanso_managed", None),
     ],
 )
 def test_trigger_id_allowlist(stub_provider, history_rows, value, origin, stored):
-    # An unknown value is recorded unattributed and never fails the run.
+    # An unknown value is recorded unattributed (managed, no trigger), apart from a terminal
+    # call (no option), and never fails the run.
     assert _run([*LOCAL, "--trigger-id", value]) == "improved"
     op = _only_op(history_rows)
     assert (op["origin"], op["trigger_id"]) == (origin, stored)
@@ -175,9 +176,23 @@ def test_gate_blocked_outcome(cloud, fake_http, history_rows):
     assert fake_http.requests == []
 
 
-def test_local_only_refusal_is_an_error_marker(monkeypatch, cloud, history_rows):
+# The other data-protection refusals count as gate_blocked too; the markers are unchanged.
+def test_local_only_refusal_is_gate_blocked(monkeypatch, cloud, history_rows):
     monkeypatch.setenv("PROMPT_LOCAL_ONLY", "true")
-    assert _run(CLOUD).startswith("[prompt-workflow: PROMPT_LOCAL_ONLY=true")
+    refusal = "PROMPT_LOCAL_ONLY=true: openrouter would send the draft off this machine"
+    assert _run(CLOUD) == f"[prompt-workflow: {refusal}]"
+    assert _outcome(history_rows) == "gate_blocked"
+
+
+def test_plaintext_cloud_url_is_gate_blocked(monkeypatch, cloud, fake_http, history_rows):
+    monkeypatch.setenv("OPENROUTER_BASE_URL", "http://openrouter.example/api/v1")
+    assert _run(CLOUD) == "[prompt-workflow: OPENROUTER_BASE_URL must be an https:// URL]"
+    assert _outcome(history_rows) == "gate_blocked"
+    assert fake_http.requests == []
+
+
+def test_missing_key_is_an_error_marker(fake_http, history_rows):
+    assert _run(CLOUD) == "[prompt-workflow: OPENROUTER_API_KEY is not configured]"
     assert _outcome(history_rows) == "error_marker"
 
 

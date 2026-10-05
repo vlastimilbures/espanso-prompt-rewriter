@@ -43,12 +43,15 @@ UNEXPECTED_ERROR = "unexpected_error"
 
 
 def attribution(trigger_id: str | None) -> tuple[str, str | None]:
-    """(origin, stored trigger) for a --trigger-id value. Only an allowlisted value counts
-    as a managed trigger; any other is recorded unattributed, and none means a direct call.
-    Never inferred from the other options."""
+    """(origin, stored trigger) for a --trigger-id value. An allowlisted value is that
+    managed trigger; any other value is a match that named itself but is not on the list,
+    recorded unattributed (managed, no trigger); no option at all is a direct call. Never
+    inferred from the other options."""
+    if trigger_id is None:
+        return "direct", None
     if trigger_id in TRIGGER_IDS:
         return "espanso_managed", f"-{trigger_id}-"
-    return "direct", None
+    return "espanso_managed", None
 
 
 class Recorder:
