@@ -350,7 +350,8 @@ In a checkout ([Development](#development)), you enable `-ic-` by uncommenting i
 routing to OpenRouter), reasoning effort, max output tokens and timeout (at most 120 s).
 Every list starts with, and defaults to, `default`, which keeps the pro-tier setting
 (`OPENROUTER_PRO_*`; for the model, `OPENROUTER_PRO_MODEL` with its
-`OPENROUTER_PRO_PROVIDER` pin). In a checkout, edit the lists in
+`OPENROUTER_PRO_PROVIDER` pin; for max tokens, `OPENROUTER_PRO_MAX_TOKENS`, or
+`OPENROUTER_MAX_TOKENS` while that is empty, as it is by default). In a checkout, edit the lists in
 [`espanso/match/prompts-llm.yml`](espanso/match/prompts-llm.yml) and deploy again; the
 tests reject any value the CLI would not accept. Two things to know:
 
@@ -388,7 +389,7 @@ prompt-workflow persona          # prints PROMPT_PERSONA (used by -p-)
 | `--model`    | provider's configured model | Override the model of whichever provider runs; `model@endpoint` also pins the OpenRouter endpoint (`@auto` unpins) |
 | `--tier`     | `standard`                  | OpenRouter only: `pro` uses the `OPENROUTER_PRO_*` settings |
 | `--effort`   | `OPENROUTER_REASONING_EFFORT` (`OPENROUTER_PRO_REASONING_EFFORT` with `--tier pro`) | OpenRouter only: `none`, `minimal`, `low`, `medium`, `high` |
-| `--max-tokens` | `OPENROUTER_MAX_TOKENS` or `ANTHROPIC_MAX_TOKENS`; no cap for Ollama and LM Studio | Output cap for this call (Ollama: `num_predict`) |
+| `--max-tokens` | `OPENROUTER_MAX_TOKENS` (`OPENROUTER_PRO_MAX_TOKENS`, if set, with `--tier pro`) or `ANTHROPIC_MAX_TOKENS`; no cap for Ollama and LM Studio | Output cap for this call (Ollama: `num_predict`) |
 | `--timeout`  | `PROMPT_TIMEOUT_SECONDS` (`PROMPT_PRO_TIMEOUT_SECONDS` with `--tier pro`) | Time limit in seconds for this call, retry included |
 | `--source`   | `clipboard`                 | `clipboard`, `stdin` or `argument`              |
 | `--text`     | —                           | The draft, with `--source argument`             |
@@ -515,11 +516,12 @@ short, does not look like a key and matches none of your `PROMPT_EXTRA_PATTERNS`
 | `OPENROUTER_PROVIDER`        | `google-ai-studio/flex`        | Pin a serving endpoint; empty = OpenRouter's own routing  |
 | `OPENROUTER_REASONING_EFFORT` | `minimal`                     | `none`…`high`; empty omits it (models without the control) |
 | `OPENROUTER_ALLOW_FALLBACKS` | `true`                         | `false` makes the pin binding                             |
-| `OPENROUTER_MAX_TOKENS`      | `2400`                         | Output cap (cost control)                                 |
+| `OPENROUTER_MAX_TOKENS`      | `2400`                         | Output cap (cost control), for both tiers unless `OPENROUTER_PRO_MAX_TOKENS` is set |
 | `OPENROUTER_BASE_URL`        | `https://openrouter.ai/api/v1` |                                                           |
 | `OPENROUTER_PRO_MODEL`       | `openai/gpt-6-luna`            | Model for `--tier pro` / `-ip-`                   |
 | `OPENROUTER_PRO_PROVIDER`    | `openai`                       | Endpoint pin for the pro tier                             |
 | `OPENROUTER_PRO_REASONING_EFFORT` | `low`                     | Reasoning effort for the pro tier                         |
+| `OPENROUTER_PRO_MAX_TOKENS`  | *(empty)*                      | Output cap for the pro tier, whose reasoning counts against it; empty = `OPENROUTER_MAX_TOKENS` |
 | `PROMPT_PRO_TIMEOUT_SECONDS` | `60`                           | Time limit for one pro-tier call, retry included          |
 | `PROMPT_PRO_PROFILE`         | (empty)                        | Profile for the pro tier (`-ip-`, `-if-`) when it runs `OPENROUTER_PRO_MODEL`; empty = `PROMPT_PROFILE` |
 | `PROMPT_PROFILE_OVERRIDES`   | *(empty)*                      | Comma-separated built-in profiles (`default`, `general`) your own same-named file replaces, see [profiles](#profiles-and-persona) |
@@ -846,7 +848,7 @@ run it are in [docs/benchmark.md](docs/benchmark.md).
 | `[prompt-workflow: Blocked call to the local server …]` | `PROMPT_GATE_LOCAL=true` and the gate matched a `-il-`/`-ilm-` draft. Remove the content, or set `PROMPT_GATE_LOCAL=false` if your `localhost` server runs the model itself (not a relay to a cloud API). |
 | `[prompt-workflow: sent despite: …]` at the top of a rewrite | You used `-iok-`; the draft was sent despite those findings. Delete the line. |
 | `[prompt-workflow: Input is too long …]` | The clipboard holds more than 50,000 characters. Copy just the draft. |
-| `… the reply hit the model's output limit and is cut off]` at the end, or `… used its whole output limit before writing any text` | The model hit its output cap, often by spending it on reasoning. Raise `OPENROUTER_MAX_TOKENS` (`ANTHROPIC_MAX_TOKENS` for Anthropic), or pick a larger max tokens (or lower effort) in `-if-`. For Ollama the cap is the model's own setting. |
+| `… the reply hit the model's output limit and is cut off]` at the end, or `… used its whole output limit before writing any text` | The model hit its output cap, often by spending it on reasoning. Raise `OPENROUTER_MAX_TOKENS` (`OPENROUTER_PRO_MAX_TOKENS` for `-ip-` alone, `ANTHROPIC_MAX_TOKENS` for Anthropic), or pick a larger max tokens (or lower effort) in `-if-`. For Ollama the cap is the model's own setting. |
 | A `base.yml.bak-…` file appeared in Espanso's `match` folder | Versions before 0.9 deployed `-p-` as `match/base.yml`, the file Espanso creates for your own snippets. The installer backed up that copy and replaced it with `prompts-template.yml`. Older installers overwrote `base.yml` without a backup, so snippets you kept there before first installing this project can only come from your own backups. |
 | Expansion is slow | Use a faster model or endpoint (see [benchmark](#model-benchmark)); Espanso waits for the CLI. |
 | `[prompt-workflow: … must be an https:// URL]` | A cloud `*_BASE_URL` uses `http`. Switch it to `https`. |

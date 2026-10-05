@@ -37,6 +37,7 @@ def test_defaults():
     assert settings.openrouter_pro_provider == "openai"
     assert settings.openrouter_pro_reasoning_effort == "low"
     assert settings.pro_timeout == 60.0
+    assert settings.openrouter_pro_max_tokens is None
     assert settings.lmstudio_base_url == "http://localhost:1234/v1"
     assert settings.lmstudio_model == "local-model"
     assert settings.anthropic_base_url == "https://api.anthropic.com"
@@ -116,6 +117,42 @@ def test_with_overrides_call_max_tokens():
     assert settings.call_max_tokens is None
     assert settings.with_overrides(max_tokens="300").call_max_tokens == 300
     assert "call_max_tokens" not in [f.metadata.get("env") for f in config.setting_fields()]
+
+
+# OPENROUTER_PRO_MAX_TOKENS: empty (the default) inherits OPENROUTER_MAX_TOKENS for the pro
+# tier; set, it caps the pro tier only (#31).
+def test_pro_max_tokens(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_MAX_TOKENS", "1000")
+    settings = Settings()
+    assert settings.openrouter_pro_max_tokens is None
+    assert settings.for_tier("pro").openrouter_max_tokens == 1000
+    monkeypatch.setenv("OPENROUTER_PRO_MAX_TOKENS", "")
+    assert Settings.load().for_tier("pro").openrouter_max_tokens == 1000
+    monkeypatch.setenv("OPENROUTER_PRO_MAX_TOKENS", "4000")
+    settings = Settings()
+    assert settings.openrouter_pro_max_tokens == 4000
+    assert settings.for_tier("pro").openrouter_max_tokens == 4000
+    assert settings.for_tier("standard").openrouter_max_tokens == 1000
+    assert settings.for_call("pro").openrouter_max_tokens == 4000
+    assert settings.for_call("pro", max_tokens="default").openrouter_max_tokens == 4000
+    assert settings.for_call("pro", max_tokens="8000").openrouter_max_tokens == 8000
+    assert settings.for_call("standard").openrouter_max_tokens == 1000
+    # A pro call on another model (the -if- popup) is still the pro tier: it keeps the cap.
+    assert settings.for_call("pro", model="x/m@auto").openrouter_max_tokens == 4000
+    for provider in ("ollama", "lmstudio", "anthropic"):
+        call = settings.for_call("pro", provider=provider)
+        assert (call.openrouter_max_tokens, call.anthropic_max_tokens) == (1000, 2400)
+        assert call.call_max_tokens is None
+
+
+@pytest.mark.parametrize("raw", ["0", "-1", "lots", "inf", " "])
+def test_bad_pro_max_tokens(monkeypatch, raw):
+    monkeypatch.setenv("OPENROUTER_PRO_MAX_TOKENS", raw)
+    with pytest.raises(
+        ValueError,
+        match=f"^OPENROUTER_PRO_MAX_TOKENS must be empty or a whole number above 0, got '{raw}'$",
+    ):
+        Settings()
 
 
 # An empty PROMPT_TEMPERATURE means "send no temperature"; unset keeps the default.

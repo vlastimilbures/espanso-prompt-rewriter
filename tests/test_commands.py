@@ -198,6 +198,20 @@ def test_config_set_validates(saved):
     assert not (saved / "config.toml").exists()
 
 
+# OPENROUTER_PRO_MAX_TOKENS takes a whole number above 0, or empty to inherit
+# OPENROUTER_MAX_TOKENS (#31).
+def test_config_set_pro_max_tokens(saved):
+    result = _run("config", "set", "OPENROUTER_PRO_MAX_TOKENS", "0")
+    assert result.exit_code == 1
+    assert "empty or a whole number above 0" in result.stderr
+    assert _run("config", "set", "OPENROUTER_PRO_MAX_TOKENS", "4000").exit_code == 0
+    assert "OPENROUTER_PRO_MAX_TOKENS = 4000" in (saved / "config.toml").read_text("utf-8")
+    assert _run("config", "validate").exit_code == 0
+    assert _run("config", "set", "OPENROUTER_PRO_MAX_TOKENS", "").exit_code == 0
+    assert _run("config", "get", "OPENROUTER_PRO_MAX_TOKENS").stdout == "\n"
+    assert _run("config", "validate").exit_code == 0
+
+
 def test_config_set_refuses_a_secret_and_a_key_shaped_value(saved):
     for name in secret_names():
         result = _run("config", "set", name, KEY)

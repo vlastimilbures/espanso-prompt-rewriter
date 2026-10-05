@@ -61,7 +61,8 @@ Rules for agents:
   ASCII, only a keycap's selector) (the draft gets the same `_clean()`; the length limit is
   checked before cleaning); stdin/stdout are reconfigured to
   UTF-8 because Windows pipes default to the ANSI code page. `--tier pro` swaps in the
-  `OPENROUTER_PRO_*` settings and `PROMPT_PRO_PROFILE` (if set) via `Settings.for_tier()`; `--model`/`--effort`/`--max-tokens`/
+  `OPENROUTER_PRO_*` settings (`OPENROUTER_PRO_MAX_TOKENS` only if set; empty inherits
+  `OPENROUTER_MAX_TOKENS`) and `PROMPT_PRO_PROFILE` (if set) via `Settings.for_tier()`; `--model`/`--effort`/`--max-tokens`/
   `--timeout` are applied by `Settings.with_overrides()` (`--model` sets every provider's model),
   so `make_provider()` always sees the effective settings (`--max-tokens` for Ollama/LM Studio
   goes in `call_max_tokens`, a per-call field that is not a setting: `setting_fields()` skips
