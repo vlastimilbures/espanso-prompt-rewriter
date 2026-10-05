@@ -78,6 +78,8 @@ class CommandFailure:
         if self.timed_out:
             return f"`{command}` timed out after {COMMAND_TIMEOUT} s"
         detail = f": {self.error}" if self.error else ""
+        if self.returncode is None:
+            return f"`{command}` could not be run{detail}"
         return f"`{command}` failed (exit {self.returncode}){detail}"
 
 
@@ -87,7 +89,10 @@ class CommandFailure:
 Runner = Callable[[Sequence[str]], str | CommandFailure | None]
 # A Rust panic's first line names only the source location; the message follows it. Newer
 # Rust puts the thread id after the name: `thread 'main' (3545792) panicked at src/main.rs:1:2:`.
+# Before Rust 1.73 the message was quoted in that line, and a backtrace note followed it.
 _PANIC_HEADER = re.compile(r"thread '[^']*'( \(\d+\))? panicked at ")
+_OLD_PANIC = re.compile(r"thread '[^']*' panicked at '(?P<message>.+)', \S+:\d+:\d+")
+_BACKTRACE_NOTE = "note: run with `RUST_BACKTRACE"
 _ERROR_LINE_MAX = 200
 
 
@@ -96,27 +101,40 @@ def _error_line(stderr: str) -> str | None:
     (no control, bidi or other format characters reach a terminal or a bug report)."""
     for raw in stderr.splitlines():
         line = "".join(c for c in raw if c.isprintable()).strip()
+        old = _OLD_PANIC.match(line)
+        if old:
+            line = old["message"]
+        elif line.startswith(_BACKTRACE_NOTE):
+            continue
         if line and not _PANIC_HEADER.match(line):
             return line if len(line) <= _ERROR_LINE_MAX else line[: _ERROR_LINE_MAX - 1] + "…"
     return None
 
 
 def run_command(argv: Sequence[str]) -> str | CommandFailure:
+    # Resolved through PATH (and PATHEXT) first: on Windows `espanso` is `espanso.cmd`, which
+    # CreateProcess alone never finds, so an installed Espanso looked missing (#115).
+    exe = shutil.which(argv[0])
+    if exe is None:
+        return CommandFailure()
     try:
         proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
-            list(argv), capture_output=True, text=True, timeout=COMMAND_TIMEOUT, check=False
+            [exe, *argv[1:]],
+            capture_output=True,
+            # Espanso, uv and brew write UTF-8; never the locale's code page, never a crash.
+            encoding="utf-8",
+            errors="replace",
+            timeout=COMMAND_TIMEOUT,
+            check=False,
         )
     except subprocess.TimeoutExpired:
-        return CommandFailure(found=True, path=shutil.which(argv[0]), timed_out=True)
-    except (OSError, subprocess.SubprocessError):
-        return CommandFailure()
+        return CommandFailure(found=True, path=exe, timed_out=True)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return CommandFailure(found=True, path=exe, error=_error_line(str(exc)))
     if proc.returncode == 0:
         return proc.stdout
     return CommandFailure(
-        found=True,
-        path=shutil.which(argv[0]),
-        returncode=proc.returncode,
-        error=_error_line(proc.stderr or ""),
+        found=True, path=exe, returncode=proc.returncode, error=_error_line(proc.stderr or "")
     )
 
 

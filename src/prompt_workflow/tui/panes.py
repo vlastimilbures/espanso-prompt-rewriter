@@ -573,10 +573,15 @@ class TriggersPane(Pane):
         if state.plan is None:
             target.update(f"Cannot compare with Espanso: {state.plan_error}")
         else:
-            target.update(
+            text = (
                 f"Espanso match folder: {state.plan.espanso_dir / 'match'}\n"
                 f"Launcher: {state.plan.launcher}"
             )
+            espanso = next((c for c in state.report.checks if c.id == "espanso"), None)
+            if espanso and (espanso.data.get("found") is False or espanso.data.get("query_failed")):
+                # Deploy and detach then use the default folder: never silently (#115).
+                text += f"\n{espanso.message}"
+            target.update(text)
 
     @on(Button.Pressed, "#show-diff")
     def _diff(self) -> None:

@@ -620,6 +620,39 @@ def test_run_command_keeps_the_first_useful_stderr_line():
     )
 
 
+def test_run_command_resolves_through_path(monkeypatch):
+    """On Windows `espanso` is `espanso.cmd`: it is run by the path `shutil.which` gives, so
+    an installed command is never reported as missing (#115)."""
+    seen = []
+    monkeypatch.setattr(deploy.shutil, "which", lambda name: seen.append(name) or sys.executable)
+    assert REAL_RUN_COMMAND(["espanso", "-c", "print('ran')"]).strip() == "ran"
+    assert seen == ["espanso"]
+
+    def broken(*args, **kwargs):
+        raise PermissionError("access denied")
+
+    monkeypatch.setattr(deploy.subprocess, "run", broken)
+    failed = REAL_RUN_COMMAND(deploy.PATH_CONFIG)
+    assert failed == deploy.CommandFailure(found=True, path=sys.executable, error="access denied")
+    assert failed.describe(deploy.PATH_CONFIG) == (
+        "`espanso path config` could not be run: access denied"
+    )
+
+
+def test_run_command_survives_undecodable_output():
+    """Output that is not UTF-8 is replaced, never raised as UnicodeDecodeError."""
+    script = (
+        "import sys; sys.stdout.buffer.write(b'out \\xff'); "
+        "sys.stderr.buffer.write(b'bad \\x8d byte\\n'); sys.exit(101)"
+    )
+    failed = REAL_RUN_COMMAND([sys.executable, "-c", script])
+    assert (failed.returncode, failed.error) == (101, "bad \ufffd byte")
+    ok = REAL_RUN_COMMAND(
+        [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'C:/\\xc4\\x8d')"]
+    )
+    assert ok == "C:/\u010d"
+
+
 def test_run_command_times_out(monkeypatch):
     monkeypatch.setattr(deploy, "COMMAND_TIMEOUT", 0.2)
     failed = REAL_RUN_COMMAND([sys.executable, "-c", "import time; time.sleep(10)"])
@@ -635,6 +668,12 @@ def test_run_command_times_out(monkeypatch):
         ("thread 'main' panicked at x.rs:1:2:\n", None),
         ("thread 'main' (3545792) panicked at x.rs:1:2:\nunable to load\n", "unable to load"),
         ("thread 'main' (x) panicked at\n", "thread 'main' (x) panicked at"),
+        (
+            "thread 'main' panicked at 'unable to load config: missing', src/main.rs:611:64\n"
+            "note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n",
+            "unable to load config: missing",
+        ),
+        ("note: run with `RUST_BACKTRACE=1` to display a backtrace\nreal\n", "real"),
         ("plain error\nsecond\n", "plain error"),
         ("\x07bell\u2066 and bidi\r\n", "bell and bidi"),
         ("x" * 500, "x" * 199 + "\u2026"),

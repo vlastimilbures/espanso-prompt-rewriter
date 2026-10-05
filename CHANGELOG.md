@@ -289,7 +289,11 @@ then `uv tool install --force <wheel> -c constraints.txt`, `prompt-workflow doct
   In `doctor --json`, `espanso.data.found` now means on PATH, and new keys `query_failed`,
   `exit_code`, `timed_out` and `error` give the detail. `setup` and `espanso deploy`, `status`
   and `detach` say on stderr when they fall back to Espanso's default folder because the query
-  failed, instead of doing it silently.
+  failed, instead of doing it silently, and the interface's Triggers tab shows the same notice.
+  The commands `doctor`, `setup` and `espanso` run (`espanso`, `uv`, `brew`) are now found
+  through `PATH` the way a shell finds them, so on Windows `espanso.cmd` is no longer reported
+  missing, and their output is read as UTF-8, so a byte the locale cannot decode no longer
+  aborts the command.
 
 ## 0.15.0 - 2026-10-04
 
