@@ -556,6 +556,13 @@ def _copy(root: Path, **kwargs):
     return plan, config_store.apply_migration(source=root, consent=plan.token, **kwargs)
 
 
+# Copy mode refuses an earlier .env whose value was cut at an unquoted ` #` (#32).
+def test_copy_refuses_a_value_cut_at_a_comment(tmp_path, env):
+    root = old_checkout(tmp_path, "PROMPT_EXTRA_PATTERNS=ticket #\\d{5}\n")
+    with pytest.raises(config_store.MigrationError, match="was cut at ' #'"):
+        config_store.plan_migration(source=root)
+
+
 def test_copy_fills_only_settings_at_their_default(tmp_path, env):
     root = old_checkout(tmp_path)
     original = (root / ".env").read_bytes()

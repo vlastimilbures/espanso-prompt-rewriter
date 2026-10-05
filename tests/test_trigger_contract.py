@@ -114,10 +114,14 @@ def test_persona_unset_placeholder():
     _golden(["persona"], PLACEHOLDER)
 
 
-# Settings that fail to load still give the placeholder, never a marker or a blank.
-def test_persona_placeholder_when_settings_fail(monkeypatch):
-    monkeypatch.setenv("PROMPT_PERSONA", "never shown")
+# Settings that fail to load never give a marker or a blank: an unrelated bad value still
+# leaves the persona, and a persona that cannot be read gives the placeholder.
+def test_persona_when_settings_fail(monkeypatch, tmp_path):
+    monkeypatch.setenv("PROMPT_PERSONA", "I am a tester.")
     monkeypatch.setenv("PROMPT_LOCAL_ONLY", "maybe")
+    _golden(["persona"], b"I am a tester.")
+    monkeypatch.delenv("PROMPT_PERSONA")
+    (tmp_path / ".env").write_bytes("PROMPT_PERSONA=never shown\n".encode("utf-16"))
     _golden(["persona"], PLACEHOLDER)
 
 

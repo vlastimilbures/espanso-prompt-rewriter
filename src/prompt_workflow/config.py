@@ -10,7 +10,7 @@ from typing import Any
 
 from . import config_files
 from .config_files import CONFIG_VERSION, VERSION_KEY, ConfigFileError, SecretStoreError
-from .redaction import InvalidExtraPattern, compile_extra, safe_repr
+from .redaction import InvalidExtraPattern, compile_extra, safe_repr, set_user_patterns
 
 
 def _parse_value(raw: str) -> str:
@@ -22,6 +22,25 @@ def _parse_value(raw: str) -> str:
         if end > 0:
             return value[1:end]
     return re.split(r"\s+#", value, maxsplit=1)[0]
+
+
+def _cut_at_comment(raw: str) -> bool:
+    """Whether _parse_value() dropped an unquoted ` #...` from ``raw``: a comment, or part of
+    the value (a regex, a persona) that needed quotes. Only the user can tell."""
+    return _parse_value(raw) != raw.strip() and raw.strip()[:1] not in ("'", '"')
+
+
+# Free-text settings whose value may well hold ` #` (a regex for `#12345`, "I am #1"), so a cut
+# there is reported. Elsewhere ` # note` is the usual dotenv comment and stays silent: no
+# model slug, profile name, number or key holds a space, and a base URL never needs ` #`.
+_HASH_IN_VALUE = frozenset({"PROMPT_EXTRA_PATTERNS", "PROMPT_PERSONA"})
+_EXTRA = "PROMPT_EXTRA_PATTERNS"
+
+
+def _env_text(data: bytes) -> str:
+    """The text of a .env file's bytes. UTF-8, with a leading byte order mark (Windows
+    Notepad) dropped, so it never becomes part of the first key."""
+    return data.decode("utf-8-sig")
 
 
 # Root of an editable install (the repo checkout), where the user keeps their .env.
@@ -69,10 +88,21 @@ def _env_file_candidates(environ: Mapping[str, str] = os.environ) -> list[Path]:
     return candidates
 
 
-def _parse_env_text(text: str) -> tuple[dict[str, str], list[int]]:
-    """KEY=VALUE pairs of .env text, and the numbers of the lines skipped for lacking `=`."""
+def _env_file_label(candidate: Path, environ: Mapping[str, str]) -> str:
+    """Which .env an error means, without its path (errors are pasted into the focused app)."""
+    if environ.get("PROMPT_WORKFLOW_ENV"):
+        return "the .env named by PROMPT_WORKFLOW_ENV"
+    if candidate == _PROJECT_ROOT / ".env":
+        return "the checkout's .env"
+    return "the .env in the user config folder"
+
+
+def _parse_env_text(text: str) -> tuple[dict[str, str], list[int], list[str]]:
+    """KEY=VALUE pairs of .env text, the numbers of the lines skipped for lacking `=`, and the
+    _HASH_IN_VALUE keys whose unquoted value was cut at ` #` (see _cut_at_comment)."""
     pairs = {}
     skipped = []
+    cut = []
     for number, raw in enumerate(text.splitlines(), start=1):
         line = raw.strip().removeprefix("export ")
         if not line or line.startswith("#"):
@@ -82,45 +112,64 @@ def _parse_env_text(text: str) -> tuple[dict[str, str], list[int]]:
             continue
         key, _, value = line.partition("=")
         pairs[key.strip()] = _parse_value(value)
-    return pairs, skipped
+        if key.strip() in _HASH_IN_VALUE and _cut_at_comment(value):
+            cut.append(key.strip())
+    return pairs, skipped, cut
+
+
+def _cut_value_error(key: str) -> str:
+    return f"the value of {key} was cut at ' #' (a comment); quote the value"
 
 
 def read_env_file(path: Path) -> dict[str, str] | None:
     """KEY=VALUE pairs of a .env file, or None when it is missing or unreadable."""
     try:
-        raw_text = path.read_text(encoding="utf-8")
+        raw_text = _env_text(path.read_bytes())
     except (OSError, UnicodeDecodeError):
         return None
     return _parse_env_text(raw_text)[0]
 
 
 def _find_env_file(
-    environ: Mapping[str, str], note: Callable[[str, str], None]
+    environ: Mapping[str, str],
+    note: Callable[[str, str], None],
+    fail: Callable[..., None],
 ) -> tuple[Path, dict[str, str]] | None:
     """The first readable .env candidate and its pairs, or None when there is none. A
     candidate that exists but cannot be read is skipped, as is a line without `=`; each is
-    passed to ``note`` (by line number, never content)."""
+    passed to ``note`` (by line number or setting name, never content), as is a persona cut at
+    ` #`. A candidate that is not UTF-8 text goes to ``fail``: its settings are lost, which
+    strict mode must not hide by using the next candidate. So does PROMPT_EXTRA_PATTERNS cut
+    at ` #`: a gate missing part of its patterns fails closed, and repair mode drops the cut
+    value (the next layer's applies)."""
     for candidate in _env_file_candidates(environ):
         source = f"file:{candidate}"
         try:
-            raw_text = candidate.read_text(encoding="utf-8")
+            raw_text = _env_text(candidate.read_bytes())
         except UnicodeDecodeError:
-            note(source, ".env is not UTF-8 text; it was skipped")
+            label = _env_file_label(candidate, environ)
+            fail(source, f"{label} is not UTF-8 text; save it as UTF-8")
             continue
         except OSError:
             if config_files.lexists(candidate):
                 note(source, ".env cannot be read; it was skipped")
             continue
-        pairs, skipped = _parse_env_text(raw_text)
+        pairs, skipped, cut = _parse_env_text(raw_text)
         for number in skipped:
             note(source, f"line {number} of .env has no '=' and was ignored")
+        for key in cut:
+            if key == "PROMPT_EXTRA_PATTERNS":
+                fail(source, _cut_value_error(key), (key,))
+                del pairs[key]
+            else:
+                note(source, _cut_value_error(key))
         return candidate, pairs
     return None
 
 
 def _saved_layer(
     path: Path,
-    fail: Callable[[str, str], None],
+    fail: Callable[..., None],
     note: Callable[[str, str], None],
 ) -> Layer | None:
     """The settings in config.toml, or None when it does not exist. A file that exists but
@@ -157,7 +206,7 @@ def _saved_layer(
             continue
         text = config_files.scalar_text(value)
         if text is None:
-            fail(source, f"{key} in {name} must be text, a number or true/false")
+            fail(source, f"{key} in {name} must be text, a number or true/false", (key,))
             continue
         if key in secrets:
             note(source, f"{key} is a secret; move it from {name} to the secret store")
@@ -446,7 +495,7 @@ class Settings:
                 timeout=self.pro_timeout,
                 profile=self.pro_profile or self.profile,
             )
-        raise ValueError(f"Unknown tier: {tier}. Choose from: {', '.join(TIERS)}")
+        raise ValueError(f"Unknown tier: {safe_repr(tier)}. Choose from: {', '.join(TIERS)}")
 
     def for_call(
         self,
@@ -551,7 +600,11 @@ class ConfigLayers:
 
     @classmethod
     def resolve(
-        cls, environ: Mapping[str, str] | None = None, *, strict: bool = True
+        cls,
+        environ: Mapping[str, str] | None = None,
+        *,
+        strict: bool = True,
+        only: str | None = None,
     ) -> ConfigLayers:
         """Merge default < saved settings < secret store < ``environ`` (os.environ by default).
 
@@ -568,6 +621,19 @@ class ConfigLayers:
         lower layer, so management commands still run on a broken config. Repair mode also
         notes what strict mode skips silently: a .env that exists but cannot be read, and a
         line without `=` (by number, never its text).
+
+        With ``only`` (a setting name), strict mode raises only the problems that can change
+        that setting: an unreadable settings file, or its own value. Another setting's bad
+        value or a failing secret store (``only`` not a secret) is recorded as a finding and
+        falls back as in repair mode, so ``persona`` still finds PROMPT_PERSONA when an
+        unrelated setting is broken; a file problem is tolerated too when ``only`` is set in
+        ``environ``. Only ``entries[only]`` is meant to be read then.
+
+        PROMPT_EXTRA_PATTERNS resolves first and is registered with
+        redaction.set_user_patterns(), so safe_repr() describes any later rejected value
+        that matches a user pattern. An error raised before that (a file-level one, a merged
+        line) is quoted with the built-in patterns only, as is a Click usage error before
+        any settings load; a later load that fails keeps the patterns registered last.
         """
         environ = os.environ if environ is None else environ
         findings: list[Finding] = []
@@ -577,10 +643,19 @@ class ConfigLayers:
             if not strict:
                 findings.append(Finding(source, message))
 
-        def fail(source: str, message: str) -> None:
-            if strict:
+        def fail(source: str, message: str, affects: tuple[str, ...] | None = None) -> None:
+            # ``affects``: the settings the problem can change; None means any of them, except
+            # one set in the real environment, which no file problem can change.
+            if strict and (
+                only is None
+                or (affects is None and only not in environ)
+                or (affects is not None and only in affects)
+            ):
                 raise ValueError(message)
             findings.append(Finding(source, message))
+
+        def fail_secrets(source: str, message: str) -> None:
+            fail(source, message, secret_names())
 
         known = env_names()
         defaults = {f.metadata["env"]: f.metadata["default"] for f in fields(Settings)}
@@ -596,22 +671,25 @@ class ConfigLayers:
                             f"file:{candidate}",
                             f".env is ignored: settings are saved in {config_files.SETTINGS_FILE}",
                         )
-        elif (found := _find_env_file(environ, note)) is not None:
+        elif (found := _find_env_file(environ, note, fail)) is not None:
             path, pairs = found
             source = f"file:{path}"
             merged = _merged_lines(pairs)
             for key in merged:
-                fail(source, _merged_line_error(key))
+                fail(source, _merged_line_error(key), (key,))
             values = {k: v for k, v in pairs.items() if k in known and k not in merged}
             layers.append(Layer(source, values))
         if not legacy and (
-            secrets := _secrets_layer(_user_config_dir(environ), strict, fail, note)
+            secrets := _secrets_layer(_user_config_dir(environ), strict, fail_secrets, note)
         ):
             layers.append(secrets)
         layers.append(Layer(ENV_SOURCE, {k: environ[k] for k in known if k in environ}))
 
         entries: dict[str, Entry] = {}
-        for f in fields(Settings):
+        # PROMPT_EXTRA_PATTERNS first: once it is known, every other rejected value that
+        # matches one of the user's patterns is described, never quoted (safe_repr).
+        ordered = sorted(fields(Settings), key=lambda f: f.metadata["env"] != _EXTRA)
+        for f in ordered:
             name = f.metadata["env"]
             setters = [layer for layer in reversed(layers) if name in layer.values]
             rejected: list[str] = []
@@ -620,13 +698,16 @@ class ConfigLayers:
                 try:
                     _parse_setting(name, f.metadata["parse"], raw)
                 except ValueError as exc:
-                    fail(layer.source, str(exc))
+                    fail(layer.source, str(exc), (name,))
                     rejected.append(layer.source)
                     continue
                 lost = setters[index + 1 :]
                 shadows = tuple(s.source for s in lost if s.source != DEFAULT_SOURCE)
                 entries[name] = Entry(raw, layer.source, shadows, tuple(rejected))
+                if name == _EXTRA:
+                    set_user_patterns(compile_extra(raw))
                 break
+        entries = {name: entries[name] for name in known if name in entries}
         return cls(tuple(layers), entries, tuple(findings))
 
     def settings(self) -> Settings:

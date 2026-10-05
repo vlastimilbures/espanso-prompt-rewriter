@@ -245,6 +245,29 @@ def test_config_validate_and_set_reject_an_invalid_extra_pattern(monkeypatch, sa
     assert "falcon" not in result.output
 
 
+# A .env value cut at an unquoted ` #` is a problem for `config validate`, named by setting
+# only (#32).
+def test_config_validate_reports_a_value_cut_at_a_comment(tmp_path):
+    (tmp_path / ".env").write_text("PROMPT_EXTRA_PATTERNS=ticket #\\d{5}\n")
+    result = _run("config", "validate")
+    assert result.exit_code == common.PROBLEMS
+    assert "the value of PROMPT_EXTRA_PATTERNS was cut at ' #'" in result.stdout
+    assert "ticket" not in result.output
+    (tmp_path / ".env").write_text(
+        'PROMPT_EXTRA_PATTERNS="ticket #\\d{5}"\nOLLAMA_MODEL=m  # an ordinary comment\n'
+    )
+    assert _run("config", "validate").exit_code == 0
+
+
+def test_config_validate_redacts_a_value_matching_a_user_pattern(monkeypatch):
+    monkeypatch.setenv("PROMPT_EXTRA_PATTERNS", "falcon")
+    monkeypatch.setenv("PROMPT_TIMEOUT_SECONDS", "falcon")
+    result = _run("config", "validate")
+    assert result.exit_code == common.PROBLEMS
+    assert "PROMPT_TIMEOUT_SECONDS must be" in result.stdout
+    assert "falcon" not in result.output
+
+
 def test_config_validate_unknown_profile(monkeypatch):
     monkeypatch.setenv("PROMPT_PROFILE", "nosuch")
     result = _run("config", "validate")

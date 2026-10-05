@@ -393,8 +393,8 @@ prompt-workflow persona          # prints PROMPT_PERSONA (used by -p-)
 Output is UTF-8 with no trailing newline, and every failure is printed as `[prompt-workflow: …]`
 with exit code 0, so Espanso always has something to paste. Drafts over 50,000 characters are
 refused (an accidental copy of a log or document should not go to the cloud). If the model stops
-at its max-tokens cap, the partial rewrite is pasted with
-`[prompt-workflow: output truncated at max tokens]` at the end.
+at its output limit, the partial rewrite is pasted with
+`[prompt-workflow: the reply hit the model's output limit and is cut off]` at the end.
 
 #### Management commands
 
@@ -485,11 +485,15 @@ without your shell's environment, set such variables for GUI apps (`launchctl se
 user environment variables on Windows) rather than in a shell profile. A base URL on this
 machine (`localhost`, `127.0.0.0/8`, `::1`) is always reached directly, never through a proxy.
 
-Values may be quoted, and an unquoted
-value may be followed by a ` # comment`. Quote a value that itself contains ` #`. Booleans are
+Values may be quoted, and an unquoted value may be followed by a ` # comment`. Quote a value
+that itself contains ` #`: for `PROMPT_EXTRA_PATTERNS` and `PROMPT_PERSONA`, where `#` may be
+part of the text, `config validate`, `doctor` and `config migrate` report a value cut at ` #`
+(migrate refuses until it is quoted), and a cut `PROMPT_EXTRA_PATTERNS` also stops every
+trigger with a marker, so the gate never runs on part of your patterns. A `.env` must be UTF-8 (a byte order mark is fine); any other encoding is
+an error. Booleans are
 `true` or `false`, timeouts and token caps are numbers above 0 (temperature may be 0); anything
 else is reported inline rather than silently ignored. An error repeats the bad value only when it is
-short and does not look like a key.
+short, does not look like a key and matches none of your `PROMPT_EXTRA_PATTERNS`.
 
 | Variable                     | Default                        | Purpose                                                   |
 |------------------------------|--------------------------------|-----------------------------------------------------------|
@@ -576,8 +580,9 @@ To add a built-in profile to the project, see [CONTRIBUTING.md](CONTRIBUTING.md#
 
 **Persona.** Set `PROMPT_PERSONA` to a first-person sentence, for example
 `PROMPT_PERSONA="I am working as a Head of Data at Example Corp."`. The `default` rewrite then
-opens `CONTEXT` with it, unless the draft names a different role, and `-p-` inserts it for you.
-Left empty, the rewrite uses only a role the draft itself states and never guesses one.
+opens `CONTEXT` with it, unless the draft names a different role, and `-p-` inserts it for you
+(even while another setting is invalid; only a settings file it cannot read gives the
+`[role]` placeholder). Left empty, the rewrite uses only a role the draft itself states and never guesses one.
 
 ## Privacy and data protection
 
@@ -830,7 +835,7 @@ tables (with cost per rewrite), the older prompts' results and how to run it are
 | `[prompt-workflow: Blocked call to the local server …]` | `PROMPT_GATE_LOCAL=true` and the gate matched a `-il-`/`-ilm-` draft. Remove the content, or set `PROMPT_GATE_LOCAL=false` if your `localhost` server runs the model itself (not a relay to a cloud API). |
 | `[prompt-workflow: sent despite: …]` at the top of a rewrite | You used `-iok-`; the draft was sent despite those findings. Delete the line. |
 | `[prompt-workflow: Input is too long …]` | The clipboard holds more than 50,000 characters. Copy just the draft. |
-| `… output truncated at max tokens]` at the end, or `… used the whole max-tokens budget` | The model hit its output cap, often by spending it on reasoning. Raise `OPENROUTER_MAX_TOKENS`, or pick a larger max tokens (or lower effort) in `-if-`. |
+| `… the reply hit the model's output limit and is cut off]` at the end, or `… used its whole output limit before writing any text` | The model hit its output cap, often by spending it on reasoning. Raise `OPENROUTER_MAX_TOKENS` (`ANTHROPIC_MAX_TOKENS` for Anthropic), or pick a larger max tokens (or lower effort) in `-if-`. For Ollama the cap is the model's own setting. |
 | A `base.yml.bak-…` file appeared in Espanso's `match` folder | Versions before 0.9 deployed `-p-` as `match/base.yml`, the file Espanso creates for your own snippets. The installer backed up that copy and replaced it with `prompts-template.yml`. Older installers overwrote `base.yml` without a backup, so snippets you kept there before first installing this project can only come from your own backups. |
 | Expansion is slow | Use a faster model or endpoint (see [benchmark](#model-benchmark)); Espanso waits for the CLI. |
 | `[prompt-workflow: … must be an https:// URL]` | A cloud `*_BASE_URL` uses `http`. Switch it to `https`. |

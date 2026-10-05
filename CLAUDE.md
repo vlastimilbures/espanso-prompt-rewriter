@@ -88,16 +88,25 @@ Rules for agents:
   provider. Values are parsed strictly (`_bool`, `_positive_int`, ...) and a bad one raises a
   `ValueError` naming the variable; API key fields are `secret` (kept out of `repr()`). Any error
   that quotes a rejected value goes through `redaction.safe_repr()`, since markers are pasted
-  into the focused app. `Settings.load()` builds from `ConfigLayers.resolve()`, a pure merge
+  into the focused app; it also hides a value matching PROMPT_EXTRA_PATTERNS once settings
+  resolve (`ConfigLayers.resolve()` resolves that setting first and calls
+  `redaction.set_user_patterns()` before parsing the rest; conftest resets it). Errors raised
+  before that point, and Click usage errors before any load, see only the built-in patterns. `Settings.load()` builds from `ConfigLayers.resolve()`, a pure merge
   of layers (lowest first): built-in default < saved settings < the secret store < the real
   environment; per-call overrides come after, in `Settings.with_overrides()`. Saved settings
   are `$PROMPT_WORKFLOW_ENV` alone if set (legacy mode: no TOML, no secret store, exactly as
   before); else the user config dir's `config.toml` once it exists (then no `.env` is read, so
   one can never shadow a saved value; repair mode reports a lingering one); else the first
   readable of the editable-install repo root's `.env` (derived from `__file__`) or the user
-  config dir `.env`. The secret store (`config_files.secret_store()`, today `secrets.toml`; a
+  config dir `.env` (read as UTF-8, a byte order mark dropped; one that is not UTF-8 is an error,
+  never skipped for the next one; an unquoted ` #` starts a comment, and repair mode and
+  `config migrate` flag only a `_HASH_IN_VALUE` value cut that way: the extra patterns, which
+  also fail strict mode, so the gate never runs on part of them, and the persona, where `#`
+  may be data). The secret store (`config_files.secret_store()`, today `secrets.toml`; a
   keyring seam is left as a TODO) holds only `secret_names()`. A broken `config.toml` or store
-  fails closed: `improve` prints the marker, `persona` its placeholder. It never
+  fails closed: `improve` prints the marker. `persona` then reads PROMPT_PERSONA alone
+  (`ConfigLayers.resolve(only=...)`: another setting's bad value or a broken secret store does
+  not hide it) and prints its placeholder only when the persona itself cannot be read. It never
   writes `os.environ` (a second load sees an edited file; child processes inherit nothing) and
   records each key's source (`default`, `file:<path>`, `env`) and the layers it shadows. Only
   `env_names()` keys are taken, so a `.env` cannot set `HTTPS_PROXY`, `SSL_CERT_FILE` or any

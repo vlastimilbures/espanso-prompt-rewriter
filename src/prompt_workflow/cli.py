@@ -15,7 +15,7 @@ from typer.core import TyperGroup
 
 from . import recorder
 from .clipboard_guard import is_concealed
-from .config import EFFORTS, KEEP, TIERS, Settings
+from .config import EFFORTS, KEEP, TIERS, ConfigLayers, Settings
 from .factory import PROVIDER_NAMES, make_provider
 from .gate import GateBlocked, GatedProvider
 from .prompt_builder import (
@@ -344,6 +344,16 @@ def improve(
 PERSONA_PLACEHOLDER = "I am working as [role] in [company]."
 
 
+def _persona_alone() -> str:
+    """PROMPT_PERSONA when the full settings fail to load: another setting's bad value or a
+    failing secret store must not hide it from the -p- snippet. Empty when the persona itself
+    cannot be read (a broken config.toml or .env, a persona line run into the next one)."""
+    try:
+        return ConfigLayers.resolve(only="PROMPT_PERSONA").entries["PROMPT_PERSONA"].value
+    except Exception:
+        return ""
+
+
 @app.command()
 def persona(trigger_id: str | None = _TRIGGER_ID) -> None:
     """Print PROMPT_PERSONA for the -p- snippet, or a fill-in placeholder when unset."""
@@ -354,7 +364,7 @@ def persona(trigger_id: str | None = _TRIGGER_ID) -> None:
         text = cfg.persona or PERSONA_PLACEHOLDER
     except Exception:
         # Same contract as improve: never a traceback or blank expansion in Espanso.
-        text = PERSONA_PLACEHOLDER
+        text = _persona_alone() or PERSONA_PLACEHOLDER
     _emit(text)
     rec.emitted()
     rec.finish()

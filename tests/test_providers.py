@@ -403,6 +403,20 @@ def test_null_content(fake_http, name):
         build().generate("d", "s")
 
 
+# Anthropic joins every text block in order, skipping the others (#32).
+def test_anthropic_joins_text_blocks(fake_http):
+    fake_http.reply(
+        {
+            "content": [
+                {"type": "text", "text": "A"},
+                {"type": "thinking", "thinking": "x"},
+                {"type": "text", "text": "B"},
+            ]
+        }
+    )
+    assert AnthropicProvider("http://x", "m", "key").generate("d", "s") == "AB"
+
+
 # Anthropic picks the first text block, skipping thinking blocks.
 def test_anthropic_skips_non_text_blocks(fake_http):
     fake_http.reply(
@@ -452,8 +466,26 @@ def test_truncated_without_text_asks_for_more_tokens(fake_http, name, text):
     if name == "anthropic" and text is None:
         body["content"] = [{"type": "thinking", "thinking": "x"}]
     fake_http.reply(body)
-    with pytest.raises(ProviderError, match=f"^{label} used the whole max-tokens budget"):
+    with pytest.raises(ProviderError, match=f"^{label} used its whole output limit") as exc:
         build().generate("d", "s")
+    # --max-tokens sets Anthropic's cap, but Ollama and an uncapped LM Studio call ignore it.
+    assert ("--max-tokens" in str(exc.value)) == (name == "anthropic")
+
+
+# An OpenAI-compatible call that sends max_tokens (OpenRouter) suggests --max-tokens.
+def test_truncated_capped_openai_compatible_suggests_max_tokens(fake_http):
+    fake_http.reply(_truncated("openai_compatible", None))
+    provider = OpenAICompatibleProvider("http://x/v1/", "m", max_tokens=10, label="OpenRouter")
+    with pytest.raises(ProviderError, match="output limit before writing any text; raise --max"):
+        provider.generate("d", "s")
+
+
+# The note names no provider-specific setting (#32).
+def test_truncated_note_is_provider_neutral():
+    assert (
+        TRUNCATED_NOTE
+        == "\n\n[prompt-workflow: the reply hit the model's output limit and is cut off]"
+    )
 
 
 # A reply that ended normally is pasted as is.

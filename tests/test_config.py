@@ -623,8 +623,9 @@ def test_repair_mode_reports_lines_without_equals(tmp_path):
     assert layers.settings().ollama_model == "m"
 
 
-# A .env candidate that exists but is not UTF-8 is skipped for the next one, silently in
-# strict mode and as a finding in repair mode; a missing candidate is no finding.
+# A .env candidate that exists but is not UTF-8 is a finding in repair mode, which goes on to
+# the next one (strict mode refuses it, see test_strict_mode_refuses_undecodable_env); a
+# missing candidate is no finding.
 def test_repair_mode_reports_undecodable_env_file(tmp_path, monkeypatch):
     project, user = tmp_path / "repo", tmp_path / "cfg"
     project.mkdir()
@@ -634,12 +635,88 @@ def test_repair_mode_reports_undecodable_env_file(tmp_path, monkeypatch):
     (user / ".env").write_text("OLLAMA_MODEL=from-user\n")
     _no_explicit_env(tmp_path, monkeypatch, project, user)
 
-    assert Settings.load().ollama_model == "from-user"
     layers = ConfigLayers.resolve(strict=False)
     assert layers.findings == (
-        Finding(f"file:{project / '.env'}", ".env is not UTF-8 text; it was skipped"),
+        Finding(
+            f"file:{project / '.env'}",
+            "the checkout's .env is not UTF-8 text; save it as UTF-8",
+        ),
     )
     assert layers.entries["OLLAMA_MODEL"].source == f"file:{user / '.env'}"
 
     (user / ".env").unlink()
     assert ConfigLayers.resolve(strict=False).findings == layers.findings
+
+
+# A .env saved with a UTF-8 byte order mark (Windows Notepad) keeps its first key (#32).
+def test_env_with_byte_order_mark(tmp_path):
+    path = tmp_path / ".env"
+    path.write_bytes(b"\xef\xbb\xbfPROMPT_EXTRA_PATTERNS=CUST-\\d{6}\nOLLAMA_MODEL=m\n")
+    assert Settings.load().extra_patterns == r"CUST-\d{6}"
+    assert ConfigLayers.resolve(strict=False).findings == ()
+    assert config.read_env_file(path) == {
+        "PROMPT_EXTRA_PATTERNS": r"CUST-\d{6}",
+        "OLLAMA_MODEL": "m",
+    }
+
+
+# A .env that is not UTF-8 stops strict mode with an error naming the problem, not a value,
+# instead of falling through to the next candidate (#32).
+def test_strict_mode_refuses_undecodable_env(tmp_path, monkeypatch):
+    project, user = tmp_path / "repo", tmp_path / "cfg"
+    project.mkdir()
+    user.mkdir()
+    (project / "pyproject.toml").write_text("")
+    (project / ".env").write_bytes("OLLAMA_MODEL=secret-ish\n".encode("utf-16"))
+    (user / ".env").write_text("OLLAMA_MODEL=from-user\n")
+    _no_explicit_env(tmp_path, monkeypatch, project, user)
+    with pytest.raises(
+        ValueError, match=r"^the checkout's \.env is not UTF-8 text; save it as UTF-8$"
+    ):
+        Settings.load()
+    (project / ".env").unlink()
+    (user / ".env").write_bytes("OLLAMA_MODEL=x\n".encode("utf-16"))
+    with pytest.raises(ValueError, match=r"^the \.env in the user config folder is not UTF-8"):
+        Settings.load()
+
+
+# An unquoted value cut at ` #` keeps dotenv's comment meaning. Repair mode reports the cut
+# only for the free-text settings where '#' may be data (a regex, the persona), naming the
+# setting only; elsewhere ` # note` is an ordinary comment (#32).
+def test_repair_mode_reports_a_value_cut_at_a_comment(tmp_path):
+    (tmp_path / ".env").write_text(
+        "PROMPT_EXTRA_PATTERNS=ticket #\\d{5};CUST-\\d{6}\n"
+        'OPENROUTER_PROVIDER="openai" # quoted, so not cut\n'
+        "LMSTUDIO_MODEL=model#v2\n"
+        "OLLAMA_MODEL=qwen3:8b  # a note\n"
+        "PROMPT_TIMEOUT_SECONDS=45 # seconds\n"
+        "PROMPT_PERSONA=I am #1 here\n"
+        "NOT_A_SETTING=x # y\n"
+    )
+    # A cut gate pattern fails closed; repair mode falls back to the default (no patterns).
+    with pytest.raises(ValueError, match=r"^the value of PROMPT_EXTRA_PATTERNS was cut"):
+        Settings.load()
+    layers = ConfigLayers.resolve(strict=False)
+    settings = layers.settings()
+    assert settings.extra_patterns == ""
+    assert settings.persona == "I am"
+    assert (settings.ollama_model, settings.timeout) == ("qwen3:8b", 45)
+    source = f"file:{tmp_path / '.env'}"
+    assert layers.findings == tuple(
+        Finding(source, f"the value of {key} was cut at ' #' (a comment); quote the value")
+        for key in ("PROMPT_EXTRA_PATTERNS", "PROMPT_PERSONA")
+    )
+
+
+# A rejected value that matches one of the user's PROMPT_EXTRA_PATTERNS is never quoted, even
+# in the error raised while the settings load (#32).
+def test_rejected_value_matching_a_user_pattern_is_redacted(monkeypatch):
+    monkeypatch.setenv("PROMPT_EXTRA_PATTERNS", "falcon")
+    monkeypatch.setenv("PROMPT_TIMEOUT_SECONDS", "falcon")
+    with pytest.raises(ValueError, match="PROMPT_TIMEOUT_SECONDS must be") as exc:
+        Settings.load()
+    assert "falcon" not in str(exc.value)
+    assert "<redacted, 6 chars>" in str(exc.value)
+    findings = ConfigLayers.resolve(strict=False).findings
+    assert findings
+    assert all("falcon" not in f.message for f in findings)

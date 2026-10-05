@@ -351,8 +351,8 @@ def strip_thinking(text: str) -> str:
 
 
 # Appended to a rewrite the model stopped at its output cap, so a cut-off prompt is never
-# pasted as if it were complete.
-TRUNCATED_NOTE = "\n\n[prompt-workflow: output truncated at max tokens]"
+# pasted as if it were complete. Provider-neutral: the cap is not always one --max-tokens sets.
+TRUNCATED_NOTE = "\n\n[prompt-workflow: the reply hit the model's output limit and is cut off]"
 # Appended to a rewrite a content filter or a refusal stopped.
 FILTERED_NOTE = (
     "\n\n[prompt-workflow: the model stopped early ({reason}); the rewrite may be incomplete]"
@@ -365,13 +365,16 @@ _FAILED = frozenset({"error"})
 _FILTERED = frozenset({"content_filter", "refusal"})
 
 
-def finalize_content(content: object, label: str, *, stop_reason: object = None) -> str:
+def finalize_content(
+    content: object, label: str, *, stop_reason: object = None, capped: bool = False
+) -> str:
     """Validate a provider's raw response content, strip <think> blocks, require non-empty text.
 
     ``stop_reason`` is the provider's raw reason for ending the reply:
     - "error": generation failed part way, so no partial text is pasted.
     - "length"/"max_tokens": the token cap. With no text, a reasoning model spent the whole
       budget thinking, which only a bigger cap fixes; otherwise TRUNCATED_NOTE is appended.
+      ``capped``: the request sent the cap that --max-tokens sets, so the error suggests it.
     - "content_filter"/"refusal": with no text the request was declined; otherwise
       FILTERED_NOTE is appended.
     """
@@ -380,7 +383,8 @@ def finalize_content(content: object, label: str, *, stop_reason: object = None)
         raise ProviderError(f"{label} stopped with an error before finishing", transient=True)
     result = strip_thinking(content) if isinstance(content, str) else ""
     if reason in _TRUNCATING and not result:
-        raise ProviderError(f"{label} used the whole max-tokens budget; raise --max-tokens")
+        hint = "; raise --max-tokens" if capped else ""
+        raise ProviderError(f"{label} used its whole output limit before writing any text{hint}")
     if reason in _FILTERED and not result:
         raise ProviderError(f"{label} declined the request ({reason})")
     if not isinstance(content, str):
