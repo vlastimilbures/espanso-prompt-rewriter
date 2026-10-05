@@ -7,6 +7,7 @@ from __future__ import annotations
 import io
 import json
 import re
+import shutil
 from decimal import Decimal
 from pathlib import Path
 
@@ -1097,6 +1098,26 @@ def test_setup_interactive_deploys_on_yes(saved, espanso, fake_run, smoke_ok, tt
     # A second run finds nothing to deploy.
     result = _setup(espanso, "--non-interactive")
     assert "Every match file is in sync." in result.stdout
+
+
+def test_setup_forgets_gone_entries_without_asking(saved, espanso, fake_run, smoke_ok, tmp_path):
+    """Every file in sync and only gone entries on record: nothing to write, so no question,
+    no dry run and no "later" step; the entries are forgotten and the files left as they are."""
+    deploy.apply(deploy.plan(espanso, LAUNCHER, deploy.Manifest.load()))
+    old = tmp_path / "old-espanso"
+    (old / "match").mkdir(parents=True)
+    deploy.apply(deploy.plan(old, LAUNCHER, deploy.Manifest.load()))
+    shutil.rmtree(old)
+    before = {p: p.read_bytes() for p in (espanso / "match").iterdir()}
+    result = _setup(espanso, "--non-interactive")
+    assert result.exit_code == 0, result.output
+    assert "Every match file is in sync." in result.stdout
+    assert "(already gone)" in result.stdout
+    assert "Dry run" not in result.stdout
+    assert "deploy the match files" not in result.stdout
+    assert fake_run.calls == []
+    assert {p: p.read_bytes() for p in (espanso / "match").iterdir()} == before
+    assert all(Path(t).parent.parent == espanso for t in deploy.Manifest.load().entries)
 
 
 def test_setup_deploy_keeps_an_edited_file(saved, espanso, fake_run, smoke_ok):

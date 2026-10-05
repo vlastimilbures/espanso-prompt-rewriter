@@ -388,6 +388,19 @@ class Manifest:
         _write(self.path, data)
 
 
+def is_gone(entry: Entry) -> bool:
+    """True when an entry's target no longer exists, not even as a dangling link: its folder
+    was deleted or Espanso moved to another config folder. Such an entry only records history.
+    A target that cannot be looked at (an unreadable or privacy-guarded folder) is not gone."""
+    try:
+        os.lstat(entry.target)
+    except (FileNotFoundError, NotADirectoryError):
+        return True
+    except OSError:
+        return False
+    return False
+
+
 def _write(path: Path, text: str) -> None:
     """Write UTF-8 with the text's own newlines, through a new temp file in the same folder
     and an atomic rename. mkstemp creates the temp file exclusively, so a planted link there
@@ -449,13 +462,25 @@ class Plan:
     steps: list[FileStep]
     legacy: Path | None  # the pre-0.9 match/base.yml we retire, if present
     manifest: Manifest
+    # Manifest entries outside this plan whose file is gone: apply forgets them.
+    orphans: list[str] = field(default_factory=list)
 
     @property
-    def is_noop(self) -> bool:
+    def _files_in_sync(self) -> bool:
         return self.legacy is None and all(
             s.state == IN_SYNC and s.entry is not None and s.entry.digest == _digest(s.rendered)
             for s in self.steps
         )
+
+    @property
+    def is_noop(self) -> bool:
+        return self._files_in_sync and not self.orphans
+
+    @property
+    def only_forgets(self) -> bool:
+        """Every file is in sync and the only work is forgetting gone entries: apply then
+        touches no file, only the manifest, so it needs no question."""
+        return self._files_in_sync and bool(self.orphans)
 
     @property
     def conflicts(self) -> list[FileStep]:
@@ -527,7 +552,11 @@ def plan(espanso: Path, launcher: str, manifest: Manifest) -> Plan:
                 entry,
             )
         )
-    return Plan(espanso, launcher, steps, _legacy_base(match_dir), manifest)
+    planned = {str(s.target) for s in steps}
+    orphans = sorted(
+        key for key, e in manifest.entries.items() if key not in planned and is_gone(e)
+    )
+    return Plan(espanso, launcher, steps, _legacy_base(match_dir), manifest, orphans)
 
 
 # --- Apply --------------------------------------------------------------------------------
@@ -639,6 +668,11 @@ def apply(the_plan: Plan, choices: Mapping[str, str] | None = None) -> Outcome:
             calls_cli=step.calls_cli,
             backups=_prune(backups, step.target),
         )
+    for key in the_plan.orphans:
+        entry = manifest.entries.get(key)
+        if entry is not None and is_gone(entry):  # checked again: never forget a live file
+            del manifest.entries[key]
+            outcome.add(f"forgot {entry.target} (already gone)", changed=False)
     manifest.save()
     return outcome
 

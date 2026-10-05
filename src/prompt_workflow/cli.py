@@ -495,6 +495,8 @@ def espanso_deploy(
                 typer.echo(step.diff(), nl=False)
         if the_plan.legacy is not None:
             typer.echo(f"  legacy    {the_plan.legacy.name} will be retired, with a backup")
+        for key in the_plan.orphans:
+            typer.echo(f"  forget    {key} (already gone)")
         if dry_run:
             typer.echo("Dry run: nothing was written.")
             return

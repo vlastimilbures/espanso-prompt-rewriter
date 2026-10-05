@@ -355,6 +355,75 @@ def test_detach_remove_all(espanso):
     assert not (user_data_dir() / deploy.MANIFEST_NAME).exists()
 
 
+def _deploy_elsewhere(tmp_path, name):
+    other = tmp_path / name
+    (other / "match").mkdir(parents=True)
+    deploy.apply(_plan(other))
+    return other
+
+
+def test_apply_forgets_entries_whose_file_is_gone(tmp_path, espanso):
+    """Entries for a deleted folder are dropped; an entry outside the plan whose file still
+    exists stays, and no file is touched."""
+    gone = _deploy_elsewhere(tmp_path, "gone")
+    kept = _deploy_elsewhere(tmp_path, "kept")
+    deploy.apply(_plan(espanso))
+    shutil.rmtree(gone)
+    the_plan = _plan(espanso)
+    assert the_plan.orphans == sorted(str(gone / "match" / n) for n in NAMES)
+    assert not the_plan.is_noop
+    before = {p: p.read_bytes() for p in tmp_path.rglob("*.yml")}
+    outcome = deploy.apply(the_plan)
+    assert not outcome.changed
+    assert sorted(outcome.lines) == sorted(
+        f"forgot {gone / 'match' / n} (already gone)" for n in NAMES
+    )
+    entries = deploy.Manifest.load().entries
+    assert sorted(entries) == sorted(str(d / "match" / n) for d in (espanso, kept) for n in NAMES)
+    assert {p: p.read_bytes() for p in tmp_path.rglob("*.yml")} == before
+    assert _plan(espanso).is_noop
+
+
+def test_apply_keeps_an_orphan_that_came_back(tmp_path, espanso):
+    gone = _deploy_elsewhere(tmp_path, "gone")
+    shutil.rmtree(gone)
+    the_plan = _plan(espanso)
+    assert the_plan.orphans
+    _deploy_elsewhere(tmp_path, "gone")  # back before the plan is applied
+    deploy.apply(the_plan)
+    assert all(str(gone / "match" / n) in deploy.Manifest.load().entries for n in NAMES)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="chmod cannot lock a folder on Windows")
+def test_an_unreadable_folder_is_not_gone(tmp_path, espanso):
+    """An entry under a folder we may not look into (chmod 000, a privacy-guarded folder) is
+    neither a crash nor an orphan: it stays on record."""
+    locked = _deploy_elsewhere(tmp_path, "locked")
+    deploy.apply(_plan(espanso))
+    (locked / "match").chmod(0)
+    try:
+        if os.access(locked / "match", os.R_OK | os.X_OK):
+            pytest.skip("chmod is not effective (running as root)")
+        the_plan = _plan(espanso)
+        assert the_plan.orphans == []
+        assert the_plan.is_noop
+        deploy.apply(the_plan)
+    finally:
+        (locked / "match").chmod(0o755)
+    assert all(str(locked / "match" / n) in deploy.Manifest.load().entries for n in NAMES)
+
+
+def test_cli_deploy_forgets_gone_entries_when_in_sync(tmp_path, espanso, fake_run):
+    deploy.apply(_plan(espanso))
+    shutil.rmtree(_deploy_elsewhere(tmp_path, "gone"))
+    result = _cli("deploy", "--yes", *_where(espanso))
+    assert result.exit_code == 0, result.output
+    assert "forget    " in result.stdout
+    assert "forgot " in result.stdout
+    assert fake_run.calls == []  # nothing Espanso loads changed: no restart
+    assert "Nothing to do" in _cli("deploy", "--yes", *_where(espanso)).stdout
+
+
 def test_detach_leaves_unowned_files(espanso):
     other = espanso / "match" / "mine.yml"
     other.write_text("matches: []\n", "utf-8")

@@ -614,9 +614,14 @@ class TriggersPane(Pane):
             self.busy = False
             self.report("Nothing to do: every match file is in sync.")
             return
+        if plan.only_forgets:  # the manifest only: no file is written, so nothing to ask
+            self.report("Forgetting deploy records of files that are gone…")
+            self.background(lambda: self._apply(plan, {}))
+            return
         lines = [f"{s.state:<9} {s.name}" for s in plan.steps]
         if plan.legacy is not None:
             lines.append(f"legacy    {plan.legacy.name} will be retired, with a backup")
+        lines += [f"forget    {key} (already gone)" for key in plan.orphans]
         diffs = [s.diff() for s in plan.steps if s.state not in (deploy.IN_SYNC, deploy.MISSING)]
         preview = "\n".join(lines) + ("\n\n" + "".join(diffs) if diffs else "")
         conflicts = plan.conflicts
@@ -726,6 +731,7 @@ def _plan_digest(plan: deploy.Plan) -> tuple[object, ...]:
         plan.legacy,
         [(s.name, s.state, s.current) for s in plan.steps],
         _manifest_digest(plan.manifest),
+        plan.orphans,
     )
 
 
