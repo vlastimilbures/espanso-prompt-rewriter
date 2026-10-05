@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## 0.18.0 - 2026-10-06
+
 ### Security
 - Every repeat in the gate's built-in patterns is now bounded, as the code comment already
   claimed (#36). The JWT pattern's three unbounded segments made a 50,000-character draft of
