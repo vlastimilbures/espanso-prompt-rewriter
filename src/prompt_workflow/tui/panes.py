@@ -6,8 +6,9 @@ from __future__ import annotations
 
 import os
 import shlex
+import shutil
 import subprocess
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -76,6 +77,8 @@ class Pane(VerticalScroll):
 
     last_message = ""
     ready = False
+    # A deploy or detach dialog is open or running (TriggersPane).
+    busy = False
 
     def on_mount(self) -> None:
         # A State read before this pane was composed is shown now (the load runs in a thread).
@@ -110,16 +113,33 @@ class Pane(VerticalScroll):
         """Run a change; show its message, or the error a headless command would print."""
         try:
             message = action()
-        except EXPECTED as exc:
-            self.report(f"error: {str(exc) or type(exc).__name__}", error=True)
-            return
         except Exception as exc:
-            # As commands/common.guard: a bug ends in a readable line, not a crashed screen.
-            self.report(f"error: unexpected {type(exc).__name__}: {exc}", error=True)
+            self.report(_error(exc), error=True)
             return
         self.report(message)
         if reload:
             self.manage.reload()
+
+    @work(thread=True, group="action", exit_on_error=False)
+    def background(self, job: Callable[[], None]) -> None:
+        """Run ``job`` in a thread (it may call a command or wait on Espanso); a failure is
+        shown like attempt()'s, never a crashed screen."""
+        try:
+            job()
+        except Exception as exc:
+            self.app.call_from_thread(self.failed, exc)
+
+    def failed(self, exc: Exception) -> None:
+        self.busy = False
+        self.report(_error(exc), error=True)
+        self.manage.reload()
+
+
+def _error(exc: Exception) -> str:
+    """As commands/common.guard: a service error's own message; a bug named as unexpected."""
+    if isinstance(exc, EXPECTED):
+        return f"error: {str(exc) or type(exc).__name__}"
+    return f"error: unexpected {type(exc).__name__}: {exc}"
 
 
 # --- Home ---------------------------------------------------------------------------------
@@ -209,7 +229,15 @@ class ProvidersPane(Pane):
             key = "not needed"
             if route.key:
                 key = "set" if entries[route.key].value else "not set"
-            _add_row(table, route.name, route.model, route.base_url, where, key)
+            model, url = entries[route.model_setting], entries[route.url_setting]
+            _add_row(
+                table,
+                route.name,
+                common.shown_value(route.model_setting, model),
+                common.shown_value(route.url_setting, url),
+                where,
+                key,
+            )
 
     @on(Button.Pressed, "#set-key")
     def _set_key(self) -> None:
@@ -339,10 +367,10 @@ class ProvidersPane(Pane):
     def _run_smoke(self, values: dict[str, str] | None) -> None:
         if values is not None:
             self.report(f"Running improve --provider {values['provider']} against the stub…")
-            self._smoke_worker(values["provider"])
+            provider = values["provider"]
+            self.background(lambda: self._smoke_now(provider))
 
-    @work(thread=True, group="action")
-    def _smoke_worker(self, provider: str) -> None:
+    def _smoke_now(self, provider: str) -> None:
         result = smoke.run(provider)
         message = f"{'ok' if result.ok else 'failed'}: {result.message}"
         self.app.call_from_thread(self.report, message, error=not result.ok)
@@ -351,12 +379,26 @@ class ProvidersPane(Pane):
 # --- Profiles -----------------------------------------------------------------------------
 
 
-def editor_command() -> list[str]:
-    """$VISUAL or $EDITOR, else Notepad on Windows and vi elsewhere."""
-    chosen = os.environ.get("VISUAL") or os.environ.get("EDITOR")
-    if chosen:
-        return shlex.split(chosen, posix=os.name != "nt")
-    return ["notepad"] if os.name == "nt" else ["vi"]
+def editor_command(
+    environ: Mapping[str, str] = os.environ,
+    *,
+    windows: bool = os.name == "nt",
+    which: Callable[[str], str | None] = shutil.which,
+) -> list[str]:
+    """$VISUAL or $EDITOR, else Notepad on Windows and vi elsewhere, as an argv. On Windows the
+    quotes around a token are dropped (`"C:\\Program Files\\…\\ed.exe" -w`), and the program
+    is looked up on PATH, so `code` finds code.cmd (PATHEXT)."""
+    chosen = environ.get("VISUAL") or environ.get("EDITOR")
+    if not chosen:
+        argv = ["notepad"] if windows else ["vi"]
+    else:
+        argv = shlex.split(chosen, posix=not windows)
+        if windows:
+            argv = [
+                token[1:-1] if len(token) > 1 and token[0] == token[-1] == '"' else token
+                for token in argv
+            ]
+    return [which(argv[0]) or argv[0], *argv[1:]]
 
 
 def run_editor(path: Path) -> int:
@@ -549,20 +591,22 @@ class TriggersPane(Pane):
 
     @on(Button.Pressed, "#deploy")
     def _deploy(self) -> None:
-        self.report("Reading the match files…")
-        self._plan_worker()
+        if self.claim():
+            self.report("Reading the match files…")
+            self.background(lambda: self.app.call_from_thread(self._ask_deploy, current_plan()))
 
-    @work(thread=True, group="action")
-    def _plan_worker(self) -> None:
-        try:
-            plan = current_plan()
-        except (deploy.DeployError, OSError, ValueError) as exc:
-            self.app.call_from_thread(self.report, f"error: {exc}", error=True)
-            return
-        self.app.call_from_thread(self._ask_deploy, plan)
+    def claim(self) -> bool:
+        """Start a deploy or detach unless one is already open: a second dialog would apply
+        a plan the first one already changed."""
+        if self.busy:
+            self.report("A deploy or detach is already in progress; finish or cancel it first.")
+            return False
+        self.busy = True
+        return True
 
     def _ask_deploy(self, plan: deploy.Plan) -> None:
         if plan.is_noop:
+            self.busy = False
             self.report("Nothing to do: every match file is in sync.")
             return
         lines = [f"{s.state:<9} {s.name}" for s in plan.steps]
@@ -584,22 +628,24 @@ class TriggersPane(Pane):
 
         def done(values: dict[str, str] | None) -> None:
             if values is None:
+                self.busy = False
                 return
             choices = {s.name: values[f"choice-{i}"] for i, s in enumerate(conflicts)}
             self.report("Deploying…")
-            self._apply_worker(plan, choices)
+            self.background(lambda: self._apply(plan, choices))
 
         self.app.push_screen(
             FormModal("Deploy the match files", fields, submit="Deploy", preview=preview), done
         )
 
-    @work(thread=True, group="action")
-    def _apply_worker(self, plan: deploy.Plan, choices: dict[str, str]) -> None:
-        try:
-            outcome = deploy.apply(plan, choices)
-        except (deploy.DeployError, OSError) as exc:
-            self.app.call_from_thread(self._done, f"error: {exc}", True)
-            return
+    def _apply(self, plan: deploy.Plan, choices: dict[str, str]) -> None:
+        """In the worker: apply the plan the person saw, unless the files changed since."""
+        if _plan_digest(current_plan()) != _plan_digest(plan):
+            raise deploy.DeployError(
+                "the match files or the deploy record changed since the preview; nothing was "
+                "written. Press Deploy again to see the new plan"
+            )
+        outcome = deploy.apply(plan, choices)
         lines = list(outcome.lines)
         if outcome.changed and not deploy.restart_espanso():
             lines.append("Could not restart Espanso; run `espanso restart` yourself.")
@@ -611,25 +657,22 @@ class TriggersPane(Pane):
         self.app.call_from_thread(self._done, "\n".join(lines), bool(outcome.kept))
 
     def _done(self, message: str, error: bool) -> None:
+        self.busy = False
         self.report(message, error=error)
         self.manage.reload()
 
     @on(Button.Pressed, "#detach")
     def _ask_detach_start(self) -> None:
-        self._manifest_worker()
-
-    @work(thread=True, group="action")
-    def _manifest_worker(self) -> None:
-        try:
-            manifest = deploy.Manifest.load()
-            root = deploy.espanso_dir().resolve()
-        except (deploy.DeployError, OSError) as exc:
-            self.app.call_from_thread(self.report, f"error: {exc}", error=True)
-            return
-        self.app.call_from_thread(self._ask_detach, manifest, root)
+        if self.claim():
+            self.background(
+                lambda: self.app.call_from_thread(
+                    self._ask_detach, deploy.Manifest.load(), deploy.espanso_dir().resolve()
+                )
+            )
 
     def _ask_detach(self, manifest: deploy.Manifest, root: Path) -> None:
         if not manifest.entries:
+            self.busy = False
             self.report("Nothing to do: prompt-workflow has no deployed match files on record.")
             return
         preview = "Detach removes the files below that you have not edited:\n" + "\n".join(
@@ -644,22 +687,41 @@ class TriggersPane(Pane):
         ]
 
         def done(values: dict[str, str] | None) -> None:
-            if values is not None:
-                self._detach_worker(manifest, root, values["mode"] == "remove-all")
+            if values is None:
+                self.busy = False
+                return
+            remove_all = values["mode"] == "remove-all"
+            self.background(lambda: self._detach_now(manifest, root, remove_all))
 
         self.app.push_screen(FormModal("Detach", fields, submit="Detach", preview=preview), done)
 
-    @work(thread=True, group="action")
-    def _detach_worker(self, manifest: deploy.Manifest, root: Path, remove_all: bool) -> None:
-        try:
-            outcome = deploy.detach(manifest, root, remove_all=remove_all)
-        except (deploy.DeployError, OSError) as exc:
-            self.app.call_from_thread(self._done, f"error: {exc}", True)
-            return
+    def _detach_now(self, manifest: deploy.Manifest, root: Path, remove_all: bool) -> None:
+        if _manifest_digest(deploy.Manifest.load()) != _manifest_digest(manifest):
+            raise deploy.DeployError(
+                "the deploy record changed since the preview; nothing was removed. Press "
+                "Detach again"
+            )
+        outcome = deploy.detach(manifest, root, remove_all=remove_all)
         lines = list(outcome.lines)
         if outcome.changed and not deploy.restart_espanso():
             lines.append("Could not restart Espanso; run `espanso restart` yourself.")
         self.app.call_from_thread(self._done, "\n".join(lines), False)
+
+
+def _manifest_digest(manifest: deploy.Manifest) -> list[tuple[str, dict[str, Any]]]:
+    return sorted((key, vars(entry)) for key, entry in manifest.entries.items())
+
+
+def _plan_digest(plan: deploy.Plan) -> tuple[object, ...]:
+    """What a deploy preview showed: each file's state and content, the legacy file, the
+    launcher and the manifest it was compared with."""
+    return (
+        plan.espanso_dir,
+        plan.launcher,
+        plan.legacy,
+        [(s.name, s.state, s.current) for s in plan.steps],
+        _manifest_digest(plan.manifest),
+    )
 
 
 # --- History ------------------------------------------------------------------------------
@@ -780,25 +842,37 @@ class HistoryPane(Pane):
     def _prune(self) -> None:
         days = str(self.state.settings.history_retention_days) if self.state else ""
         fields = [Field("days", "Delete the records older than this many days", value=days)]
-        preview = "The records and their requests are deleted; this cannot be undone."
         self.app.push_screen(
-            FormModal("Prune the usage history", fields, submit="Delete", preview=preview),
-            self._do_prune,
+            FormModal("Prune the usage history", fields, submit="Next…"), self._ask_prune
         )
 
-    def _do_prune(self, values: dict[str, str] | None) -> None:
+    def _ask_prune(self, values: dict[str, str] | None) -> None:
         if values is None:
             return
+        found = usage._AGE.fullmatch(values["days"].strip())
+        if found is None:
+            self.report("error: enter a number of days, e.g. 30", error=True)
+            return
+        days = int(found.group(1))
+        cutoff = history.HistoryStore._cutoff(timedelta(days=days))[:16].replace("T", " ")
 
         def prune() -> str:
-            found = usage._AGE.fullmatch(values["days"].strip())
-            if found is None:
-                raise common.CommandError("enter a number of days, e.g. 30")
-            days = int(found.group(1))
             deleted = self._store().prune(timedelta(days=days))
             return f"Deleted {deleted} call(s) older than {days} day(s)."
 
-        self.attempt(prune)
+        def done(yes: bool | None) -> None:
+            if yes:
+                self.attempt(prune)
+
+        self.app.push_screen(
+            ConfirmModal(
+                f"Delete every record older than {days} day(s)?",
+                f"Everything recorded before {cutoff} UTC, with its requests, is deleted; this "
+                "cannot be undone.",
+                confirm="Delete",
+            ),
+            done,
+        )
 
     @on(Button.Pressed, "#reset")
     def _reset(self) -> None:
@@ -882,9 +956,8 @@ class DiagnosticsPane(Pane):
     @on(Button.Pressed, "#import-check")
     def _import_check(self) -> None:
         self.report("Importing the CLI in a fresh interpreter…")
-        self._import_worker()
+        self.background(self._import_now)
 
-    @work(thread=True, group="action")
-    def _import_worker(self) -> None:
+    def _import_now(self) -> None:
         found = doctor.import_check()
         self.app.call_from_thread(self.report, found.message, error=not found.ok)

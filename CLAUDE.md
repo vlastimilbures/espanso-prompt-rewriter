@@ -230,11 +230,15 @@ prompt-workflow espanso status  # missing / in sync / stale / modified / foreign
   the interface opens; `tests/test_trigger_contract.py` checks neither the triggers nor `--help`,
   `doctor`, `config show` and the other headless commands load it. Six tabs (Home, Providers &
   keys, Profiles, Triggers, History, Diagnostics) show one `tui/state.State`, which `gather()`
-  reads again in a worker thread after every change; each action calls the same services as the
+  reads again in a worker thread after every change (a generation number drops an older load
+  that finishes late); each action calls the same services as the
   headless command (`commands/settings.save_setting()` is shared with `config set`) and adds no
   logic. Keys appear only as set/not set; destructive actions (key removal, deploy, detach,
-  migrate, history prune/reset) go through a dialog whose Cancel is the default, and deploy keeps
-  an edited file unless a conflict choice says otherwise. No provider call except the explicit
+  migrate, history prune/reset) go through a dialog whose Cancel has the focus, and deploy keeps
+  an edited file unless a conflict choice says otherwise. Only one deploy/detach dialog opens at a
+  time, and each re-reads the plan or manifest before writing and refuses if it changed since the
+  preview. Workers run through `Pane.background()`, which reports any failure instead of
+  crashing; base URLs and models are shown through `common.shown_value()`. No provider call except the explicit
   "Test call" (`smoke.run()`); doctor runs without the clipboard. Bindings are letters and digits
   only (on `MainScreen`, so none fires under a dialog); `t` switches to the high-contrast theme;
   Textual honours `NO_COLOR`; exit is `sys.exit(app.return_code or 0)`. `tests/test_tui.py`
@@ -246,7 +250,8 @@ prompt-workflow espanso status  # missing / in sync / stale / modified / foreign
   via `run_command`; keys as set/not set; the clipboard only as a length (never read when
   concealed). Match files `stale`/`missing` or a deployed launcher that is gone fail (exit 4).
   `import_check()` (the interface's Diagnostics) imports `prompt_workflow.cli` in a fresh
-  interpreter and reports its time, module count and any `HEAVY_MODULES` it loaded.
+  interpreter (`-P`, so a module planted in the working directory never runs; the smoke test's
+  child uses `-P` too) and reports its time, module count and any `HEAVY_MODULES` it loaded.
 - `smoke.py` — `setup`'s smoke test: a `ThreadingHTTPServer` on 127.0.0.1:0 answering the
   OpenAI-compatible, Anthropic and Ollama shapes, and a child `python -m prompt_workflow.cli
   improve --provider <p>` whose env points every `*_BASE_URL` at it with a placeholder key (the

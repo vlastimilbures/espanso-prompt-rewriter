@@ -110,6 +110,9 @@ class ManageApp(App[int]):
         self.loader = loader
         self.group_by = "trigger"
         self.state: State | None = None
+        # Each reload's number. A thread cannot be stopped, so a slower, older load may finish
+        # after a newer one: only the newest is shown.
+        self.generation = 0
         self.main = MainScreen()
         self.register_theme(HIGH_CONTRAST)
         self.theme = DEFAULT_THEME
@@ -120,7 +123,8 @@ class ManageApp(App[int]):
 
     def reload(self) -> None:
         """Read everything again (settings, doctor, plan, stats) and refill every tab."""
-        self._load()
+        self.generation += 1
+        self._load(self.generation)
 
     def action_reload(self) -> None:
         self.reload()
@@ -129,7 +133,7 @@ class ManageApp(App[int]):
         self.theme = DEFAULT_THEME if self.theme == HIGH_CONTRAST.name else HIGH_CONTRAST.name
 
     @work(thread=True, exclusive=True, group="load", exit_on_error=False)
-    def _load(self) -> None:
+    def _load(self, generation: int) -> None:
         try:
             state = self.loader(self.group_by)
         except Exception as exc:
@@ -140,9 +144,11 @@ class ManageApp(App[int]):
                 markup=False,
             )
             return
-        self.call_from_thread(self._show, state)
+        self.call_from_thread(self._show, state, generation)
 
-    def _show(self, state: State) -> None:
+    def _show(self, state: State, generation: int) -> None:
+        if generation != self.generation:
+            return  # an older load that finished late
         self.state = state
         for pane in self.main.query(Pane):
             if pane.ready:

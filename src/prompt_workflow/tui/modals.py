@@ -107,7 +107,8 @@ class TextModal(_Dialog[None]):
 
 class FormModal(_Dialog[dict[str, str] | None]):
     """A few fields and a submit button; returns the values by field id, or None when
-    cancelled. The submit button is the confirmation for what the preview describes."""
+    cancelled. Cancel has the focus when it opens. Its submit button is the confirmation for
+    what the preview describes, except prune, which asks once more."""
 
     def __init__(
         self, title: str, fields: Sequence[Field], *, submit: str = "Save", preview: str = ""
@@ -138,6 +139,10 @@ class FormModal(_Dialog[dict[str, str] | None]):
             with Horizontal(classes="buttons"):
                 yield Button("Cancel", id="cancel")
                 yield Button(self.submit, id="submit", variant="primary")
+
+    def on_mount(self) -> None:
+        # Cancel first: Enter right after the dialog opens changes nothing.
+        self.query_one("#cancel", Button).focus()
 
     def values(self) -> dict[str, str]:
         found = {}

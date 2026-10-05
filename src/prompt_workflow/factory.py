@@ -91,28 +91,31 @@ class Route:
     to call. ``remote`` is _leaves_machine(); ``refused`` is PROMPT_LOCAL_ONLY refusing it."""
 
     name: str
-    model: str
-    base_url: str
+    # The settings that hold the model and the base URL, so a screen can show their values
+    # the way `config show` does (a URL with a password in it only as set).
+    model_setting: str
+    url_setting: str
     key: str | None
     remote: bool
     refused: bool
 
 
 def routes(cfg: Settings) -> list[Route]:
-    """Every provider in PROVIDER_NAMES with its model, base URL, key setting and whether it
-    can send the draft off this machine. Builds no provider and makes no call."""
-    places = {
-        "ollama": (cfg.ollama_model, cfg.ollama_base_url),
-        "lmstudio": (cfg.lmstudio_model, cfg.lmstudio_base_url),
-        "openrouter": (cfg.openrouter_model, cfg.openrouter_base_url),
-        "anthropic": (cfg.anthropic_model, cfg.anthropic_base_url),
-    }
+    """Every provider in PROVIDER_NAMES with its model and base URL settings, key setting and
+    whether it can send the draft off this machine. Builds no provider and makes no call."""
     found = []
     for name in PROVIDER_NAMES:
-        model, base_url = places[name]
+        prefix = name.upper()
         remote = _leaves_machine(name, cfg)
         found.append(
-            Route(name, model, base_url, PROVIDER_KEYS.get(name), remote, remote and cfg.local_only)
+            Route(
+                name,
+                f"{prefix}_MODEL",
+                f"{prefix}_BASE_URL",
+                PROVIDER_KEYS.get(name),
+                remote,
+                remote and cfg.local_only,
+            )
         )
     return found
 

@@ -485,12 +485,14 @@ def test_profiles_editor_unsupported_terminal(espanso, monkeypatch):
     drive(scenario)
 
 
-def test_editor_command(monkeypatch):
-    monkeypatch.delenv("VISUAL", raising=False)
-    monkeypatch.setenv("EDITOR", "code --wait")
-    assert panes.editor_command() == ["code", "--wait"]
-    monkeypatch.delenv("EDITOR")
-    assert panes.editor_command() in (["vi"], ["notepad"])
+def test_editor_command():
+    def nowhere(name):
+        return None
+
+    assert panes.editor_command({}, windows=False, which=nowhere) == ["vi"]
+    assert panes.editor_command({}, windows=True, which=nowhere) == ["notepad"]
+    both = {"VISUAL": "vim", "EDITOR": "code --wait"}
+    assert panes.editor_command(both, windows=False, which=nowhere) == ["vim"]
 
 
 def test_profiles_migrate_copies_after_confirming(espanso, tmp_path, monkeypatch):
@@ -782,6 +784,7 @@ def test_history_stats_export_prune_reset(espanso, tmp_path):
         assert "number of days" in history_pane.last_message
         await press(app, pilot, "#prune")
         await fill(app, pilot, days="30")
+        await press(app, pilot, "#confirm")
         assert history_pane.last_message == "Deleted 0 call(s) older than 30 day(s)."
 
         await press(app, pilot, "#reset")
@@ -983,7 +986,14 @@ def _words(text: str) -> str:
     differ by terminal width, CI and OS."""
     text = re.sub(r"\x1b\[[0-9;]*m", "", text)
     text = re.sub(r"Usage: .*? \[OPTIONS\]", "Usage: prompt-workflow [OPTIONS]", text)
-    return " ".join(re.sub(r"[│╭╮╰╯─|+]", " ", text).split())
+    # Every box-drawing character: Windows draws square corners where macOS draws round ones.
+    return " ".join(re.sub(r"[\u2500-\u257f|+]", " ", text).split())
+
+
+def test_words_ignore_the_border_style():
+    rounded = "╭─ Options ─╮\n│ --help │\n╰───────────╯"
+    square = "┌─ Options ─┐\n│ --help │\n└───────────┘"
+    assert _words(rounded) == _words(square) == "Options --help"
 
 
 def test_bare_command_without_a_terminal_prints_the_help_as_before(monkeypatch):
@@ -1052,3 +1062,206 @@ def test_bare_command_in_a_real_process(tmp_path):
     assert (bare.returncode, helped.returncode) == (2, 0)
     assert bare.stdout + EOL == helped.stdout
     assert bare.stderr == helped.stderr == b""
+
+
+# --- review of #109: regressions ----------------------------------------------------------
+
+
+def test_providers_never_show_credentials_in_a_base_url(espanso, monkeypatch):
+    secret = "hunter" + "2pass"
+    url = f"https://bob:{secret}@llm.example.com/v1"
+    monkeypatch.setenv("OPENROUTER_BASE_URL", url)
+
+    async def scenario(app, pilot):
+        await pilot.press("2")
+        assert secret not in app.export_screenshot()
+        await pilot.press("6")
+        assert secret not in app.export_screenshot()
+
+    drive(scenario)
+
+
+def test_an_older_slower_load_never_overwrites_a_newer_one(espanso):
+    import threading
+
+    release, started = threading.Event(), threading.Event()
+    loaded = []
+
+    def loader(group_by):
+        n = len(loaded)
+        loaded.append(n)
+        if n == 1:  # the second load is slow and finishes last
+            started.set()
+            release.wait(10)
+        state = gather(group_by)
+        object.__setattr__(state, "plan_error", f"load {n}")
+        return state
+
+    async def scenario(app, pilot):
+        app.reload()
+        while not started.is_set():
+            await pilot.pause(0.01)
+        app.reload()
+        await settle(pilot)
+        assert app.state.plan_error == "load 2"
+        release.set()
+        for _ in range(20):
+            await pilot.pause(0.02)
+        assert app.state.plan_error == "load 2"
+
+    drive(scenario, loader=loader)
+    assert loaded == [0, 1, 2]
+
+
+def test_a_failing_worker_is_reported_not_raised(espanso, monkeypatch):
+    def bug(provider):
+        raise RuntimeError("kaput")
+
+    monkeypatch.setattr(smoke, "run", bug)
+
+    def bad_apply(*args, **kwargs):
+        raise ValueError("bad choice")
+
+    monkeypatch.setattr(deploy, "apply", bad_apply)
+
+    async def scenario(app, pilot):
+        await pilot.press("2")
+        await press(app, pilot, "#smoke")
+        await fill(app, pilot)
+        assert pane(app, "providers").last_message == "error: unexpected RuntimeError: kaput"
+        await pilot.press("4")
+        await press(app, pilot, "#deploy")
+        await press(app, pilot, "#submit")
+        assert pane(app, "triggers").last_message == "error: bad choice"
+        assert app.is_running
+
+    drive(scenario)
+
+
+def test_deploy_twice_opens_one_dialog(espanso):
+    async def scenario(app, pilot):
+        await pilot.press("4")
+        buttons = app.screen.query_one("#deploy", Button), app.screen.query_one("#detach", Button)
+        buttons[0].press()
+        buttons[0].press()
+        buttons[1].press()
+        await settle(pilot)
+        assert isinstance(app.screen, FormModal)
+        assert "in progress" in pane(app, "triggers").last_message
+        await press(app, pilot, "#cancel")
+        assert not isinstance(app.screen, FormModal)
+        # Once the dialog is closed, Deploy works again.
+        await press(app, pilot, "#deploy")
+        assert isinstance(app.screen, FormModal)
+        await press(app, pilot, "#submit")
+        assert pane(app, "triggers").last_message.endswith("The match files are up to date.")
+
+    drive(scenario)
+
+
+def test_deploy_refuses_a_plan_that_changed_since_the_preview(espanso):
+    target = espanso.root / "match" / "prompts-core.yml"
+
+    async def scenario(app, pilot):
+        await pilot.press("4")
+        await press(app, pilot, "#deploy")
+        target.write_text("matches: []  # written meanwhile\n", encoding="utf-8")
+        await press(app, pilot, "#submit")
+        assert "changed since the preview" in pane(app, "triggers").last_message
+
+    drive(scenario)
+    assert target.read_text("utf-8") == "matches: []  # written meanwhile\n"
+    assert not (espanso.root / "match" / "prompts-llm.yml").exists()
+
+
+def test_detach_refuses_a_manifest_that_changed_since_the_preview(espanso):
+    async def scenario(app, pilot):
+        await pilot.press("4")
+        await press(app, pilot, "#deploy")
+        await press(app, pilot, "#submit")
+        await press(app, pilot, "#detach")
+        manifest = deploy.Manifest.load()
+        manifest.entries.popitem()
+        manifest.save()
+        await press(app, pilot, "#submit")
+        assert "changed since the preview" in pane(app, "triggers").last_message
+
+    drive(scenario)
+    assert (espanso.root / "match" / "prompts-llm.yml").is_file()
+
+
+def test_prune_enter_does_not_prune(espanso, monkeypatch):
+    pruned = []
+    monkeypatch.setattr(HistoryStore, "prune", lambda self, age=None: pruned.append(age) or 0)
+
+    async def scenario(app, pilot):
+        await pilot.press("5")
+        await press(app, pilot, "#prune")
+        await pilot.press("enter")
+        await settle(pilot)
+        assert not isinstance(app.screen, FormModal | ConfirmModal)
+        await press(app, pilot, "#prune")
+        await fill(app, pilot, days="30")
+        assert isinstance(app.screen, ConfirmModal)
+        assert "older than 30 day(s)" in app.screen.dialog_title
+        await pilot.press("enter")
+        await settle(pilot)
+        assert pruned == []
+        await press(app, pilot, "#prune")
+        await fill(app, pilot, days="30")
+        await press(app, pilot, "#confirm")
+
+    drive(scenario)
+    from datetime import timedelta
+
+    assert pruned == [timedelta(days=30)]
+
+
+@pytest.mark.parametrize(
+    ("windows", "value", "expected"),
+    [
+        (False, "code --wait", ["/bin/code", "--wait"]),
+        (False, "'/opt/my editor/ed' -w", ["/opt/my editor/ed", "-w"]),
+        (True, "code --wait", ["C:/bin/code.cmd", "--wait"]),
+        (True, '"C:\\Program Files\\Ed\\ed.exe" -w', ["C:\\Program Files\\Ed\\ed.exe", "-w"]),
+    ],
+)
+def test_editor_command_forms(windows, value, expected):
+    found = {"code": "/bin/code"} if not windows else {"code": "C:/bin/code.cmd"}
+    command = panes.editor_command(
+        {"EDITOR": value}, windows=windows, which=lambda name: found.get(name)
+    )
+    assert command == expected
+
+
+def test_children_ignore_modules_planted_in_the_working_directory(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    marker = tmp_path / "ran"
+    for name in ("json", "typer"):
+        (tmp_path / f"{name}.py").write_text(
+            f"open({str(marker)!r}, 'w').write('planted')\nraise SystemExit(9)\n",
+            encoding="utf-8",
+        )
+    assert doctor.import_check().ok
+    assert smoke.run("ollama").ok
+    assert not marker.exists()
+
+
+def test_builtin_profiles_load_in_a_fixed_order(monkeypatch):
+    # The Linux snapshot listed `general` before `default`: a directory's order is the file
+    # system's, so the loader sorts.
+    from prompt_workflow import prompt_builder
+
+    class Entry:
+        def __init__(self, name):
+            self.name = name
+
+        def read_text(self, encoding):
+            return self.name
+
+    class Folder:
+        def iterdir(self):
+            return iter([Entry("general.md"), Entry("zeta.md"), Entry("default.md")])
+
+    monkeypatch.setattr(prompt_builder, "_PROMPT_DIR", Folder())
+    assert list(prompt_builder._load_profiles()) == ["default", "general", "zeta"]

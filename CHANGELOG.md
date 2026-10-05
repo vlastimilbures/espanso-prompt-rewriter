@@ -14,7 +14,8 @@ All notable changes to this project are documented here. The format follows
   and deploy state, a diff preview, deploy (an edited file is kept unless you choose otherwise),
   detach, `.env` and profile migration, export, prune and reset of the usage history, config
   provenance, SQLite and lost-write state, and an import-time check. Every change asks first
-  and reloads every tab; no provider is called except by the Test call button (a stub on
+  (Cancel has the focus; deploy and detach refuse a plan that changed since their preview) and
+  reloads every tab; credentials in a base URL are never shown; no provider is called except by the Test call button (a stub on
   127.0.0.1). Keys are letters and digits, `t` switches to a high-contrast theme, and
   `NO_COLOR` is honoured. Without a terminal a bare `prompt-workflow` still prints the help and
   exits 2 (the help now lists `ui`), and `ui` exits 3. Textual is a new dependency
@@ -241,6 +242,10 @@ All notable changes to this project are documented here. The format follows
   separators become newlines instead of disappearing.
 - A draft over 50,000 characters is refused before it is cleaned, so a pasted multi-megabyte
   log no longer stalls the expansion.
+
+- The built-in profiles are listed in name order on every OS (`default`, `general`). Linux
+  listed them in the file system's order, so an unknown-profile error or `profiles list` could
+  name `general` first.
 
 ### Removed
 - `espanso/config/default.yml` and the installers' `--with-config` / `-WithConfig` option (#37).

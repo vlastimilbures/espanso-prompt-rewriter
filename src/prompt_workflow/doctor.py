@@ -431,7 +431,9 @@ def import_check(timeout: float = IMPORT_TIMEOUT) -> ImportCheck:
     probe = f"HEAVY = {top!r}\nPREFIXES = {prefixes!r}\n{_IMPORT_PROBE}"
     try:
         proc = subprocess.run(  # noqa: S603 - this interpreter, a fixed script, no shell
-            [sys.executable, "-c", probe],
+            # -P: the working directory is not put on sys.path, so a module planted there
+            # (a json.py) never runs.
+            [sys.executable, "-P", "-c", probe],
             capture_output=True,
             timeout=timeout,
             check=False,

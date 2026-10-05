@@ -13,9 +13,11 @@ _PROMPT_DIR = files(__package__) / "prompts"
 
 
 def _load_profiles() -> dict[str, str]:
+    # Sorted: a directory lists in the file system's order (ext4 hashes names), and the order
+    # shows in --help texts, errors and the interface.
     return {
         p.name.removesuffix(".md"): p.read_text(encoding="utf-8").strip()
-        for p in _PROMPT_DIR.iterdir()
+        for p in sorted(_PROMPT_DIR.iterdir(), key=lambda p: p.name)
         if p.name.endswith(".md")
     }
 
