@@ -259,7 +259,9 @@ in README and in the CHANGELOG's Unreleased and newest release notes, and every 
   (`previous_install.detect()`) has a candidate or an unskipped pending copy, and from Home's
   "Previous install…": four steps (copy via `plan_migration(source=)`, profiles via
   `panes.copy_profiles()`, deploy via `TriggersPane.start_deploy()`, retire via
-  `plan_retire()`, enabled only once no launcher points into the checkout), digits 1-4 as keys,
+  `plan_retire()` in a worker, enabled only once no launcher points into the checkout and
+  refused without `espanso path config`'s answer), none opening while `TriggersPane.busy`;
+  digits 1-4 as keys,
   "Enter a path…" (detected again with `entered=`) and "Skip" (the skip marker, pending root
   too). `tests/test_tui.py`
   drives each tab with Pilot (`asyncio.run`, no pytest-asyncio); `tests/test_tui_snapshots.py`

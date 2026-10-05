@@ -16,7 +16,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Button, Footer, Header, Static
 
-from .. import config_store, previous_install
+from .. import config_store, deploy, previous_install
 from ..commands import common
 from .modals import ConfirmModal, Field, FormModal
 from .panes import EXPECTED, TriggersPane, _error, copy_profiles, previous_root
@@ -113,7 +113,19 @@ class PreviousInstallScreen(Screen[None]):
         except EXPECTED as exc:
             self.app.call_from_thread(self.render_found, previous_install.Detection(), str(exc))
             return
-        self.app.call_from_thread(self.render_found, found, None)
+        self.app.call_from_thread(self._show_entered, entered, found)
+
+    def _show_entered(self, entered: Path, found: previous_install.Detection) -> None:
+        self.render_found(found, None)
+        if found.gated or any(previous_install.ENTERED in c.signals for c in found.candidates):
+            return
+        # Not a checkout: say so, and stop looking there on every reload.
+        self.entered = None
+        self.report(
+            f"{entered} is not a checkout of {previous_install.PROJECT_NAME} (a folder whose "
+            "pyproject.toml names it), or it is this install's own",
+            error=True,
+        )
 
     def render_found(self, found: previous_install.Detection, error: str | None) -> None:
         self.found = found
@@ -200,6 +212,18 @@ class PreviousInstallScreen(Screen[None]):
         if not button.disabled:
             button.press()
 
+    @property
+    def triggers(self) -> TriggersPane:
+        return self.manage.main.query_one("#triggers-pane", TriggersPane)
+
+    def busy(self) -> bool:
+        """A deploy reads its plan in a worker and opens its dialog later: until it is done,
+        no other step opens a dialog, so none lands on top of another."""
+        if self.triggers.busy:
+            self.report("A deploy is in progress; finish or cancel it first.", error=True)
+            return True
+        return False
+
     def _ask(self, title: str, preview: str, confirm: str, action: Callable[[], str]) -> None:
         def done(yes: bool | None) -> None:
             if yes:
@@ -210,7 +234,7 @@ class PreviousInstallScreen(Screen[None]):
     @on(Button.Pressed, "#previous-copy")
     def _copy(self) -> None:
         best = previous_install.best(self.found.candidates)
-        if best is None:
+        if best is None or self.busy():
             return
         root = best.root
         try:
@@ -237,12 +261,14 @@ class PreviousInstallScreen(Screen[None]):
     @on(Button.Pressed, "#previous-profiles")
     def _profiles(self) -> None:
         root = previous_root(self.found)
-        if root is not None:
+        if root is not None and not self.busy():
             copy_profiles(self, root)
 
     @on(Button.Pressed, "#previous-deploy")
     def _deploy(self) -> None:
-        triggers = self.manage.main.query_one("#triggers-pane", TriggersPane)
+        triggers = self.triggers
+        if self.busy():
+            return
         best = previous_install.best(self.found.candidates)
         if best is None or best.env_file is None or self.found.pending is not None:
             triggers.start_deploy()
@@ -267,23 +293,40 @@ class PreviousInstallScreen(Screen[None]):
     @on(Button.Pressed, "#previous-retire")
     def _retire(self) -> None:
         pending = self.found.pending
-        if pending is None:
+        if pending is None or self.busy():
             return
-        root = pending.root
-        try:
-            plan = config_store.plan_retire(root)
-        except EXPECTED as exc:
-            self.report(_error(exc), error=True)
-            return
+        self.report("Reading the match files…")
+        self._plan_retire(pending.root)
 
+    @work(thread=True, group="previous-retire", exclusive=True, exit_on_error=False)
+    def _plan_retire(self, root: Path) -> None:
+        """`espanso path config` may take a while: asked here, in a worker, never on the UI
+        thread. Without its answer retire is refused, as in `config retire --from`."""
+        try:
+            found = deploy.locate_espanso_dir()
+            if found.fallback:
+                raise config_store.MigrationError(
+                    f"cannot check which CLI the match files run ({found.fallback}); in a "
+                    f"terminal: `prompt-workflow config retire --from {root} --espanso-dir PATH`"
+                )
+            folder = found.path
+            plan = config_store.plan_retire(root, espanso_dir=folder)
+        except Exception as exc:
+            self.app.call_from_thread(self.report, _error(exc), error=True)
+            return
+        self.app.call_from_thread(self._ask_retire, root, folder, plan)
+
+    def _ask_retire(self, root: Path, folder: Path, plan: config_store.RetirePlan) -> None:
         def apply() -> str:
-            place = config_store.apply_retire(root, consent=plan.token)
+            place = config_store.apply_retire(root, espanso_dir=folder, consent=plan.token)
             return f"Retired: {plan.env_file} -> {place}"
 
         self._ask(f"Retire the old .env of {root}?", "\n".join(plan.describe()), "Retire", apply)
 
     @on(Button.Pressed, "#previous-enter")
     def _enter(self) -> None:
+        if self.busy():
+            return
         fields = [Field("previous-path", "The checkout's folder", placeholder="~/Projects/…")]
         self.app.push_screen(
             FormModal("Where did you run it from?", fields, submit="Look"), self._entered
@@ -292,7 +335,8 @@ class PreviousInstallScreen(Screen[None]):
     def _entered(self, values: dict[str, str] | None) -> None:
         if values is None:
             return
-        text = values["previous-path"].strip()
+        # A pasted path may keep its quotes (Windows "Copy as path").
+        text = values["previous-path"].strip().strip("\"'").strip()
         try:
             common.no_key(text, "the path")
         except EXPECTED as exc:
@@ -315,8 +359,12 @@ class PreviousInstallScreen(Screen[None]):
         except OSError as exc:
             self.report(_error(exc), error=True)
             return
-        self.app.notify("Skipped; Home > Previous install… opens this again.", markup=False)
+        self.app.notify(
+            "Skipped. To see that checkout again: Home > Previous install… > Enter a path…",
+            markup=False,
+        )
         self.dismiss()
+        self.manage.reload()
 
     @on(Button.Pressed, "#previous-close")
     def action_close(self) -> None:

@@ -1480,3 +1480,54 @@ def test_previous_install_detect_failure_is_shown(espanso, monkeypatch):
         assert "Could not look for a previous install: no access" in _found(app)
 
     drive(scenario)
+
+
+def test_previous_install_steps_wait_for_a_deploy(previous):
+    async def scenario(app, pilot):
+        app.main.query_one("#triggers-pane", panes.TriggersPane).busy = True
+        for step in ("copy", "profiles", "deploy", "enter"):
+            await press(app, pilot, f"#previous-{step}")
+            assert not isinstance(app.screen, ConfirmModal | FormModal), step
+            assert app.screen.last_message.startswith("A deploy is in progress")
+
+    drive(scenario)
+
+
+def test_previous_install_retire_needs_espanso_to_name_its_folder(previous, espanso):
+    async def scenario(app, pilot):
+        await press(app, pilot, "#previous-copy")
+        await press(app, pilot, "#confirm")
+        await press(app, pilot, "#previous-deploy")
+        await press(app, pilot, "#submit")
+        del espanso.answers["espanso path config"]
+        await press(app, pilot, "#previous-retire")
+        assert not isinstance(app.screen, ConfirmModal)
+        message = app.screen.last_message
+        assert "cannot check which CLI the match files run" in message
+        assert f"config retire --from {previous.resolve()} --espanso-dir PATH" in message
+
+    drive(scenario)
+    assert (previous / ".env").is_file()
+
+
+def test_previous_install_entered_path_that_is_no_checkout(saved, espanso, tmp_path, monkeypatch):
+    from prompt_workflow import previous_install
+
+    monkeypatch.setattr(previous_install.shutil, "which", lambda *a, **k: None)
+    root = _old_checkout(tmp_path, espanso)
+    for path in (espanso.root / "match").iterdir():
+        path.unlink()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+
+    async def scenario(app, pilot):
+        await press(app, pilot, "#home-previous")
+        await press(app, pilot, "#previous-enter")
+        await fill(app, pilot, previous_path=str(elsewhere))
+        assert app.screen.last_message.startswith(f"{elsewhere} is not a checkout")
+        assert app.screen.entered is None
+        await press(app, pilot, "#previous-enter")
+        await fill(app, pilot, previous_path=f'"{root}"')  # pasted with its quotes
+        assert f"Previous install: {root.resolve()} (entered)" in _found(app)
+
+    drive(scenario)
