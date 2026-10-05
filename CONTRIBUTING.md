@@ -139,8 +139,11 @@ average about 14, so on the high side), CLI 0.15.0:
 | Modules the guarded trigger runs add to a bare interpreter | 293 | 294 |
 | The same with the usage history recording (#89, 2026-10-05) | 307 | 306 |
 
-The largest parts of the import are `importlib.metadata` (about 50 ms, for `__version__` in
-`prompt_workflow/__init__.py`), httpx (about 30 ms) and Typer (about 19 ms). CI runner numbers
+The largest parts of the import are `importlib.metadata` (about 50 ms cumulative under
+`-X importtime`, for `__version__` in `prompt_workflow/__init__.py`), httpx (about 30 ms) and
+Typer (about 19 ms). The `importlib.metadata` figure overstates its real cost: the modules it
+pulls in (email, zipfile, csv) load anyway, so a literal `__version__` saves only about 2 ms of
+wall time per run (median of 30 in a clean wheel venv, 3.12 and 3.14, 2026-10-06, #132). CI runner numbers
 (Linux, Windows) are still to be recorded from a CI run.
 
 Re-measure with:
