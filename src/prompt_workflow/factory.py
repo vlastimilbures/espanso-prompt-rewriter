@@ -4,7 +4,7 @@ from collections.abc import Callable
 from urllib.parse import urlsplit
 
 from .config import Settings
-from .gate import GatedProvider
+from .gate import GateBlocked, GatedProvider
 from .providers.anthropic import AnthropicProvider
 from .providers.base import Provider, ProviderError, is_loopback
 from .providers.ollama import OllamaProvider
@@ -59,7 +59,7 @@ def _require_https(url: str, env_name: str) -> str:
     scheme = urlsplit(url).scheme
     if scheme == "https" or (scheme == "http" and is_loopback(url)):
         return url
-    raise ProviderError(f"{env_name} must be an https:// URL")
+    raise GateBlocked(f"{env_name} must be an https:// URL")
 
 
 def _is_ollama_cloud(model: str) -> bool:
@@ -86,7 +86,7 @@ def _gate(
     # make_provider refuses earlier with a clearer message; this keeps the guarantee for any
     # provider added later that returns through _gate().
     if cfg.local_only:
-        raise ProviderError(
+        raise GateBlocked(
             "PROMPT_LOCAL_ONLY=true: this provider would send the draft off this machine"
         )
     return GatedProvider(
@@ -128,7 +128,7 @@ def make_provider(
     """
     remote = _leaves_machine(name, cfg)
     if remote and cfg.local_only:
-        raise ProviderError(f"PROMPT_LOCAL_ONLY=true: {name} would send the draft off this machine")
+        raise GateBlocked(f"PROMPT_LOCAL_ONLY=true: {name} would send the draft off this machine")
     if name == "ollama":
         ollama = OllamaProvider(
             base_url=cfg.ollama_base_url,

@@ -85,6 +85,9 @@ def _check_persona() -> None:
             "USERPROFILE": str(home),
             "XDG_CONFIG_HOME": str(home / "config"),
             "APPDATA": str(home / "appdata"),
+            # persona records its run in the usage history: keep it out of the real one.
+            "XDG_DATA_HOME": str(home / "data"),
+            "LOCALAPPDATA": str(home / "localappdata"),
             "PROMPT_WORKFLOW_ENV": str(env_file),
         }
         env.pop("PROMPT_PERSONA", None)

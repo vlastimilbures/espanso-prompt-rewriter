@@ -806,10 +806,21 @@ def test_match_history_has_the_current_sources():
         )
 
 
+# Every release, and every commit that changed a match file on this branch or the default
+# branch (an editable install runs an untagged commit), is recognised.
 @pytest.mark.skipif(not _git_tags(), reason="needs a git checkout with the release tags")
-def test_match_history_has_every_release():
-    for name, digests in history_script.tagged_digests().items():
-        assert digests <= KNOWN_SOURCES.get(name, frozenset()), name
+def test_match_history_has_every_release_and_commit():
+    for source in (history_script.tagged_digests(), history_script.history_digests()):
+        for name, digests in source.items():
+            assert digests <= KNOWN_SOURCES.get(name, frozenset()), name
+
+
+# Regenerating never drops a digest the module already lists.
+def test_match_history_regeneration_keeps_listed_digests(monkeypatch):
+    for source in ("tagged_digests", "history_digests", "current_digests"):
+        monkeypatch.setattr(history_script, source, dict)
+    collected = history_script.collect()
+    assert {name: frozenset(found) for name, found in collected.items()} == KNOWN_SOURCES
 
 
 @pytest.mark.skipif(not _git_tags(), reason="needs a git checkout with the release tags")

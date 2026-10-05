@@ -12,6 +12,7 @@ import time
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -699,6 +700,89 @@ def test_prune_deletes_old_operations_and_their_attempts(store):
     assert store.health().operations == 0
     with pytest.raises(ValueError, match="negative"):
         store.prune(older_than=timedelta(days=-1))
+
+
+# record(prune=True), the trigger recorder's write, also deletes a batch of old operations,
+# oldest first; a plain record() never prunes.
+def test_record_can_prune_a_batch(store, monkeypatch):
+    monkeypatch.setattr(history, "_PRUNE_BATCH", 2)
+    now = datetime.now(UTC)
+    old = [_op(occurred_at_utc=now - timedelta(days=400 + n)) for n in range(3)]
+    for op in old:
+        assert store.record(op, [_attempt()])
+    assert store.health().operations == 3
+    assert store.record(_op(), [_attempt()], prune=True)
+    left = {r["id"] for r in _rows(store, "operations")}
+    assert old[0]["id"] in left  # the newest of the old ones waits for the next write
+    assert len(left) == 2
+    assert len(_rows(store, "attempts")) == 2
+
+
+# A prune that fails is rolled back on its own: the record it rode along with is kept.
+def test_failed_prune_keeps_the_record(store):
+    old = _op(occurred_at_utc=datetime.now(UTC) - timedelta(days=400))
+    assert store.record(old)
+    with contextlib.closing(sqlite3.connect(store.path)) as conn:
+        conn.execute(
+            "CREATE TRIGGER no_delete BEFORE DELETE ON operations "
+            "BEGIN SELECT RAISE(ABORT, 'no'); END"
+        )
+        conn.commit()
+    new = _op()
+    assert store.record(new, [_attempt()], prune=True)
+    assert {r["id"] for r in _rows(store, "operations")} == {old["id"], new["id"]}
+    assert store.health().lost_writes == 0
+
+
+# A prune the time budget interrupts is rolled back (SQLite rolls back its whole transaction
+# on an interrupt), and the record, already committed, stays. No clock: the prune is handed a
+# deadline already past and checks it at every VM step.
+def test_interrupted_prune_keeps_the_record(store, monkeypatch):
+    old = [_op(occurred_at_utc=datetime.now(UTC) - timedelta(days=400)) for _ in range(5)]
+    for op in old:
+        assert store.record(op, [_attempt()])
+    real_prune = history._prune_batch
+    calls = []
+
+    def past_deadline(conn, cutoff, deadline):
+        calls.append(cutoff)
+        real_prune(conn, cutoff, float("-inf"))
+
+    monkeypatch.setattr(history, "_prune_batch", past_deadline)
+    monkeypatch.setattr(history, "_PROGRESS_STEPS", 1)
+    new = _op()
+    assert store.record(new, [_attempt()], prune=True)
+    assert calls
+    ids = {r["id"] for r in _rows(store, "operations")}
+    assert ids == {new["id"], *(op["id"] for op in old)}
+    assert len(_rows(store, "attempts")) == 6
+    assert store.health().lost_writes == 0
+    # The connection was left usable: the next write and prune go through.
+    monkeypatch.setattr(history, "_prune_batch", real_prune)
+    assert store.record(_op(), prune=True)
+    assert store.health().operations == 2
+
+
+# The write that creates the database gets _CREATE_EXTRA on top of the budget; later ones not.
+def test_creating_write_gets_extra_time(store, monkeypatch):
+    deadlines = []
+    real_write = HistoryStore._write
+
+    def spy(self, op, rows, deadline, prune_before=None):
+        deadlines.append(deadline)
+        return real_write(self, op, rows, deadline, prune_before)
+
+    monkeypatch.setattr(HistoryStore, "_write", spy)
+    _use_real_budget(monkeypatch)
+    # A clock that stands still, so the deadlines are exact rather than timed.
+    clock = SimpleNamespace(monotonic=lambda: 100.0, time=time.time, sleep=time.sleep)
+    monkeypatch.setattr(history, "time", clock)
+    assert store.record(_op())
+    assert store.record(_op())
+    assert deadlines == [
+        100.0 + history._WRITE_BUDGET + history._CREATE_EXTRA,
+        100.0 + history._WRITE_BUDGET,
+    ]
 
 
 def test_reset_deletes_every_record_and_the_marker(store):

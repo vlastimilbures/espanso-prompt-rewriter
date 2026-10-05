@@ -7,6 +7,29 @@ All notable changes to this project are documented here. The format follows
 ## Unreleased
 
 ### Added
+- The usage history records every `improve` and `persona` run (#89): one operation per run
+  (origin, trigger, kind, profile, outcome, latency until the output was printed) and one
+  attempt per HTTP attempt, a retry's two included, with its tokens and reported charge. The
+  run is written after its output is printed and flushed, in one transaction, so history never
+  changes what is pasted, the exit code or a retry, and the charge of a reply whose content was
+  then rejected, or whose `--copy` failed, is kept. Outcomes: `ok`, `error_marker`,
+  `gate_blocked` (the gate, `PROMPT_LOCAL_ONLY` or a non-https cloud URL), `validation_failed`, `clipboard_failed`, `concealed_refused`,
+  `unexpected_error`. Settings that fail to load record nothing (whether history is
+  off is then unknown). With `PROMPT_HISTORY=false`
+  nothing is written and `sqlite3` is never imported. Each recorded run also prunes up to 100
+  records past `PROMPT_HISTORY_RETENTION_DAYS`, in its own transaction after the record is
+  committed, and the write that creates the database gets
+  0.75 s more than the usual ~0.25 s budget (a slow disk dropped it).
+- `improve` and `persona` take a hidden `--trigger-id` from a fixed allowlist (`i`, `iok`,
+  `ip`, `if`, `il`, `ilm`, `ic`, `p`); every managed Espanso match now passes its own as a
+  literal argument (the commented-out `-ic-` too, and `-p-` through its one `persona` call).
+  Without it a run is recorded as `direct`; an unknown value is recorded unattributed (a managed run
+  with no trigger) and never fails. What a trigger pastes is unchanged. Run `prompt-workflow espanso deploy` to update the
+  deployed matches; older ones keep working and are recorded as `direct`.
+- `scripts/update_match_history.py` never drops a digest `match_history.py` already lists, and
+  also records the match files at every commit that changed them on the branch and on the
+  default branch, so a file an editable install of an untagged commit deployed is recognised
+  as ours (`stale`), not `foreign`.
 - Managed Espanso deployment (#86): `prompt-workflow espanso deploy|status|detach`. `deploy`
   shows a plan and a diff and asks first (`--yes` skips); a second run with nothing to change
   does nothing. A manifest in the per-device data dir (`~/.local/share/prompt-workflow/`,

@@ -28,6 +28,13 @@ PLACEHOLDER = b"I am working as [role] in [company]."
 EOL = os.linesep.encode()
 
 
+# Every in-process golden test runs with the usage history on (the default) and off: recording
+# a run must not change a byte of it.
+@pytest.fixture(autouse=True, params=["true", "false"], ids=["history-on", "history-off"])
+def _history_setting(request, monkeypatch):
+    monkeypatch.setenv("PROMPT_HISTORY", request.param)
+
+
 def _golden(args: list[str], expected: bytes) -> None:
     """``expected`` is written with LF; each newline is checked as this platform prints it."""
     result = runner.invoke(app, args)
@@ -185,22 +192,24 @@ Path(sys.argv[1]).write_text(json.dumps(result), encoding="utf-8")
 """
 
 # Never on the trigger path: the Textual interface (#93), config writers (#84), the keyring
-# (#88), history (sqlite3, until #89 lets it in) and the Espanso deploy service (#86). rich is
-# installed with Typer but not loaded today: Typer imports it only for help and usage errors.
+# and the Espanso deploy service (#86). rich is installed with Typer but not loaded today:
+# Typer imports it only for help and usage errors.
 FORBIDDEN = (
     "textual",
     "rich.console",
-    "sqlite3",
-    "_sqlite3",
     "tomli_w",
     "tomlkit",
     "keyring",
     "prompt_workflow.deploy",
 )
+# The usage history (#89) writes each run after its output, so sqlite3 loads on the trigger
+# path when tracking is on (PROMPT_HISTORY, the default), and never when it is off.
+HISTORY_MODULES = ("prompt_workflow.history", "sqlite3", "_sqlite3")
 
-# Modules the trigger scenarios add to a bare interpreter: 293 on Python 3.12 and 294 on 3.14,
-# macOS (see "Trigger start-up budget" in CONTRIBUTING.md). A coarse ceiling, not a timing: a new
-# dependency tree on the trigger path crosses it; ordinary growth does not.
+# Modules the trigger scenarios add to a bare interpreter, macOS: 307 on Python 3.12 and 306 on
+# 3.14 with the usage history on, 296 on both with it off (see "Trigger start-up budget" in
+# CONTRIBUTING.md). A coarse ceiling, not a timing: a new dependency tree on the trigger path
+# crosses it; ordinary growth does not.
 MODULE_CEILING = 400
 
 # Variables that would make the child load modules before the script runs (coverage's .pth
@@ -208,14 +217,21 @@ MODULE_CEILING = 400
 _PRELOADING = ("COVERAGE_PROCESS_START", "COVERAGE_PROCESS_CONFIG", "PYTHONSTARTUP", "PYTHONPATH")
 
 
-@pytest.fixture(scope="module")
-def trigger_run(tmp_path_factory):
+@pytest.fixture(scope="module", params=[True, False], ids=["tracking-on", "tracking-off"])
+def trigger_run(request, tmp_path_factory):
     tmp = tmp_path_factory.mktemp("trigger")
     (tmp / ".env").write_text("", encoding="utf-8")
-    # Module-scoped, so conftest's per-test isolation has not run yet: drop every setting here.
+    # Module-scoped, so conftest's per-test isolation has not run yet: drop every setting here,
+    # and keep the run's config, data (the usage history) and home in this temp dir.
     dropped = {*env_names(), *_PRELOADING}
     env = {key: value for key, value in os.environ.items() if key not in dropped}
     env["PROMPT_WORKFLOW_ENV"] = str(tmp / ".env")
+    for name in ("XDG_CONFIG_HOME", "APPDATA", "XDG_DATA_HOME", "LOCALAPPDATA"):
+        env[name] = str(tmp / name.lower())
+    for name in ("HOME", "USERPROFILE"):
+        env[name] = str(tmp / "home")
+    if not request.param:
+        env["PROMPT_HISTORY"] = "false"
     # Built at runtime, so no key-shaped literal lands in the repo.
     env["OPENROUTER_API_KEY"] = "-".join(("test", "key"))
     out = tmp / "modules.json"
@@ -228,10 +244,13 @@ def trigger_run(tmp_path_factory):
         check=False,
     )
     assert proc.returncode == 0, proc.stderr.decode("utf-8", "replace")
-    return proc.stdout.split(b"\x1e"), json.loads(out.read_text(encoding="utf-8"))
+    data = json.loads(out.read_text(encoding="utf-8"))
+    data["tracking"] = request.param
+    return proc.stdout.split(b"\x1e"), data
 
 
-# The real process prints the same contract as the in-process runner and exits 0 every time.
+# The real process prints the same contract as the in-process runner and exits 0 every time,
+# with tracking on and off.
 def test_trigger_run_output(trigger_run):
     outputs, data = trigger_run
     local, cloud, cloud_error, settings_error, persona, persona_fallback, rest = outputs
@@ -250,10 +269,21 @@ def test_trigger_run_output(trigger_run):
 
 # Checked against everything loaded, not only what the run added, so a module loaded before
 # the script started cannot make the check pass vacuously.
-@pytest.mark.parametrize("module", FORBIDDEN)
+@pytest.mark.parametrize("module", FORBIDDEN + HISTORY_MODULES)
 def test_trigger_path_does_not_import(trigger_run, module):
     _, data = trigger_run
+    if data["tracking"] and module in HISTORY_MODULES:
+        pytest.skip("history is on: the run is recorded")
     assert not [m for m in data["loaded"] if m == module or m.startswith(module + ".")]
+
+
+# With tracking on, the guard above is not vacuous: the history really was loaded.
+def test_tracking_run_loads_history(trigger_run):
+    _, data = trigger_run
+    loaded = set(data["loaded"])
+    assert (
+        set(HISTORY_MODULES) <= loaded if data["tracking"] else not (set(HISTORY_MODULES) & loaded)
+    )
 
 
 def test_trigger_path_module_count(trigger_run):
