@@ -17,6 +17,16 @@ All notable changes to this project are documented here. The format follows
   `PATH` finds first is not the installed launcher, for example while a checkout's `.venv` is
   active. `doctor --json` adds the check with the data `gated`, `roots`, `signals`,
   `env_file`, `retire_pending` and `shadow`.
+- `prompt-workflow config migrate --from PATH` copies the settings and key of an earlier
+  checkout's `.env` (#110). It fills only the settings still at their default, so nothing you
+  use today changes (the others are listed as kept), and it leaves that `.env` where it is, so
+  the old triggers keep working until the match files are deployed again. A `.env` in use is
+  migrated in the same step as before. `prompt-workflow config retire --from PATH` then moves
+  the old `.env` into the backup; it is refused while a match file still runs that checkout's
+  CLI. Both show a preview first, and `config rollback` undoes either. `prompt-workflow setup`
+  offers the copy (and the checkout's edited profiles) when it finds such a checkout, or the
+  one `--migrate-from PATH` names, and the retire after the deploy step; `doctor` warns while
+  a copied `.env` is still in place.
 
 ## 0.16.1 - 2026-10-05
 
