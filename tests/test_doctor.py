@@ -212,6 +212,15 @@ def test_run_survives_a_failing_espanso_probe(espanso, no_clipboard):
     assert [c.id for c in report.checks] == list(doctor.CHECK_IDS)
 
 
+def test_every_data_key_is_in_the_json_schema(espanso, no_clipboard):
+    """to_json() keeps only DATA_KEYS, so a key a check sets but the schema lacks is
+    silently dropped (as launcher's orphans was)."""
+    deploy.apply(deploy.plan(espanso, LAUNCHER, deploy.Manifest.load()))
+    report = doctor.run(espanso_dir=espanso, launcher=LAUNCHER, runner=_runner())
+    for check in report.checks:
+        assert set(check.data) <= set(doctor.DATA_KEYS[check.id]), check.id
+
+
 # --- history and SQLite -------------------------------------------------------------------
 
 
