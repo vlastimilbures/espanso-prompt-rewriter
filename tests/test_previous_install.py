@@ -682,6 +682,27 @@ def test_a_failed_copy_check_undoes_everything(tmp_path, env, monkeypatch):
     assert not (user_dir() / "migration.json").exists()
 
 
+def test_plain_migration_keeps_a_value_a_real_variable_shadows(tmp_path, env, monkeypatch):
+    # The .env's value is migrated, the variable still wins: nothing the CLI uses changes.
+    (user_dir() / ".env").write_text(
+        f"OLLAMA_MODEL=from-dotenv\nOPENROUTER_API_KEY={COPIED_KEY}x\n"
+    )
+    monkeypatch.setenv("OLLAMA_MODEL", "from-shell")
+    monkeypatch.setenv("OPENROUTER_API_KEY", COPIED_KEY)
+    plan = config_store.plan_migration()
+    config_store.apply_migration(consent=plan.token)
+    assert Settings.load().ollama_model == "from-shell"
+    assert 'OLLAMA_MODEL = "from-dotenv"' in config.settings_file().read_text("utf-8")
+
+
+def test_copy_keeps_a_shadowed_value_of_the_env_in_use(tmp_path, env, monkeypatch):
+    root = old_checkout(tmp_path)
+    (user_dir() / ".env").write_text("OPENROUTER_MAX_TOKENS=900\n", "utf-8")
+    monkeypatch.setenv("OPENROUTER_MAX_TOKENS", "1200")
+    _copy(root)
+    assert Settings.load().openrouter_max_tokens == 1200
+
+
 def _redeployed(espanso: Path) -> None:
     for path in (espanso / "match").iterdir():
         path.unlink()
@@ -731,6 +752,34 @@ def test_retire_refuses_when_espanso_cannot_say_where_its_files_are(tmp_path, en
     _copy(root)
     with pytest.raises(MigrationError, match="pass --espanso-dir"):
         config_store.plan_retire(root, runner=FakeRunner())
+
+
+def test_a_retire_cut_short_can_be_done_again(tmp_path, espanso, env, monkeypatch):
+    root = old_checkout(tmp_path)
+    _copy(root)
+    plan = config_store.plan_retire(root, espanso_dir=espanso)
+
+    def interrupted(source, target):
+        raise KeyboardInterrupt
+
+    with monkeypatch.context() as patched:
+        patched.setattr(config_store, "_move", interrupted)
+        with pytest.raises(KeyboardInterrupt):
+            config_store.apply_retire(root, espanso_dir=espanso, consent=plan.token)
+    # The marker names both places, but the .env is still where it was: not retired.
+    assert previous_install.copied_env(os.environ) == (root.resolve(), root.resolve() / ".env")
+    plan = config_store.plan_retire(root, espanso_dir=espanso)
+    place = config_store.apply_retire(root, espanso_dir=espanso, consent=plan.token)
+    assert place.is_file()
+    assert not (root / ".env").exists()
+
+
+def test_retire_in_legacy_mode_is_refused(tmp_path, espanso, env, monkeypatch):
+    root = old_checkout(tmp_path)
+    _copy(root)
+    monkeypatch.setenv("PROMPT_WORKFLOW_ENV", str(root / ".env"))
+    with pytest.raises(MigrationError, match="PROMPT_WORKFLOW_ENV is set"):
+        config_store.plan_retire(root, espanso_dir=espanso)
 
 
 def test_retire_refusals(tmp_path, espanso, env):
@@ -898,6 +947,49 @@ def test_setup_non_interactive_offers_the_copy_and_writes_nothing(
     assert COPIED_KEY not in result.output
     assert not config.settings_file().exists()
     assert (root / ".env").is_file()
+
+
+def _interactive(monkeypatch, answers=None):
+    from prompt_workflow import smoke
+    from prompt_workflow.commands import common
+
+    fake = FakeRunner({"espanso restart": "", **(answers or {})})
+    monkeypatch.setattr(deploy, "run_command", fake)
+    monkeypatch.setattr(common, "stdin_is_tty", lambda: True)
+    monkeypatch.setattr(common, "_getpass", lambda prompt: "")
+    monkeypatch.setattr(smoke, "run", lambda p: smoke.SmokeResult(True, smoke.REPLY, 1, "ok"))
+    return fake
+
+
+def test_setup_does_not_redeploy_by_default_after_a_declined_copy(
+    tmp_path, espanso, env, monkeypatch
+):
+    root = old_checkout(tmp_path)
+    old = str(venv_launcher(root))
+    deploy_old(espanso, old)
+    before = {p.name: p.read_bytes() for p in (espanso / "match").iterdir()}
+    _interactive(monkeypatch)
+    # Copy: no; then Enter for every other question, the deploy included.
+    result = _cli(
+        "setup", "--espanso-dir", str(espanso), "--launcher", UV_BIN, input="n\n" + "\n" * 6
+    )
+    assert result.exit_code == 0, result.output
+    assert "are not copied yet" in result.stderr
+    assert {p.name: p.read_bytes() for p in (espanso / "match").iterdir()} == before
+    assert not config.settings_file().exists()
+
+
+def test_setup_carries_on_past_a_broken_env_it_found_itself(tmp_path, espanso, env, monkeypatch):
+    root = old_checkout(tmp_path, "OPENROUTER_MAX_TOKENS=lots\n")
+    deploy_old(espanso, str(venv_launcher(root)))
+    monkeypatch.setattr(deploy, "run_command", FakeRunner())
+    args = ["setup", "--non-interactive", "--no-smoke-test", "--provider", "ollama"]
+    result = _cli(*args, "--espanso-dir", str(espanso), "--launcher", UV_BIN)
+    assert result.exit_code == 0, result.output
+    assert "its settings were not copied" in result.stdout
+    # Named with --migrate-from, the same checkout fails setup: the user asked for it.
+    result = _cli(*args, "--espanso-dir", str(espanso), "--migrate-from", str(root))
+    assert result.exit_code == 1
 
 
 def test_setup_copies_with_consent_then_offers_retire_after_the_deploy(

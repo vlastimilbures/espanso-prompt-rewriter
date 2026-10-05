@@ -81,7 +81,9 @@ def _previous_install(
     return ranked[0]
 
 
-def _settings_writable(steps: _Steps, interactive: bool, copy_from: Path | None = None) -> bool:
+def _settings_writable(
+    steps: _Steps, interactive: bool, copy_from: Path | None = None, *, detected: bool = False
+) -> bool:
     """Whether setup may write config.toml and the secret store. A .env in use is migrated
     first, with consent; without it nothing is written, since config.toml would make the
     .env unread. With ``copy_from``, an earlier checkout's .env is copied in the same step
@@ -95,8 +97,12 @@ def _settings_writable(steps: _Steps, interactive: bool, copy_from: Path | None 
     try:
         plan = config_store.plan_migration(source=copy_from)
     except config_store.MigrationError as exc:
-        steps.fail("settings", f"{exc}")
-        return False
+        if not detected:
+            steps.fail("settings", f"{exc}")
+            return False
+        # A checkout setup found by itself never fails setup: it is offered, not asked for.
+        steps.later(f"its settings were not copied: {exc}")
+        return _settings_writable(steps, interactive)
     if plan.status != "ready":
         if copy_from is not None:
             typer.echo(f"  Nothing was copied from {copy_from}: {plan.describe()[0]}")
@@ -246,6 +252,7 @@ def _deploy_step(
     steps: _Steps,
     *,
     apply: bool | None,
+    ask_default: bool = True,
     interactive: bool,
     espanso_dir: str | None,
     launcher: str | None,
@@ -272,7 +279,7 @@ def _deploy_step(
         typer.echo("  Every match file is in sync.")
         return
     if apply is None and interactive:
-        apply = typer.confirm("  Write these match files now?", default=True)
+        apply = typer.confirm("  Write these match files now?", default=ask_default)
     if not apply:
         typer.echo("  Dry run: nothing was written.")
         steps.later("deploy the match files: `prompt-workflow espanso deploy`")
@@ -368,7 +375,19 @@ def setup(
     else:
         # Not detected (not a checkout, or the settings are saved): the plan says why.
         copy_from = entered
-    writable = _settings_writable(steps, interactive, copy_from)
+    writable = _settings_writable(
+        steps,
+        interactive,
+        copy_from,
+        detected=previous is not None and previous_install.ENTERED not in previous.signals,
+    )
+    # Deploying before the copy would leave the triggers with neither the old settings nor
+    # the new ones (#110: copy first, then redeploy).
+    uncopied = (
+        previous is not None
+        and previous.env_file is not None
+        and previous_install.copied_env(os.environ) is None
+    )
     if previous is not None and previous.profiles_dir is not None:
         _profiles_step(steps, previous.root, interactive)
     if writable:
@@ -402,9 +421,15 @@ def setup(
     if deploy_files is False:
         typer.echo("  Skipped (--no-deploy).")
     else:
+        if uncopied and previous is not None:
+            common.warn(
+                f"the settings of {previous.root} are not copied yet; deploying now leaves "
+                "the triggers without them"
+            )
         _deploy_step(
             steps,
             apply=deploy_files,
+            ask_default=not uncopied,
             interactive=interactive,
             espanso_dir=espanso_dir,
             launcher=launcher,

@@ -614,7 +614,9 @@ def apply_migration(
         _undo(directory, settings_path, secrets_path, secrets_copy)
         raise MigrationError(f"nothing was migrated: {exc}") from None
     env_sources = {f"file:{s.path}" for s in (*plan.sources, *filter(None, [plan.copy]))}
-    planned = {k: _toml_value(k, v) for k, v in {**plan.settings, **plan.secret_values}.items()}
+    # Only the copied keys change; a .env value a real variable shadows stays shadowed.
+    values = {**plan.settings, **plan.secret_values}
+    planned = {k: _toml_value(k, values[k]) for k in plan.copied}
     expected = {k: planned.get(k, value) for k, (value, _) in before.items()}
     changed = sorted(k for k in before if expected[k] != after[k][0])
     still = sorted(k for k, (_, source) in after.items() if source in env_sources)
@@ -765,6 +767,19 @@ class RetirePlan:
         ]
 
 
+def retired(entry: Mapping[str, Any]) -> bool:
+    """A copied .env was retired: the marker names where it went and it is there, or it is no
+    longer where it was. A retire cut short between its marker write and its rename leaves the
+    .env in place and nothing at either name, and counts as not retired."""
+    places = [entry.get(key) for key in ("retired_to", "retired_in_place")]
+    named = [Path(p) for p in places if isinstance(p, str)]
+    if not named:
+        return False
+    original = entry.get("from")
+    in_place = isinstance(original, str) and config_files.is_file(Path(original))
+    return any(config_files.is_file(p) for p in named) or not in_place
+
+
 def _copy_entry(record: Mapping[str, Any], root: Path) -> tuple[int, dict[str, Any]] | None:
     from . import previous_install
 
@@ -807,6 +822,10 @@ def plan_retire(
     from . import previous_install
 
     env = _env(environ)
+    if env.get("PROMPT_WORKFLOW_ENV"):
+        raise MigrationError(
+            "PROMPT_WORKFLOW_ENV is set, so that .env stays in use as it is; unset it to retire"
+        )
     directory = config_dir(env)
     root = previous_install.resolved(source.expanduser())
     first = f"copy its settings first: `prompt-workflow config migrate --from {root}`"
@@ -817,7 +836,7 @@ def plan_retire(
     if found is None:
         raise MigrationError(f"nothing was copied from {root}; {first}")
     index, entry = found
-    if entry.get("retired_to"):
+    if retired(entry):
         raise MigrationError(f"the .env of {root} was already retired to {entry['retired_to']}")
     env_file = Path(entry["from"])
     digest = _file_digest(env_file)

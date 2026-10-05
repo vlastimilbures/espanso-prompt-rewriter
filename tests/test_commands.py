@@ -406,12 +406,22 @@ def test_no_command_accepts_a_key_as_an_argument(path, saved, tmp_path, monkeypa
 # --- Repair mode: every command runs on a broken config ------------------------------------
 
 
+def _old_checkout(near: Path) -> str:
+    """An earlier checkout with a .env holding a key, for the --from/--migrate-from walks."""
+    root = near.parent / "old-checkout"
+    root.mkdir(exist_ok=True)
+    (root / "pyproject.toml").write_text('[project]\nname = "espanso-prompt-rewriter"\n', "utf-8")
+    (root / ".env").write_text(f"OLLAMA_MODEL=old\nOPENROUTER_API_KEY={KEY}\n", "utf-8")
+    return str(root)
+
+
 def _commands(espanso: Path) -> dict[tuple[str, ...], list[list[str]]]:
     where = ["--espanso-dir", str(espanso), "--launcher", LAUNCHER]
+    old = _old_checkout(espanso)
     return {
         ("setup",): [
             ["setup", "--non-interactive", "--no-smoke-test", *where],
-            ["setup", "--non-interactive", "--no-smoke-test", "--migrate-from", str(espanso)],
+            ["setup", "--non-interactive", "--no-smoke-test", "--migrate-from", old, *where],
         ],
         ("config", "show"): [["config", "show"], ["config", "show", "--raw"]],
         ("config", "get"): [["config", "get", "PROMPT_PROFILE"]],
@@ -420,10 +430,12 @@ def _commands(espanso: Path) -> dict[tuple[str, ...], list[list[str]]]:
         ("config", "validate"): [["config", "validate"]],
         ("config", "migrate"): [
             ["config", "migrate", "--dry-run"],
-            ["config", "migrate", "--dry-run", "--from", str(espanso)],
+            ["config", "migrate", "--dry-run", "--from", old],
         ],
         ("config", "rollback"): [["config", "rollback", "--dry-run"]],
-        ("config", "retire"): [["config", "retire", "--dry-run", "--from", str(espanso)]],
+        ("config", "retire"): [
+            ["config", "retire", "--dry-run", "--from", old, "--espanso-dir", str(espanso)]
+        ],
         ("secrets", "set"): [["secrets", "set", "OPENROUTER_API_KEY", "--stdin"]],
         ("secrets", "status"): [["secrets", "status"]],
         ("secrets", "remove"): [["secrets", "remove", "OPENROUTER_API_KEY", "--yes"]],

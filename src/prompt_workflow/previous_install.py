@@ -249,7 +249,7 @@ def shadow(
 def copied_env(environ: Mapping[str, str]) -> tuple[Path, Path] | None:
     """The (root, .env) a copy-mode migration copied and nobody retired yet, while that .env
     is still there; None otherwise, also for a missing or damaged migration.json."""
-    from .config_store import MARKER_FILE
+    from .config_store import MARKER_FILE, retired
 
     try:
         raw = json.loads((config._user_config_dir(environ) / MARKER_FILE).read_text("utf-8"))
@@ -259,7 +259,7 @@ def copied_env(environ: Mapping[str, str]) -> tuple[Path, Path] | None:
     if not isinstance(raw, dict) or raw.get("mode") != "copy" or not isinstance(sources, list):
         return None
     for entry in sources:
-        if not isinstance(entry, dict) or not entry.get("copied") or entry.get("retired_to"):
+        if not isinstance(entry, dict) or not entry.get("copied") or retired(entry):
             continue
         root, env_file = entry.get("root"), entry.get("from")
         if not isinstance(root, str) or not isinstance(env_file, str):
