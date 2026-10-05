@@ -15,7 +15,7 @@ from typer.core import TyperGroup
 
 from . import recorder
 from .clipboard_guard import is_concealed
-from .config import EFFORTS, KEEP, TIERS, ConfigLayers, Settings
+from .config import EFFORTS, KEEP, TIERS, ConfigLayers, Settings, openrouter_only
 from .factory import PROVIDER_NAMES, make_provider
 from .gate import GateBlocked, GatedProvider
 from .prompt_builder import (
@@ -269,10 +269,11 @@ def improve(
         None, help="Override the model for this call; slug@endpoint also pins the endpoint"
     ),
     tier: str = typer.Option(
-        "standard", help=f"{', '.join(TIERS)}; pro uses the OPENROUTER_PRO_* reasoning model"
+        "standard",
+        help=f"{', '.join(TIERS)}; pro uses the OPENROUTER_PRO_* reasoning model (OpenRouter only)",
     ),
     effort: str | None = typer.Option(
-        None, help=f"Reasoning effort for this call: {', '.join((KEEP, *EFFORTS))}"
+        None, help=f"OpenRouter reasoning effort for this call: {', '.join((KEEP, *EFFORTS))}"
     ),
     max_tokens: str | None = typer.Option(None, help=f"Output cap for this call, or {KEEP}"),
     timeout: str | None = typer.Option(None, help=f"Request timeout in seconds, or {KEEP}"),
@@ -295,9 +296,18 @@ def improve(
     try:
         loaded = Settings.load()
         rec.track(loaded)
+        provider = provider or loaded.provider
         cfg = loaded.for_call(
-            tier, model=model, effort=effort, max_tokens=max_tokens, timeout=timeout
+            tier,
+            provider=provider,
+            model=model,
+            effort=effort,
+            max_tokens=max_tokens,
+            timeout=timeout,
         )
+        # An unknown name is left to make_provider(), which reports it as such.
+        if provider in PROVIDER_NAMES:
+            openrouter_only(provider, tier, effort)
         raw = _read_input(source, text)
         # Checked before cleaning, which would otherwise run over a pasted multi-megabyte log.
         if len(raw) > MAX_DRAFT_CHARS:
@@ -312,9 +322,7 @@ def improve(
         name = profile or cfg.profile
         system = system_prompt(name, cfg.persona, cfg.profile_overrides)
         rec.profile_id = name if name in PROFILES else ALIASES.get(name, name)
-        built = make_provider(
-            provider or cfg.provider, cfg, allow_flagged=allow_flagged, observer=rec.observer
-        )
+        built = make_provider(provider, cfg, allow_flagged=allow_flagged, observer=rec.observer)
         result = built.generate(draft, system)
         # Cleaned first, so an invisible character cannot hide a fence from the strip. A reply
         # wrapped in one code fence would be pasted with the fence (flash-lite wrapped 16 of 36

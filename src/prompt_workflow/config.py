@@ -4,7 +4,7 @@ import math
 import os
 import re
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field, fields, replace
+from dataclasses import Field, dataclass, field, fields, replace
 from pathlib import Path
 from typing import Any
 
@@ -292,15 +292,21 @@ def _env(
     return field(default_factory=read, repr=not secret, metadata=metadata)
 
 
+def setting_fields() -> tuple[Field[Any], ...]:
+    """The Settings fields read from a setting (env var, .env, config.toml), in field order;
+    a per-call field such as call_max_tokens has none."""
+    return tuple(f for f in fields(Settings) if "env" in f.metadata)
+
+
 def env_names() -> tuple[str, ...]:
     """Every environment variable Settings reads, in field order."""
-    return tuple(f.metadata["env"] for f in fields(Settings))
+    return tuple(f.metadata["env"] for f in setting_fields())
 
 
 def secret_names() -> tuple[str, ...]:
     """The settings that hold a secret (API keys): saved only in the secret store, never in
     config.toml, and kept out of repr()."""
-    return tuple(f.metadata["env"] for f in fields(Settings) if f.metadata["secret"])
+    return tuple(f.metadata["env"] for f in setting_fields() if f.metadata["secret"])
 
 
 # Parsers raise ValueError(what the value must be); _env and _override name the setting.
@@ -331,6 +337,19 @@ def _number(
 _positive_int = _number(int, "a whole number above 0", lambda v: v > 0)
 _positive_float = _number(float, "a number above 0", lambda v: v > 0)
 _non_negative_float = _number(float, "a number of 0 or more", lambda v: v >= 0)
+
+
+def _temperature(raw: str) -> float | None:
+    """PROMPT_TEMPERATURE: empty (set, but to nothing) sends no temperature at all, for
+    models that reject the field; unset keeps the default."""
+    if raw == "":
+        return None
+    try:
+        return _non_negative_float(raw)
+    except ValueError:
+        raise ValueError("empty or a number of 0 or more") from None
+
+
 # Longest usage-history retention, 100 years: a longer one overflows the date arithmetic.
 MAX_RETENTION_DAYS = 36500
 _retention_days = _number(
@@ -383,6 +402,27 @@ KEEP = "default"
 AUTO_ENDPOINT = "auto"
 
 
+def openrouter_only(provider: str, tier: str, effort: str | None) -> None:
+    """Refuse --tier pro and --effort for a provider other than OpenRouter, the only one with
+    a pro tier and a reasoning-effort control; silently ignoring them would paste a rewrite
+    the user did not ask for. The neutral values (--tier standard, --effort default) pass."""
+    if provider == "openrouter":
+        return
+    named = [
+        option
+        for option, used in (
+            ("--tier pro", tier == "pro"),
+            ("--effort", effort not in (None, KEEP)),
+        )
+        if used
+    ]
+    if named:
+        verb = "apply" if len(named) > 1 else "applies"
+        raise ValueError(
+            f"{' and '.join(named)} {verb} only to OpenRouter, not {safe_repr(provider)}"
+        )
+
+
 def split_model_spec(spec: str | None) -> tuple[str | None, str | None]:
     """Split `slug@endpoint` into (slug, endpoint pin); a bare slug has no pin (None).
 
@@ -418,7 +458,8 @@ class Settings:
     persona: str = _env("PROMPT_PERSONA", "")
     timeout: float = _env("PROMPT_TIMEOUT_SECONDS", "30", _positive_float)
     # Low by default: the rewrite must reproduce fixed template wordings verbatim.
-    temperature: float = _env("PROMPT_TEMPERATURE", "0.2", _non_negative_float)
+    # Empty omits the temperature from every request (models that reject the field).
+    temperature: float | None = _env("PROMPT_TEMPERATURE", "0.2", _temperature)
     ollama_base_url: str = _env("OLLAMA_BASE_URL", "http://localhost:11434")
     ollama_model: str = _env("OLLAMA_MODEL", "qwen3:8b")
     ollama_think: bool = _env("OLLAMA_THINK", "false", _bool)
@@ -472,6 +513,10 @@ class Settings:
     history: bool = _env("PROMPT_HISTORY", "true", _bool)
     # Days a history record is kept; HistoryStore.prune() deletes older ones.
     history_retention_days: int = _env("PROMPT_HISTORY_RETENTION_DAYS", "365", _retention_days)
+    # Not a setting (no env var, see setting_fields()): the --max-tokens of one call, for the
+    # providers without a cap setting (Ollama num_predict, LM Studio max_tokens). None sends
+    # them no cap, as before.
+    call_max_tokens: int | None = field(default=None)
 
     @classmethod
     def load(cls) -> Settings:
@@ -501,18 +546,23 @@ class Settings:
         self,
         tier: str,
         *,
+        provider: str = "openrouter",
         model: str | None = None,
         effort: str | None = None,
         max_tokens: str | None = None,
         timeout: str | None = None,
     ) -> Settings:
-        """Settings for one CLI call: for_tier(), then the per-call overrides. A set
-        PROMPT_PRO_PROFILE is meant for OPENROUTER_PRO_MODEL, so a pro call that runs another
-        model (one picked in the -if- popup) uses PROMPT_PROFILE instead."""
-        cfg = self.for_tier(tier).with_overrides(
+        """Settings for one CLI call on ``provider``: for_tier(), then the per-call overrides.
+        Only OpenRouter has a pro tier, so another provider keeps the standard settings (the
+        tier name is still checked). A set PROMPT_PRO_PROFILE is meant for
+        OPENROUTER_PRO_MODEL, so a pro call that runs another model (one picked in the -if-
+        popup) uses PROMPT_PROFILE instead."""
+        pro = tier == "pro" and provider == "openrouter"
+        tiered = self.for_tier(tier)
+        cfg = (tiered if pro else self).with_overrides(
             model=model, effort=effort, max_tokens=max_tokens, timeout=timeout
         )
-        if tier == "pro" and cfg.openrouter_model != self.openrouter_pro_model:
+        if pro and cfg.openrouter_model != self.openrouter_pro_model:
             return replace(cfg, profile=self.profile)
         return cfg
 
@@ -544,6 +594,7 @@ class Settings:
         if tokens is not None:
             changes["openrouter_max_tokens"] = tokens
             changes["anthropic_max_tokens"] = tokens
+            changes["call_max_tokens"] = tokens
         if seconds is not None:
             changes["timeout"] = seconds
         return replace(self, **changes) if changes else self
@@ -658,7 +709,7 @@ class ConfigLayers:
             fail(source, message, secret_names())
 
         known = env_names()
-        defaults = {f.metadata["env"]: f.metadata["default"] for f in fields(Settings)}
+        defaults = {f.metadata["env"]: f.metadata["default"] for f in setting_fields()}
         layers = [Layer(DEFAULT_SOURCE, defaults)]
         legacy = bool(environ.get("PROMPT_WORKFLOW_ENV"))
         saved = None if legacy else _saved_layer(settings_file(environ), fail, note)
@@ -688,7 +739,7 @@ class ConfigLayers:
         entries: dict[str, Entry] = {}
         # PROMPT_EXTRA_PATTERNS first: once it is known, every other rejected value that
         # matches one of the user's patterns is described, never quoted (safe_repr).
-        ordered = sorted(fields(Settings), key=lambda f: f.metadata["env"] != _EXTRA)
+        ordered = sorted(setting_fields(), key=lambda f: f.metadata["env"] != _EXTRA)
         for f in ordered:
             name = f.metadata["env"]
             setters = [layer for layer in reversed(layers) if name in layer.values]
@@ -717,6 +768,6 @@ class ConfigLayers:
                 f.name: _parse_setting(
                     f.metadata["env"], f.metadata["parse"], self.entries[f.metadata["env"]].value
                 )
-                for f in fields(Settings)
+                for f in setting_fields()
             }
         )

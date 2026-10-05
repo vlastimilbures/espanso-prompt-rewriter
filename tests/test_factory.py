@@ -508,3 +508,19 @@ def test_gate_local_block_message(monkeypatch, fake_http, name):
         "detected: email. Remove it, or set PROMPT_GATE_LOCAL=false if the server runs the "
         "model itself."
     )
+
+
+# An empty PROMPT_TEMPERATURE reaches every provider as None (omitted from the body), and
+# --max-tokens reaches the local providers, which otherwise get no cap (#31).
+def test_make_provider_empty_temperature_and_call_cap(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "-".join(("test", "key")))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "-".join(("test", "key")))
+    monkeypatch.setenv("PROMPT_TEMPERATURE", "")
+    cfg = Settings()
+    for name in PROVIDER_NAMES:
+        provider = make_provider(name, cfg)
+        assert getattr(provider, "_inner", provider).temperature is None
+    assert make_provider("ollama", cfg).max_tokens is None
+    capped = cfg.with_overrides(max_tokens="300")
+    assert make_provider("ollama", capped).max_tokens == 300
+    assert make_provider("lmstudio", capped).max_tokens == 300

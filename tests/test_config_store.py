@@ -311,6 +311,17 @@ def test_save_settings_round_trip(saved_mode):
     assert [p.name for p in saved_mode.iterdir()] == ["config.toml"]  # no temp file left
 
 
+# An empty value is saved as "" (PROMPT_TEMPERATURE: omit the temperature), never taken for
+# None, which removes the setting so its default applies again.
+def test_save_settings_empty_value(saved_mode):
+    saved = config_store.save_settings(config_store.read_settings(), {"PROMPT_TEMPERATURE": ""})
+    assert saved.table["PROMPT_TEMPERATURE"] == ""
+    assert Settings.load().temperature is None
+    saved = config_store.save_settings(saved, {"PROMPT_TEMPERATURE": None})
+    assert "PROMPT_TEMPERATURE" not in saved.table
+    assert Settings.load().temperature == 0.2
+
+
 @pytest.mark.parametrize(
     ("changes", "error"),
     [

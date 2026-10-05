@@ -82,6 +82,53 @@ def test_for_call(monkeypatch):
     assert (other.profile, other.timeout) == ("general", settings.pro_timeout)
 
 
+# Only OpenRouter has a pro tier: for any other provider for_call("pro") keeps the standard
+# profile and timeout, even with PROMPT_PRO_PROFILE set (#31).
+@pytest.mark.parametrize("provider", ["ollama", "lmstudio", "anthropic"])
+def test_for_call_pro_tier_is_openrouter_only(monkeypatch, provider):
+    monkeypatch.setenv("PROMPT_PRO_PROFILE", "general")
+    settings = Settings()
+    call = settings.for_call("pro", provider=provider)
+    assert (call.profile, call.timeout) == (settings.profile, settings.timeout)
+    assert settings.for_call("pro", provider=provider, timeout="7").timeout == 7
+    pro = settings.for_call("pro", provider="openrouter")
+    assert (pro.profile, pro.timeout) == ("general", settings.pro_timeout)
+    with pytest.raises(ValueError, match="Unknown tier"):
+        settings.for_call("ultra", provider=provider)
+
+
+# --tier pro and --effort name OpenRouter-only settings; the neutral values pass anywhere.
+def test_openrouter_only_options():
+    config.openrouter_only("openrouter", "pro", "high")
+    for neutral in ((("standard", None)), ("standard", "default")):
+        config.openrouter_only("ollama", *neutral)
+    with pytest.raises(
+        ValueError, match=r"^--tier pro and --effort apply only to OpenRouter, not 'lmstudio'"
+    ):
+        config.openrouter_only("lmstudio", "pro", "low")
+    with pytest.raises(ValueError, match=r"^--effort applies only to OpenRouter, not 'x y'"):
+        config.openrouter_only("x y", "standard", "none")
+
+
+# --max-tokens is kept for the local providers too, which have no cap setting of their own.
+def test_with_overrides_call_max_tokens():
+    settings = Settings()
+    assert settings.call_max_tokens is None
+    assert settings.with_overrides(max_tokens="300").call_max_tokens == 300
+    assert "call_max_tokens" not in [f.metadata.get("env") for f in config.setting_fields()]
+
+
+# An empty PROMPT_TEMPERATURE means "send no temperature"; unset keeps the default.
+def test_empty_temperature(monkeypatch):
+    assert Settings().temperature == 0.2
+    monkeypatch.setenv("PROMPT_TEMPERATURE", "")
+    assert Settings().temperature is None
+    assert Settings.load().temperature is None
+    monkeypatch.setenv("PROMPT_TEMPERATURE", " ")
+    with pytest.raises(ValueError, match="PROMPT_TEMPERATURE must be empty or a number"):
+        Settings()
+
+
 # split_model_spec: a bare slug has no pin, slug@endpoint pins it, @auto unpins.
 def test_split_model_spec():
     assert split_model_spec(None) == (None, None)
@@ -147,7 +194,7 @@ def test_with_overrides_rejects_bad_values(kwargs, message):
     [
         ("PROMPT_TIMEOUT_SECONDS", "a number above 0"),
         ("PROMPT_PRO_TIMEOUT_SECONDS", "a number above 0"),
-        ("PROMPT_TEMPERATURE", "a number of 0 or more"),
+        ("PROMPT_TEMPERATURE", "empty or a number of 0 or more"),
         ("OPENROUTER_MAX_TOKENS", "a whole number above 0"),
         ("ANTHROPIC_MAX_TOKENS", "a whole number above 0"),
     ],
