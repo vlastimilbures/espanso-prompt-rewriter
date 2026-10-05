@@ -10,7 +10,7 @@ from typing import Any
 
 from . import config_files
 from .config_files import CONFIG_VERSION, VERSION_KEY, ConfigFileError, SecretStoreError
-from .redaction import safe_repr
+from .redaction import InvalidExtraPattern, compile_extra, safe_repr
 
 
 def _parse_value(raw: str) -> str:
@@ -215,11 +215,18 @@ def _merged_line_error(key: str) -> str:
     return f"{shown} in .env runs into the next line; add the missing newline"
 
 
+# Settings whose rejected value is never quoted, not even through safe_repr: a user regex may
+# describe the very data it guards (a project code name), and errors are pasted into the
+# focused app. The parser's message names the position instead.
+_UNQUOTED = frozenset({"PROMPT_EXTRA_PATTERNS"})
+
+
 def _parse_setting(name: str, parse: Callable[[str], Any], raw: str) -> Any:
     try:
         return parse(raw)
     except ValueError as exc:
-        raise ValueError(f"{name} must be {exc}, got {safe_repr(raw)}") from None
+        got = "" if name in _UNQUOTED else f", got {safe_repr(raw)}"
+        raise ValueError(f"{name} must be {exc}{got}") from None
 
 
 def _env(
@@ -292,6 +299,20 @@ def _builtin_profiles(raw: str) -> tuple[str, ...]:
     if any(name not in PROFILES for name in names):
         raise ValueError(f"empty or a comma-separated list of {', '.join(PROFILES)}")
     return names
+
+
+def _regexes(raw: str) -> str:
+    """PROMPT_EXTRA_PATTERNS, kept as text (the gate and the history compile it), but
+    rejected here if an entry is not a valid regex. There is no timing probe for a
+    catastrophic pattern: it would run on every trigger and flake on a busy machine; README
+    warns against nested quantifiers instead."""
+    try:
+        compile_extra(raw)
+    except InvalidExtraPattern as exc:
+        raise ValueError(
+            f"valid ';'-separated regexes; entry {exc.entry} is not a valid regex"
+        ) from None
+    return raw
 
 
 TIERS = ("standard", "pro")
@@ -392,7 +413,7 @@ class Settings:
     local_only: bool = _env("PROMPT_LOCAL_ONLY", "false", _bool)
     # Extra `;`-separated regexes the data-protection gate blocks on, e.g. internal project
     # code names or customer-ID formats. Compiled by redaction.compile_extra().
-    extra_patterns: str = _env("PROMPT_EXTRA_PATTERNS", "")
+    extra_patterns: str = _env("PROMPT_EXTRA_PATTERNS", "", _regexes)
     # Local usage history (history.py): metadata only, never prompt, clipboard, output,
     # persona or key text, kept in user_data_dir() on this device. false records nothing.
     history: bool = _env("PROMPT_HISTORY", "true", _bool)

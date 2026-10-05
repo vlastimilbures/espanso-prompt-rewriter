@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pytest
 
 from prompt_workflow import factory
@@ -348,12 +350,13 @@ def test_cloud_base_url_allows_loopback_http(monkeypatch, url):
     assert isinstance(make_provider("openrouter", Settings()), GatedProvider)
 
 
-# An invalid PROMPT_EXTRA_PATTERNS regex is reported when the gated provider is built.
+# Settings rejects an invalid PROMPT_EXTRA_PATTERNS regex (test_config.py); one that reaches
+# the factory anyway (a Settings built without its parsers) is still reported, never skipped.
 def test_invalid_extra_pattern_raises(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "k")
-    monkeypatch.setenv("PROMPT_EXTRA_PATTERNS", "a[")
+    cfg = replace(Settings(), extra_patterns="a[")
     with pytest.raises(ValueError, match="PROMPT_EXTRA_PATTERNS entry 1"):
-        make_provider("openrouter", Settings())
+        make_provider("openrouter", cfg)
 
 
 # allow_flagged reaches the gate of every provider that leaves the machine, and nothing else.

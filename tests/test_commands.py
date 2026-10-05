@@ -233,6 +233,18 @@ def test_config_validate(monkeypatch):
     assert "PROMPT_LOCAL_ONLY must be true or false" in result.stdout
 
 
+def test_config_validate_and_set_reject_an_invalid_extra_pattern(monkeypatch, saved):
+    result = _run("config", "set", "PROMPT_EXTRA_PATTERNS", "falcon;(")
+    assert result.exit_code == 1
+    assert "entry 2 is not a valid regex" in result.stderr
+    assert not (saved / "config.toml").exists()
+    monkeypatch.setenv("PROMPT_EXTRA_PATTERNS", "falcon;(")
+    result = _run("config", "validate")
+    assert result.exit_code == common.PROBLEMS
+    assert "PROMPT_EXTRA_PATTERNS must be" in result.stdout
+    assert "falcon" not in result.output
+
+
 def test_config_validate_unknown_profile(monkeypatch):
     monkeypatch.setenv("PROMPT_PROFILE", "nosuch")
     result = _run("config", "validate")

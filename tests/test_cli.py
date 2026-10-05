@@ -211,6 +211,21 @@ def test_local_only_bad_value_fails_closed(monkeypatch, fake_http):
     assert fake_http.requests == []
 
 
+# An invalid PROMPT_EXTRA_PATTERNS fails closed like any other bad setting, for local triggers
+# too: an inline error naming the entry, never the pattern, and no request.
+@pytest.mark.parametrize("provider", ["openrouter", "ollama"])
+def test_invalid_extra_pattern_fails_closed(monkeypatch, fake_http, provider):
+    monkeypatch.setenv("PROMPT_EXTRA_PATTERNS", "falcon;(")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    result = improve("--provider", provider, "--source", "argument", "--text", "d")
+    assert result.exit_code == 0
+    assert result.stdout == (
+        "[prompt-workflow: PROMPT_EXTRA_PATTERNS must be valid ';'-separated regexes; "
+        "entry 2 is not a valid regex]"
+    )
+    assert fake_http.requests == []
+
+
 def test_local_only_allows_local_trigger(monkeypatch, fake_http):
     monkeypatch.setenv("PROMPT_LOCAL_ONLY", "true")
     fake_http.reply({"message": {"content": "improved"}})

@@ -328,7 +328,9 @@ the user's `PROMPT_EXTRA_PATTERNS`, and the whole-draft `bare_token` rule, which
 `scan()` leaves out) and blocks the call unless `ALLOW_CLOUD_OVERRIDE=true`.
 `make_provider(..., allow_flagged=True)` (`--allow-flagged`, the `-iok-` trigger) lets one call
 through when every finding is in `redaction.SOFT_FINDINGS` (labels, Vietnamese IDs, email, IBAN);
-any other finding, including `custom_N`, stays blocked. The CLI then prefixes the output with
+any other finding, including `custom_N`, stays blocked. `Settings` rejects an invalid
+`PROMPT_EXTRA_PATTERNS` regex when it loads (`config._regexes`, naming the entry, never the
+pattern); every repeat in a built-in pattern is bounded (a test walks each one). The CLI then prefixes the output with
 `[prompt-workflow: sent despite: …]` (finding names only) from `GatedProvider.sent_despite`.
 It also requires `https` cloud base URLs (plain `http` only to loopback).
 `providers.base.post_json()` (the only HTTP call) gives a loopback URL its own `HTTPTransport`,
