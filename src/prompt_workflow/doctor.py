@@ -58,7 +58,7 @@ DATA_KEYS = {
         "error",
     ),
     "match_files": ("espanso_dir", "files", "legacy"),
-    "launcher": ("current", "deployed", "drift", "missing"),
+    "launcher": ("current", "deployed", "drift", "missing", "orphans"),
     "history": (
         "enabled",
         "path",
