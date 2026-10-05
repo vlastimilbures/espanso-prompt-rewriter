@@ -222,10 +222,31 @@ prompt-workflow espanso status  # missing / in sync / stale / modified / foreign
   `tests/test_commands.py` walks the whole command tree: no option named like a secret, a key
   given to any value is never saved, and every command on a broken `.env`/TOML/secrets exits
   0-4 without a traceback (add a new command to `_commands()` there).
+- `tui/` — the full-screen Textual interface (#93): `prompt-workflow ui`, and a bare
+  `prompt-workflow` when stdin and stdout are both TTYs (D-UI-1: `_LazyGroup.parse_args()` turns
+  `[]` into `["ui"]`; anywhere else `no_args_is_help` prints the help and exits 2 exactly as
+  before, pinned by `tests/golden/no-args-help.txt`; `ui` without a TTY exits 3). `textual` is a
+  required dependency (D-UI-2) imported only by `tui/`, which only `commands/ui.py` imports, once
+  the interface opens; `tests/test_trigger_contract.py` checks neither the triggers nor `--help`,
+  `doctor`, `config show` and the other headless commands load it. Six tabs (Home, Providers &
+  keys, Profiles, Triggers, History, Diagnostics) show one `tui/state.State`, which `gather()`
+  reads again in a worker thread after every change; each action calls the same services as the
+  headless command (`commands/settings.save_setting()` is shared with `config set`) and adds no
+  logic. Keys appear only as set/not set; destructive actions (key removal, deploy, detach,
+  migrate, history prune/reset) go through a dialog whose Cancel is the default, and deploy keeps
+  an edited file unless a conflict choice says otherwise. No provider call except the explicit
+  "Test call" (`smoke.run()`); doctor runs without the clipboard. Bindings are letters and digits
+  only (on `MainScreen`, so none fires under a dialog); `t` switches to the high-contrast theme;
+  Textual honours `NO_COLOR`; exit is `sys.exit(app.return_code or 0)`. `tests/test_tui.py`
+  drives each tab with Pilot (`asyncio.run`, no pytest-asyncio); `tests/test_tui_snapshots.py`
+  compares SVG exports with `tests/snapshots/` (Linux and macOS; `UPDATE_SNAPSHOTS=1`
+  regenerates them, and the Home one is `docs/interface.svg`).
 - `doctor.py` — `run()` returns a `Report` of the fixed `CHECK_IDS` (JSON `schema_version` 1:
   only add ids/keys). Read-only: `espanso path config`/`espanso status` and the launcher lookup
   via `run_command`; keys as set/not set; the clipboard only as a length (never read when
   concealed). Match files `stale`/`missing` or a deployed launcher that is gone fail (exit 4).
+  `import_check()` (the interface's Diagnostics) imports `prompt_workflow.cli` in a fresh
+  interpreter and reports its time, module count and any `HEAVY_MODULES` it loaded.
 - `smoke.py` — `setup`'s smoke test: a `ThreadingHTTPServer` on 127.0.0.1:0 answering the
   OpenAI-compatible, Anthropic and Ollama shapes, and a child `python -m prompt_workflow.cli
   improve --provider <p>` whose env points every `*_BASE_URL` at it with a placeholder key (the

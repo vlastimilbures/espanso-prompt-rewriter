@@ -31,6 +31,13 @@ uv run mypy                                     # strict, src and scripts
 uv run pre-commit run --all-files               # also YAML checks, gitleaks and zizmor
 ```
 
+If you change a screen of the interface (`src/prompt_workflow/tui/`), its SVG snapshots fail
+until you regenerate them, review the new SVGs and commit them (Linux or macOS):
+
+```bash
+UPDATE_SNAPSHOTS=1 uv run pytest tests/test_tui_snapshots.py
+```
+
 If you change a prompt, a provider or anything on the request path, also run the opt-in live
 tests (needs `OPENROUTER_API_KEY` in `.env`, costs fractions of a cent):
 
@@ -164,8 +171,10 @@ espanso-prompt-rewriter/
 ├── src/prompt_workflow/          the prompt-workflow CLI
 │   ├── cli.py                    improve and persona commands, the single output sink;
 │   │                             mounts the management commands lazily
-│   ├── commands/                 setup, config, secrets, profiles, stats, history, doctor:
+│   ├── commands/                 setup, config, secrets, profiles, stats, history, doctor, ui:
 │   │                             thin Typer wrappers over the services (common.py: exit codes)
+│   ├── tui/                      the full-screen Textual interface; only `ui` (commands/ui.py,
+│   │                             also a bare prompt-workflow on a terminal) loads it
 │   ├── doctor.py                 the doctor report (stable JSON, never a key or persona)
 │   ├── smoke.py                  setup's smoke test: improve against a stub on 127.0.0.1
 │   ├── config.py                 Settings from the environment, config.toml or .env
@@ -202,6 +211,8 @@ espanso-prompt-rewriter/
 ├── tests/                        unit tests, no network (fake_http in conftest.py)
 │   ├── test_live.py              opt-in real OpenRouter calls (pytest -m live)
 │   ├── test_trigger_contract.py  exact trigger output, imports and module budget
+│   ├── test_tui.py               the interface, driven headless with Textual's Pilot
+│   ├── test_tui_snapshots.py     SVG snapshots of each tab (snapshots/, UPDATE_SNAPSHOTS=1)
 │   └── test_docs.py              README and .env.example list every setting
 ├── .github/                      CI (tests, gitleaks), Dependabot, issue and PR templates
 ├── .env.example                  key and persona; every other setting commented out

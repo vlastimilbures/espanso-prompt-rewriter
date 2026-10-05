@@ -295,3 +295,67 @@ def test_trigger_path_module_count(trigger_run):
     _, data = trigger_run
     added = len(data["added"])
     assert added <= MODULE_CEILING, f"the trigger run added {added} modules"
+
+
+# The headless management commands, --help and the bare command without a terminal never load
+# the interface (#93): Textual is imported only once it opens. Run in one fresh interpreter,
+# with Espanso, uv and brew answering nothing and the clipboard never read.
+_MANAGEMENT_RUN = """
+import json
+import sys
+from pathlib import Path
+
+from prompt_workflow import deploy
+import prompt_workflow.cli as cli
+
+deploy.run_command = lambda argv: None
+scenarios = [
+    [],
+    ["--help"],
+    ["doctor", "--no-clipboard"],
+    ["doctor", "--json", "--no-clipboard"],
+    ["config", "show"],
+    ["secrets", "status"],
+    ["profiles", "list"],
+    ["stats"],
+    ["espanso", "status"],
+    ["ui"],
+]
+codes = []
+for argv in scenarios:
+    try:
+        cli.app(argv)
+    except SystemExit as exc:
+        codes.append(exc.code)
+Path(sys.argv[1]).write_text(json.dumps({"codes": codes, "loaded": sorted(sys.modules)}))
+"""
+
+
+def test_management_commands_do_not_import_the_interface(tmp_path):
+    env = {
+        key: value for key, value in os.environ.items() if key not in {*env_names(), *_PRELOADING}
+    }
+    env["PROMPT_WORKFLOW_ENV"] = str(tmp_path / ".env")
+    for name in ("XDG_CONFIG_HOME", "APPDATA", "XDG_DATA_HOME", "LOCALAPPDATA"):
+        env[name] = str(tmp_path / name.lower())
+    for name in ("HOME", "USERPROFILE"):
+        env[name] = str(tmp_path / "home")
+    out = tmp_path / "modules.json"
+    proc = subprocess.run(
+        [sys.executable, "-c", _MANAGEMENT_RUN, str(out)],
+        capture_output=True,
+        stdin=subprocess.DEVNULL,
+        env=env,
+        cwd=tmp_path,
+        timeout=60,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr.decode("utf-8", "replace")
+    data = json.loads(out.read_text(encoding="utf-8"))
+    # Bare without a terminal: help, exit 2. `ui` without a terminal: exit 3 (#92's code).
+    assert data["codes"][0] == 2
+    assert data["codes"][-1] == 3
+    loaded = data["loaded"]
+    assert "prompt_workflow.commands.ui" in loaded  # --help listed it, so the guard is real
+    for module in ("textual", "prompt_workflow.tui"):
+        assert not [m for m in loaded if m == module or m.startswith(module + ".")], module

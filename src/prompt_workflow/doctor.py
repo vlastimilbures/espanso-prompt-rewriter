@@ -9,8 +9,10 @@ persona or clipboard text, since people paste it into bug reports. Its JSON shap
 
 from __future__ import annotations
 
+import json
 import os
 import platform
+import subprocess
 import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -386,3 +388,60 @@ def run(
     checks.append(_safely("clipboard", lambda: _clipboard_check(clipboard)))
     checks.append(_safely("profiles", lambda: _profiles_check(settings)))
     return Report(tuple(checks))
+
+
+# Modules the trigger path must never load (tests/test_trigger_contract.py freezes the same).
+HEAVY_MODULES = (
+    "textual",
+    "tomli_w",
+    "tomlkit",
+    "keyring",
+    "prompt_workflow.deploy",
+    "prompt_workflow.commands",
+    "prompt_workflow.doctor",
+    "prompt_workflow.config_store",
+)
+IMPORT_TIMEOUT = 30
+_IMPORT_PROBE = """
+import json, sys, time
+started = set(sys.modules)
+clock = time.perf_counter()
+import prompt_workflow.cli
+seconds = time.perf_counter() - clock
+heavy = sorted(m for m in sys.modules if m.split(".")[0] in HEAVY or m.startswith(PREFIXES))
+print(json.dumps({"seconds": seconds, "modules": len(set(sys.modules) - started), "heavy": heavy}))
+"""
+
+
+@dataclass(frozen=True)
+class ImportCheck:
+    ok: bool
+    message: str
+    seconds: float | None = None
+    modules: int | None = None
+    heavy: tuple[str, ...] = ()
+
+
+def import_check(timeout: float = IMPORT_TIMEOUT) -> ImportCheck:
+    """Import the CLI module the way a trigger starts, in a fresh interpreter, and report how
+    long it took, how many modules it loaded and any of HEAVY_MODULES among them. Runs no
+    command and reads no setting."""
+    top = [m for m in HEAVY_MODULES if "." not in m]
+    prefixes = tuple(m for m in HEAVY_MODULES if "." in m)
+    probe = f"HEAVY = {top!r}\nPREFIXES = {prefixes!r}\n{_IMPORT_PROBE}"
+    try:
+        proc = subprocess.run(  # noqa: S603 - this interpreter, a fixed script, no shell
+            [sys.executable, "-c", probe],
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+        )
+        data = json.loads(proc.stdout.decode("utf-8"))
+    except (OSError, subprocess.SubprocessError, ValueError) as exc:
+        return ImportCheck(False, f"the import check could not run ({type(exc).__name__})")
+    heavy = tuple(data["heavy"])
+    seconds, modules = float(data["seconds"]), int(data["modules"])
+    summary = f"{seconds * 1000:.0f} ms, {modules} module(s)"
+    if heavy:
+        return ImportCheck(False, f"{summary}; loads {', '.join(heavy)}", seconds, modules, heavy)
+    return ImportCheck(True, f"{summary}; no heavy module", seconds, modules)

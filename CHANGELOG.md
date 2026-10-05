@@ -7,6 +7,20 @@ All notable changes to this project are documented here. The format follows
 ## Unreleased
 
 ### Added
+- A full-screen interface for setting up and managing prompt-workflow (#93, #64): run
+  `prompt-workflow` in a terminal, or `prompt-workflow ui`. Six tabs (Home, Providers & keys,
+  Profiles, Triggers, History, Diagnostics) show and change what the headless commands do,
+  through the same services: keys only as set or not set, each trigger with its fixed provider
+  and deploy state, a diff preview, deploy (an edited file is kept unless you choose otherwise),
+  detach, `.env` and profile migration, export, prune and reset of the usage history, config
+  provenance, SQLite and lost-write state, and an import-time check. Every change asks first
+  and reloads every tab; no provider is called except by the Test call button (a stub on
+  127.0.0.1). Keys are letters and digits, `t` switches to a high-contrast theme, and
+  `NO_COLOR` is honoured. Without a terminal a bare `prompt-workflow` still prints the help and
+  exits 2 (the help now lists `ui`), and `ui` exits 3. Textual is a new dependency
+  (`textual>=8.2.8,<9`), loaded only when the interface opens: no trigger or other command
+  imports it. The `doctor` service gains `import_check()`, `factory` gains `routes()` and
+  `assets` gains `triggers()`, read-only helpers the interface shows.
 - Headless management commands (#92), each a thin wrapper over a service and safe to script:
   `prompt-workflow --version`; `setup` (provider, default profile, API key, a deploy preview and
   a smoke test that runs `improve` against a stub on 127.0.0.1, never a paid call; it offers a

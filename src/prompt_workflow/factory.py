@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 from .config import Settings
@@ -78,6 +79,42 @@ def _leaves_machine(name: str, cfg: Settings) -> bool:
     if name == "lmstudio":
         return not is_loopback(cfg.lmstudio_base_url)
     return name in ("openrouter", "anthropic")
+
+
+# The key setting each provider needs; the local ones need none.
+PROVIDER_KEYS = {"openrouter": "OPENROUTER_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
+
+
+@dataclass(frozen=True)
+class Route:
+    """Where a provider would send a draft, as the settings say: for a screen to show, not
+    to call. ``remote`` is _leaves_machine(); ``refused`` is PROMPT_LOCAL_ONLY refusing it."""
+
+    name: str
+    model: str
+    base_url: str
+    key: str | None
+    remote: bool
+    refused: bool
+
+
+def routes(cfg: Settings) -> list[Route]:
+    """Every provider in PROVIDER_NAMES with its model, base URL, key setting and whether it
+    can send the draft off this machine. Builds no provider and makes no call."""
+    places = {
+        "ollama": (cfg.ollama_model, cfg.ollama_base_url),
+        "lmstudio": (cfg.lmstudio_model, cfg.lmstudio_base_url),
+        "openrouter": (cfg.openrouter_model, cfg.openrouter_base_url),
+        "anthropic": (cfg.anthropic_model, cfg.anthropic_base_url),
+    }
+    found = []
+    for name in PROVIDER_NAMES:
+        model, base_url = places[name]
+        remote = _leaves_machine(name, cfg)
+        found.append(
+            Route(name, model, base_url, PROVIDER_KEYS.get(name), remote, remote and cfg.local_only)
+        )
+    return found
 
 
 def _gate(
