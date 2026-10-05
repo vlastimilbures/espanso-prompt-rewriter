@@ -31,18 +31,21 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import shutil
 import statistics
 import subprocess
+import sys
 import threading
 import time
 from collections.abc import Collection
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
+from typing import Any
 
 from prompt_workflow import prompt_builder
 from prompt_workflow.config import Settings, split_model_spec
@@ -55,6 +58,7 @@ from prompt_workflow.prompt_builder import (
     strip_outer_fence,
 )
 from prompt_workflow.providers.base import TRUNCATED_NOTE, ProviderError
+from prompt_workflow.providers.usage import AttemptUsage
 
 MODELS: list[str] = [
     # Standard tier (-i-). The first is the shipped default.
@@ -959,16 +963,18 @@ class Result:
     model: str
     draft: str
     run: int
-    seconds: float
+    seconds: float  # the HTTP attempt that answered, not a failed one or the wait before a retry
     out_tokens: int
     in_tokens: int
-    cost: float = 0.0
+    # What every HTTP attempt of the run reported, failed ones included; None when none did.
+    cost: float | None = None
+    unknown_costs: int = 0  # attempts that reported no cost (not counted as 0)
     backend: str = ""
     pin: str = ""
     effort: str = ""
     reasoning_tokens: int = 0
     finish_reason: str = ""
-    retried: bool = False
+    retries: int = 0  # HTTP attempts after the first: post_json's own retry and the bench's
     repaired: bool = False  # the CLI's tag repair changed the text (counted, not failed)
     fenced: bool = False  # the CLI stripped a code fence around the reply (counted, not failed)
     retention: float = 0.0
@@ -987,11 +993,17 @@ class Result:
 
 
 class Budget:
-    """Running total of real spend, shared across bench threads."""
+    """Running total of real spend, shared across bench threads.
+
+    Only reported costs are added. An attempt that reported none (a timeout, an error page,
+    a reply without a usage block) is counted in ``unknown`` and never guessed, so ``spent`` is
+    a lower bound on the real spend and the report says how many attempts it leaves out.
+    """
 
     def __init__(self, limit: float) -> None:
         self.limit = limit
         self.spent = 0.0
+        self.unknown = 0
         self._lock = threading.Lock()
 
     def exhausted(self) -> bool:
@@ -1001,6 +1013,35 @@ class Budget:
     def add(self, cost: float) -> None:
         with self._lock:
             self.spent += cost
+
+    def charge(self, usage: AttemptUsage) -> None:
+        if usage.charged_amount is None:
+            with self._lock:
+                self.unknown += 1
+        else:
+            self.add(float(usage.charged_amount))
+
+
+class Attempts:
+    """The usage observer of one run: keeps each HTTP attempt's record and charges it to the
+    budget as it arrives, so a failed or retried attempt costs what it reported too."""
+
+    def __init__(self, budget: Budget) -> None:
+        self.budget = budget
+        self.records: list[AttemptUsage] = []
+
+    def __call__(self, usage: AttemptUsage) -> None:
+        self.records.append(usage)
+        self.budget.charge(usage)
+
+    @property
+    def cost(self) -> float | None:
+        reported = [float(u.charged_amount) for u in self.records if u.charged_amount is not None]
+        return sum(reported) if reported else None
+
+    @property
+    def unknown(self) -> int:
+        return sum(u.charged_amount is None for u in self.records)
 
 
 def split_spec(spec: str) -> tuple[str, str, str]:
@@ -1028,8 +1069,10 @@ def _call(
     sys_prompt: str,
     effort: str = "",
     max_tokens: int = BENCH_MAX_TOKENS,
+    observer: Attempts | None = None,
 ) -> tuple[str, dict[str, object]]:
-    """One gated OpenRouter call; returns the text and the raw response body."""
+    """One gated OpenRouter call; returns the text and the raw response body. ``observer``
+    receives one usage record per HTTP attempt, failed ones included."""
     body: dict[str, object] = {}
     # A pin routes to one specific endpoint (e.g. `deepinfra/fp4`) and fails rather than
     # silently falling back, so latency and quality are attributable to that backend.
@@ -1049,6 +1092,7 @@ def _call(
         extra_body={"usage": {"include": True}},
         on_response=body.update,
         title="espanso-prompt-rewriter-bench",
+        observer=observer,
     )
     return provider.generate(draft, sys_prompt), body
 
@@ -1064,6 +1108,45 @@ def run_one(
     persona: str = EXAMPLE_PERSONA,
     max_tokens: int = BENCH_MAX_TOKENS,
 ) -> Result:
+    """Run and score one call. Never raises: anything that goes wrong becomes this run's
+    error, so one bad reply or scorer bug cannot stop the bench or lose its results."""
+    attempts = Attempts(budget)
+    try:
+        return _run_one(
+            cfg, spec, draft_name, run, outdir, attempts, sys_prompt, persona, max_tokens
+        )
+    except Exception as exc:
+        try:
+            model, pin, effort = split_spec(spec)
+        except ValueError:
+            model, pin, effort = spec, "", ""
+        return Result(
+            model=model,
+            draft=draft_name,
+            run=run,
+            pin=pin,
+            effort=effort,
+            seconds=0.0,
+            out_tokens=0,
+            in_tokens=0,
+            cost=attempts.cost,
+            unknown_costs=attempts.unknown,
+            retries=max(len(attempts.records) - 1, 0),
+            error=f"{type(exc).__name__}: {exc}",
+        )
+
+
+def _run_one(
+    cfg: Settings,
+    spec: str,
+    draft_name: str,
+    run: int,
+    outdir: Path,
+    attempts: Attempts,
+    sys_prompt: str | None,
+    persona: str,
+    max_tokens: int,
+) -> Result:
     model, pin, effort = split_spec(spec)
     draft = DRAFTS[draft_name]
     # A --system-prompt-file candidate gets the same token filling as a shipped profile.
@@ -1071,38 +1154,53 @@ def run_one(
 
     # Identity of this run, shared by every Result it can produce.
     result = partial(Result, model=model, draft=draft_name, run=run, pin=pin, effort=effort)
-    if budget.exhausted():
+    if attempts.budget.exhausted():
         return result(
             seconds=0.0, out_tokens=0, in_tokens=0, skipped=True, error="budget exhausted"
         )
 
-    started = time.monotonic()
-    retried = False
+    def finish(**fields: Any) -> Result:
+        """The run's Result, with what its attempts cost and how many there were (a stubbed
+        _call reports no records; then each bench attempt counts as one)."""
+        return result(
+            cost=attempts.cost,
+            unknown_costs=attempts.unknown,
+            retries=max(len(attempts.records), calls) - 1,
+            **fields,
+        )
+
     text = ""
+    calls = 0
     for attempt in (1, 2):
+        # Timed per attempt: a failed first attempt and the wait before the retry are not
+        # the model's latency.
+        started = time.monotonic()
+        seen = len(attempts.records)
+        calls += 1
         try:
-            text, body = _call(cfg, model, pin, draft.text, sys_prompt, effort, max_tokens)
-            break
+            text, body = _call(
+                cfg, model, pin, draft.text, sys_prompt, effort, max_tokens, observer=attempts
+            )
         except Exception as exc:
             message = str(exc)
             # post_json already retried a rate limit or an unavailable upstream once; this
             # retry also covers what it never repeats for an interactive call (a timeout, a
             # 500), since a batch run can afford the wait.
             if attempt == 1 and isinstance(exc, ProviderError) and exc.transient:
-                retried = True
                 time.sleep(3)
                 continue
             elapsed = time.monotonic() - started
-            return result(
-                seconds=elapsed, out_tokens=0, in_tokens=0, retried=retried, error=message
-            )
-    elapsed = time.monotonic() - started
+            return finish(seconds=elapsed, out_tokens=0, in_tokens=0, error=message)
+        elapsed = time.monotonic() - started
+        # The last HTTP attempt is the one that answered; post_json's own retry and its wait
+        # before it are left out too.
+        if len(attempts.records) > seen:
+            elapsed = attempts.records[-1].latency_ms / 1000
+        break
 
     usage = body.get("usage")
     if not isinstance(usage, dict):
         usage = {}
-    cost = float(usage.get("cost", 0.0))
-    budget.add(cost)
     details = usage.get("completion_tokens_details")
     reasoning_tokens = int(details.get("reasoning_tokens") or 0) if isinstance(details, dict) else 0
     try:
@@ -1136,15 +1234,13 @@ def run_one(
     (outdir / f"{slug}__{draft_name}__{run}.txt").write_text(text, encoding="utf-8")
     if text != raw:  # keep what came back before the fence strip and the tag repair
         (outdir / f"{slug}__{draft_name}__{run}.raw").write_text(raw, encoding="utf-8")
-    return result(
+    return finish(
         seconds=elapsed,
-        out_tokens=int(usage.get("completion_tokens", 0)),
-        in_tokens=int(usage.get("prompt_tokens", 0)),
-        cost=cost,
+        out_tokens=int(usage.get("completion_tokens") or 0),
+        in_tokens=int(usage.get("prompt_tokens") or 0),
         backend=str(body.get("provider", "")),
         reasoning_tokens=reasoning_tokens,
         finish_reason=finish_reason,
-        retried=retried,
         repaired=text != unfenced,
         fenced=fenced,
         retention=retention(text, draft),
@@ -1152,9 +1248,38 @@ def run_one(
     )
 
 
-def _p95(values: list[float]) -> float:
+# Below this many samples a p95 is just the slowest run or two, so the report shows "-".
+P95_MIN_SAMPLES = 20
+
+
+def _p95(values: list[float]) -> float | None:
+    """Nearest-rank 95th percentile: the smallest sample that at least 95% of the samples do
+    not exceed. None for fewer than P95_MIN_SAMPLES samples."""
+    if len(values) < P95_MIN_SAMPLES:
+        return None
     ordered = sorted(values)
-    return ordered[min(len(ordered) - 1, round(0.95 * (len(ordered) - 1)))]
+    return ordered[-(-95 * len(ordered) // 100) - 1]
+
+
+def _cell(value: float | None, spec: str) -> str:
+    return "-" if value is None else format(value, spec)
+
+
+def write_results(path: Path, results: list[Result]) -> None:
+    """Replace results.json in one step (temp file + rename), so a crash leaves the last
+    complete version rather than a half-written file."""
+    tmp = path.with_name(f"{path.name}.tmp")
+    tmp.write_text(json.dumps([asdict(r) for r in results], indent=2), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def save_results(path: Path, results: list[Result]) -> None:
+    """write_results(), warning instead of raising: a results.json that cannot be replaced
+    (on Windows, open in another program) must not stop the runs or the report."""
+    try:
+        write_results(path, results)
+    except OSError as exc:
+        print(f"warning: could not save {path}: {exc}", file=sys.stderr)
 
 
 def git_state() -> tuple[str, bool | None]:
@@ -1235,39 +1360,48 @@ def report(results: list[Result], budget: Budget, meta: dict[str, object] | None
     for r in results:
         by_model.setdefault(r.label, []).append(r)
 
+    # A run skipped for the budget never happened: it is counted in `skip`, not in `pass`.
     header = (
-        f"{'model':62s} {'pass':>7s} {'rep':>4s} {'kept':>5s} {'p50 s':>7s} {'p95 s':>7s} "
-        f"{'in':>6s} {'out':>6s} {'reas':>6s} {'$/1k':>7s} backend"
+        f"{'model':62s} {'pass':>7s} {'skip':>4s} {'rep':>4s} {'kept':>5s} {'p50 s':>7s} "
+        f"{'p95 s':>7s} {'in':>6s} {'out':>6s} {'reas':>6s} {'$/1k':>7s} backend"
     )
     print(f"\n{header}")
     print("-" * len(header))
     rows = []
     for model, rs in by_model.items():
+        ran = [r for r in rs if not r.skipped]
         done = [r for r in rs if r.error is None]
         n_passed = sum(1 for r in rs if r.ok)
         times = [r.seconds for r in done]
-        costs = [r.cost for r in done if r.cost]
+        costs = [r.cost for r in done if r.cost is not None]
+
+        def mean(values: list[float]) -> float | None:
+            return statistics.mean(values) if values else None
+
         rows.append(
             (
-                -n_passed / len(rs),
+                -n_passed / len(ran) if ran else 1.0,
                 statistics.median(times) if times else 999.0,
                 model,
-                f"{n_passed}/{len(rs)}",
+                f"{n_passed}/{len(ran)}",
+                len(rs) - len(ran),
                 sum(r.repaired for r in rs),
-                statistics.mean([r.retention for r in done]) if done else float("nan"),
-                statistics.median(times) if times else float("nan"),
-                _p95(times) if times else float("nan"),
-                statistics.mean([r.in_tokens for r in done]) if done else 0.0,
-                statistics.mean([r.out_tokens for r in done]) if done else 0.0,
-                statistics.mean([r.reasoning_tokens for r in done]) if done else 0.0,
-                statistics.mean(costs) * 1000 if costs else float("nan"),
+                mean([r.retention for r in done]),
+                statistics.median(times) if times else None,
+                _p95(times),
+                mean([r.in_tokens for r in done]),
+                mean([r.out_tokens for r in done]),
+                mean([r.reasoning_tokens for r in done]),
+                statistics.mean(costs) * 1000 if costs else None,
                 next((r.backend for r in done if r.backend), "?"),
             )
         )
-    for _, _, model, passed, rep, kept, p50, p95, tin, tout, reas, per_k, backend in sorted(rows):
+    for row in sorted(rows, key=lambda row: row[:3]):
+        model, passed, skip, rep, kept, p50, p95, tin, tout, reas, per_k, backend = row[2:]
         print(
-            f"{model:62s} {passed:>7s} {rep:4d} {kept:5.2f} {p50:7.1f} {p95:7.1f} "
-            f"{tin:6.0f} {tout:6.0f} {reas:6.0f} {per_k:7.2f} {backend}"
+            f"{model:62s} {passed:>7s} {skip:4d} {rep:4d} {_cell(kept, '.2f'):>5s} "
+            f"{_cell(p50, '.1f'):>7s} {_cell(p95, '.1f'):>7s} {_cell(tin, '.0f'):>6s} "
+            f"{_cell(tout, '.0f'):>6s} {_cell(reas, '.0f'):>6s} {_cell(per_k, '.2f'):>7s} {backend}"
         )
 
     # Split by draft before blaming a backend: a draft every model fails is a prompt problem.
@@ -1279,13 +1413,15 @@ def report(results: list[Result], budget: Budget, meta: dict[str, object] | None
     for d in dict.fromkeys(r.draft for r in results):
         cells = []
         for model in labels:
-            ds = [r for r in by_model[model] if r.draft == d]
+            ds = [r for r in by_model[model] if r.draft == d and not r.skipped]
             cells.append(f"{sum(r.ok for r in ds)}/{len(ds)}" if ds else "-")
         print(f"{d[:18]:18s}" + "".join(f"{c:>7s}" for c in cells))
 
     print("\nfailures:")
     any_failure = False
     for r in results:
+        if r.skipped:
+            continue
         if r.error:
             any_failure = True
             print(f"  {r.label} {r.draft}#{r.run}: ERROR {r.error[:90]}")
@@ -1307,7 +1443,13 @@ def report(results: list[Result], budget: Budget, meta: dict[str, object] | None
         for run in repaired:
             print(f"  {run}")
 
+    skipped = sum(r.skipped for r in results)
+    if skipped:
+        print(f"\n{skipped} runs skipped: budget exhausted (not counted in pass)")
+
     print(f"\ntotal spend: ${budget.spent:.4f} of ${budget.limit:.2f} budget")
+    if budget.unknown:
+        print(f"  {budget.unknown} attempts reported no cost and are not included")
 
 
 def main() -> None:
@@ -1340,7 +1482,8 @@ def main() -> None:
         "--budget",
         type=float,
         default=1.0,
-        help="stop starting calls once this much USD is spent (in-flight calls still finish)",
+        help="stop starting calls once this much reported USD is spent, failed attempts "
+        "included (in-flight calls still finish)",
     )
     parser.add_argument(
         "--persona",
@@ -1421,18 +1564,19 @@ def main() -> None:
         persona=persona,
         max_tokens=args.max_tokens,
     )
+    finished: dict[int, Result] = {}
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
-        futures = [pool.submit(job, m, d, run) for m, d, run in jobs]
-        results = []
-        for i, fut in enumerate(futures, 1):
+        futures = {pool.submit(job, m, d, run): n for n, (m, d, run) in enumerate(jobs)}
+        for i, fut in enumerate(as_completed(futures), 1):
             r = fut.result()
-            results.append(r)
+            finished[futures[fut]] = r
+            # Rewritten after every run, in job order, so a crash keeps what finished.
+            save_results(outdir / "results.json", [finished[n] for n in sorted(finished)])
             mark = "skip" if r.skipped else "ok  " if r.ok else "FAIL"
             print(f"[{i}/{len(jobs)}] {mark} {r.label} {r.draft}#{r.run} {r.seconds:.1f}s")
 
-    (outdir / "results.json").write_text(
-        json.dumps([asdict(r) for r in results], indent=2), encoding="utf-8"
-    )
+    results = [finished[n] for n in sorted(finished)]
+    save_results(outdir / "results.json", results)  # once more, in case a save above failed
     report(results, budget, meta)
 
 

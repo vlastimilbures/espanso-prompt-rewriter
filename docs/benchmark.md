@@ -19,7 +19,15 @@ and end of pasted material copied word for word into `INPUTS`, no third-person c
 degeneration. A `kept` column reports the share of the draft's specifics carried over, and `rep`
 how many rewrites had a `<CONTEXT>…</GOAL>` slip (seen on flash-lite), which the CLI repairs
 before pasting; those are scored on the repaired text. Cost and token counts come from
-OpenRouter's own usage data. Each model is given as
+OpenRouter's own usage data. Every HTTP attempt's reported cost counts against `--budget`,
+failed and retried ones included; an attempt that reports no cost is counted apart and never
+as 0, so the total spend is a lower bound and the report says how many attempts it leaves out.
+`p50` and `p95` time only the attempt that answered (a failed attempt and the wait before a
+retry are left out; retries are kept in `results.json`), and `p95` is the nearest-rank 95th
+percentile, shown only from 20 runs on (`-` below). A run skipped once the budget is spent is
+counted under `skip`, not in `pass`. A run that fails in an unexpected way is recorded as that
+run's error, and `results.json` is rewritten after every finished run, so a crash keeps what
+finished. Each model is given as
 `model@endpoint~effort`: the endpoint is pinned with fallbacks off, because the same model on
 another host can differ several-fold in latency and cost, and `~effort` sets the reasoning
 effort. The report splits passes by draft, so a draft every model fails shows up as a prompt

@@ -62,6 +62,19 @@ All notable changes to this project are documented here. The format follows
   git (`git show v0.17.0:docs/prompt-candidates/I2.md`); `PLAN.md` remains as the decision
   record and now says which candidate shipped.
 
+### Fixed
+- The bench's accounting (#39): latency (`p50`, `p95`) times only the HTTP attempt that
+  answered, not a failed first attempt or the wait before a retry, and `results.json` records
+  `retries` (the HTTP attempts after the first) instead of `retried`. Runs skipped once the
+  budget is spent no longer count as failures: the report shows them in a new `skip` column
+  and prints `-` instead of `nan` for a setup with no finished run. `p95` is the nearest-rank
+  95th percentile and is shown only from 20 runs on. A `null` cost no longer crashes a run,
+  any other unexpected error becomes that run's error instead of stopping the bench, and
+  `results.json` is rewritten after every finished run. Every HTTP attempt's reported cost,
+  failed and retried ones included, now counts against `--budget` (through the usage observer
+  of #87); an attempt that reports no cost is counted apart, never as 0, and named in the
+  total. `cost` in `results.json` is `null` when no attempt reported one.
+
 ## 0.17.0 - 2026-10-05
 
 Upgrading from the install scripts (an editable checkout install) to the release wheel: you no
