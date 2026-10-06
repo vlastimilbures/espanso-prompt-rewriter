@@ -63,6 +63,9 @@ All notable changes to this project are documented here. The format follows
   Ollama cloud model (`ollama cp gpt-oss:120b-cloud my-model`) has no `cloud` tag, so it counts
   as local: the gate does not run and `PROMPT_LOCAL_ONLY` does not refuse it. Set
   `PROMPT_GATE_LOCAL=true` to gate it (#33).
+- Development: strict mypy now checks `tests/` as well as `src/` and `scripts/` (#41). The
+  tests see the real types of the bench, release and lock-check scripts they load, instead of
+  an untyped module.
 
 ### Removed
 - The static `-prompt-` form ("Act as {{role}}", objective, context, constraints, output) in

@@ -1,6 +1,10 @@
+from __future__ import annotations
+
 import dataclasses
+from collections.abc import Callable, Mapping
 from decimal import Decimal
 from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any
 
 import httpx
 import pytest
@@ -10,27 +14,38 @@ from prompt_workflow.factory import make_provider
 from prompt_workflow.prompt_builder import PERSONA_TOKEN, render
 from prompt_workflow.providers import base
 from prompt_workflow.providers.anthropic import AnthropicProvider
-from prompt_workflow.providers.base import ProviderError
+from prompt_workflow.providers.base import Provider, ProviderError
 from prompt_workflow.providers.ollama import OllamaProvider
 from prompt_workflow.providers.openai_compatible import OpenAICompatibleProvider
 from prompt_workflow.providers.usage import (
     AttemptUsage,
     Meter,
+    UsageObserver,
     anthropic_usage,
     ollama_usage,
     openai_usage,
     openrouter_usage,
 )
 
+if TYPE_CHECKING:
+    from conftest import FakeHttp
 
-def _openai_body(text="ok", usage=None, **extra):
-    body = {"choices": [{"message": {"content": text}, "finish_reason": "stop"}], **extra}
+
+def _openai_body(
+    text: str = "ok", usage: dict[str, Any] | None = None, **extra: Any
+) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "choices": [{"message": {"content": text}, "finish_reason": "stop"}],
+        **extra,
+    }
     if usage is not None:
         body["usage"] = usage
     return body
 
 
-def _openrouter(monkeypatch, records, **env):
+def _openrouter(
+    monkeypatch: pytest.MonkeyPatch, records: list[AttemptUsage], **env: str
+) -> Provider:
     # Built at runtime, so a secret scanner never sees a key-shaped literal.
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-" + "t" * 12)
     for key, value in env.items():
@@ -43,7 +58,7 @@ def _openrouter(monkeypatch, records, **env):
 
 # OpenRouter: tokens with cache details taken out of the uncached input, the serving provider,
 # the credits charged and, for a BYOK call, the upstream's USD cost kept apart from them.
-def test_openrouter_mapping(fake_http, monkeypatch):
+def test_openrouter_mapping(fake_http: FakeHttp, monkeypatch: pytest.MonkeyPatch) -> None:
     records: list[AttemptUsage] = []
     fake_http.reply(
         _openai_body(
@@ -91,7 +106,9 @@ def test_openrouter_mapping(fake_http, monkeypatch):
 
 
 # The request no longer asks for usage accounting: OpenRouter always returns it.
-def test_openrouter_request_has_no_usage_include(fake_http, monkeypatch):
+def test_openrouter_request_has_no_usage_include(
+    fake_http: FakeHttp, monkeypatch: pytest.MonkeyPatch
+) -> None:
     fake_http.reply(_openai_body())
     _openrouter(monkeypatch, []).generate("draft", "sys")
     assert "usage" not in fake_http.calls[0]["json"]
@@ -111,7 +128,14 @@ def test_openrouter_request_has_no_usage_include(fake_http, monkeypatch):
         ({"cost": -1}, None, None, "unknown"),
     ],
 )
-def test_openrouter_cost_state(fake_http, monkeypatch, usage, amount, unit, state):
+def test_openrouter_cost_state(
+    fake_http: FakeHttp,
+    monkeypatch: pytest.MonkeyPatch,
+    usage: dict[str, Any] | None,
+    amount: Decimal | None,
+    unit: str | None,
+    state: str,
+) -> None:
     records: list[AttemptUsage] = []
     fake_http.reply(_openai_body(usage=usage))
     _openrouter(monkeypatch, records).generate("draft", "sys")
@@ -123,7 +147,7 @@ def test_openrouter_cost_state(fake_http, monkeypatch, usage, amount, unit, stat
 
 
 # LM Studio on this machine: tokens if present, and no cost to report.
-def test_lmstudio_local_mapping(fake_http):
+def test_lmstudio_local_mapping(fake_http: FakeHttp) -> None:
     records: list[AttemptUsage] = []
     fake_http.reply(
         _openai_body(model="qwen3-8b", usage={"prompt_tokens": 40, "completion_tokens": 9})
@@ -141,7 +165,9 @@ def test_lmstudio_local_mapping(fake_http):
 
 # An LM Studio on another machine is not verified local inference: its cost is unknown, and a
 # usage.cost it sends is not read (only OpenRouter's unit is known).
-def test_lmstudio_remote_cost_is_unknown(fake_http, monkeypatch):
+def test_lmstudio_remote_cost_is_unknown(
+    fake_http: FakeHttp, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("LMSTUDIO_BASE_URL", "https://lm.example.com/v1")
     records: list[AttemptUsage] = []
     fake_http.reply(_openai_body(usage={"prompt_tokens": 4, "cost": 0.5}))
@@ -156,7 +182,7 @@ def test_lmstudio_remote_cost_is_unknown(fake_http, monkeypatch):
 
 
 # Anthropic: the four non-overlapping token counts; no cost is reported.
-def test_anthropic_mapping(fake_http, monkeypatch):
+def test_anthropic_mapping(fake_http: FakeHttp, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-" + "t" * 12)
     records: list[AttemptUsage] = []
     fake_http.reply(
@@ -200,7 +226,7 @@ _OLLAMA_BODY = {
 
 
 # Ollama on this machine: prompt and output tokens, its timings in ms, no cost.
-def test_ollama_local_mapping(fake_http):
+def test_ollama_local_mapping(fake_http: FakeHttp) -> None:
     records: list[AttemptUsage] = []
     fake_http.reply(_OLLAMA_BODY)
     make_provider("ollama", Settings(), observer=records.append).generate("draft", "sys")
@@ -217,7 +243,9 @@ def test_ollama_local_mapping(fake_http):
 
 
 # A cloud-tagged Ollama model runs on ollama.com even through a loopback server: unknown.
-def test_ollama_cloud_model_cost_is_unknown(fake_http, monkeypatch):
+def test_ollama_cloud_model_cost_is_unknown(
+    fake_http: FakeHttp, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("OLLAMA_MODEL", "gpt-oss:120b-cloud")
     records: list[AttemptUsage] = []
     fake_http.reply(_OLLAMA_BODY)
@@ -227,7 +255,7 @@ def test_ollama_cloud_model_cost_is_unknown(fake_http, monkeypatch):
 
 
 # A provider built directly, without the factory's verdict, never claims local inference.
-def test_unverified_endpoint_defaults_to_unknown(fake_http):
+def test_unverified_endpoint_defaults_to_unknown(fake_http: FakeHttp) -> None:
     records: list[AttemptUsage] = []
     fake_http.reply(_OLLAMA_BODY)
     OllamaProvider("http://localhost:11434", "m", observer=records.append).generate("d", "s")
@@ -236,7 +264,7 @@ def test_unverified_endpoint_defaults_to_unknown(fake_http):
 
 # Counts that are not non-negative integers, and identifiers that are not short printable
 # strings, are dropped rather than stored.
-def test_parsers_drop_malformed_values():
+def test_parsers_drop_malformed_values() -> None:
     base = AttemptUsage("p", "m", "remote", 1, 200, None, 1.0)
     odd = {
         "id": "x" * 500,
@@ -268,12 +296,12 @@ def test_parsers_drop_malformed_values():
 # --- Attempts: retries, timeouts, failures. ------------------------------------------------
 
 
-def _remote_ollama(records, timeout=30):
+def _remote_ollama(records: list[AttemptUsage], timeout: float = 30) -> OllamaProvider:
     return OllamaProvider("http://x", "m", timeout=timeout, observer=records.append)
 
 
 # A retried call (503, then 200) produces two records, one per attempt.
-def test_retry_produces_two_records(fake_http):
+def test_retry_produces_two_records(fake_http: FakeHttp) -> None:
     records: list[AttemptUsage] = []
     fake_http.queue({"status_code": 503}, {"json_data": _OLLAMA_BODY})
     assert _remote_ollama(records).generate("d", "s") == "ok"
@@ -286,7 +314,7 @@ def test_retry_produces_two_records(fake_http):
 
 
 # A timeout produces one record and no retry.
-def test_timeout_produces_one_record(fake_http):
+def test_timeout_produces_one_record(fake_http: FakeHttp) -> None:
     records: list[AttemptUsage] = []
     fake_http.queue(httpx.ReadTimeout("slow"))
     with pytest.raises(ProviderError, match="timed out"):
@@ -305,7 +333,9 @@ def test_timeout_produces_one_record(fake_http):
         (httpx.RemoteProtocolError("dropped"), "transport", None),
     ],
 )
-def test_failed_attempt_is_recorded(fake_http, reply, kind, status):
+def test_failed_attempt_is_recorded(
+    fake_http: FakeHttp, reply: dict[str, Any] | Exception, kind: str, status: int | None
+) -> None:
     records: list[AttemptUsage] = []
     fake_http.queue(reply)
     with pytest.raises(ProviderError):
@@ -314,7 +344,7 @@ def test_failed_attempt_is_recorded(fake_http, reply, kind, status):
 
 
 # A refused connection to another machine is retried: both attempts are recorded.
-def test_refused_connection_records_each_attempt(fake_http):
+def test_refused_connection_records_each_attempt(fake_http: FakeHttp) -> None:
     records: list[AttemptUsage] = []
     fake_http.queue(httpx.ConnectError("refused"), httpx.ConnectError("refused"))
     with pytest.raises(ProviderError, match="refused"):
@@ -324,7 +354,9 @@ def test_refused_connection_records_each_attempt(fake_http):
 
 # Usage reaches the observer before the content is finalised, so a 200 whose content is then
 # rejected still leaves its tokens and cost on record.
-def test_usage_kept_when_finalize_fails(fake_http, monkeypatch):
+def test_usage_kept_when_finalize_fails(
+    fake_http: FakeHttp, monkeypatch: pytest.MonkeyPatch
+) -> None:
     records: list[AttemptUsage] = []
     fake_http.reply(
         _openai_body(
@@ -340,7 +372,9 @@ def test_usage_kept_when_finalize_fails(fake_http, monkeypatch):
 
 
 # The gate blocks before any request is sent, so no attempt is recorded.
-def test_gate_blocks_before_any_record(fake_http, monkeypatch):
+def test_gate_blocks_before_any_record(
+    fake_http: FakeHttp, monkeypatch: pytest.MonkeyPatch
+) -> None:
     records: list[AttemptUsage] = []
     secret = "AKIA" + "ABCDEFGHIJKLMNOP"
     with pytest.raises(ProviderError, match="Blocked cloud call"):
@@ -350,8 +384,8 @@ def test_gate_blocks_before_any_record(fake_http, monkeypatch):
 
 
 # An observer that raises changes neither the output nor the number of attempts.
-def test_failing_observer_is_swallowed(fake_http):
-    def explode(usage):
+def test_failing_observer_is_swallowed(fake_http: FakeHttp) -> None:
+    def explode(usage: AttemptUsage) -> None:
         raise RuntimeError("observer broke")
 
     fake_http.reply(_OLLAMA_BODY)
@@ -366,8 +400,8 @@ def test_failing_observer_is_swallowed(fake_http):
 
 # A parser that fails on an unexpected body still leaves the transport facts on record,
 # with no tokens and an unknown cost.
-def test_failing_parser_keeps_the_transport_record():
-    def parse(body, usage):
+def test_failing_parser_keeps_the_transport_record() -> None:
+    def parse(body: Mapping[str, object], usage: AttemptUsage) -> AttemptUsage:
         raise ValueError("bad body")
 
     records: list[AttemptUsage] = []
@@ -377,7 +411,7 @@ def test_failing_parser_keeps_the_transport_record():
 
 
 # A cost too large for a float is invalid, not a crash: the attempt keeps its tokens.
-def test_huge_cost_is_dropped(fake_http, monkeypatch):
+def test_huge_cost_is_dropped(fake_http: FakeHttp, monkeypatch: pytest.MonkeyPatch) -> None:
     records: list[AttemptUsage] = []
     fake_http.reply(
         _openai_body(usage={"prompt_tokens": 5, "completion_tokens": 7, "cost": 10**400})
@@ -390,12 +424,14 @@ def test_huge_cost_is_dropped(fake_http, monkeypatch):
 
 # The observer's time is not charged to the time limit: a slow one (seen through a fake
 # clock) does not cost the call its retry.
-def test_slow_observer_keeps_the_retry(fake_http, monkeypatch):
+def test_slow_observer_keeps_the_retry(
+    fake_http: FakeHttp, monkeypatch: pytest.MonkeyPatch
+) -> None:
     clock = [1000.0]
     monkeypatch.setattr(base, "time", SimpleNamespace(monotonic=lambda: clock[0]))
     records: list[AttemptUsage] = []
 
-    def slow(usage):
+    def slow(usage: AttemptUsage) -> None:
         records.append(usage)
         clock[0] += 100  # far longer than the whole 30 s time limit
 
@@ -421,7 +457,11 @@ def test_slow_observer_keeps_the_retry(fake_http, monkeypatch):
         ),
     ],
 )
-def test_observer_does_not_change_the_request(fake_http, build, body):
+def test_observer_does_not_change_the_request(
+    fake_http: FakeHttp,
+    build: Callable[[UsageObserver | None], Provider],
+    body: dict[str, Any],
+) -> None:
     fake_http.reply(body)
     records: list[AttemptUsage] = []
     assert build(None).generate("d", "s") == build(records.append).generate("d", "s") == "ok"
@@ -434,7 +474,9 @@ def test_observer_does_not_change_the_request(fake_http, build, body):
 
 
 # No record ever holds the prompt, the response, the API key, the persona or an error body.
-def test_records_hold_no_sensitive_text(fake_http, monkeypatch):
+def test_records_hold_no_sensitive_text(
+    fake_http: FakeHttp, monkeypatch: pytest.MonkeyPatch
+) -> None:
     prompt = "please rewrite promptsentinel draft"
     response = "RESPONSE-SENTINEL-9a2c"
     persona = "PERSONA-SENTINEL-77b0"
@@ -461,7 +503,7 @@ def test_records_hold_no_sensitive_text(fake_http, monkeypatch):
 
 # The trigger path never loads decimal: it is imported only where a cost is parsed, which
 # needs an observer.
-def test_trigger_path_does_not_import_decimal():
+def test_trigger_path_does_not_import_decimal() -> None:
     import subprocess
     import sys
 

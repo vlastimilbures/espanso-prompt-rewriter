@@ -1,13 +1,19 @@
+from __future__ import annotations
+
 import itertools
 import re
 import shutil
 import subprocess
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from bench_module import bench
 
 from prompt_workflow.config import env_names
+
+if TYPE_CHECKING:
+    from typer._click import Command, Context
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -21,7 +27,7 @@ def _readme_config_rows() -> set[str]:
 # out with its default, except the key and persona), so a new variable cannot ship
 # undocumented.
 @pytest.mark.parametrize("name", env_names())
-def test_setting_is_documented(name):
+def test_setting_is_documented(name: str) -> None:
     assert name in _readme_config_rows(), f"{name} missing from README configuration table"
     example = (REPO / ".env.example").read_text("utf-8")
     assert re.search(rf"^#? ?{name}=", example, re.MULTILINE), f"{name} missing from .env.example"
@@ -29,13 +35,13 @@ def test_setting_is_documented(name):
 
 # The README table documents nothing Settings does not read (PROMPT_WORKFLOW_ENV is read
 # by the .env loader itself).
-def test_readme_documents_no_stale_settings():
+def test_readme_documents_no_stale_settings() -> None:
     assert _readme_config_rows() - {*env_names(), "PROMPT_WORKFLOW_ENV"} == set()
 
 
 # Every bench output directory the docs mention, and the bench's own default, is gitignored, so
 # following the docs cannot commit outputs (with --persona env they hold a private persona).
-def test_documented_bench_outdirs_are_ignored():
+def test_documented_bench_outdirs_are_ignored() -> None:
     git = shutil.which("git")
     inside = git and subprocess.run([git, "rev-parse"], cwd=REPO, capture_output=True).returncode
     if git is None or inside != 0:
@@ -51,7 +57,7 @@ def test_documented_bench_outdirs_are_ignored():
 
 # CONTRIBUTING's project tree names every module of the package (commands/ and tui/ are listed
 # as folders), so a new module cannot be left out of the map.
-def test_contributing_tree_lists_every_module():
+def test_contributing_tree_lists_every_module() -> None:
     contributing = (REPO / "CONTRIBUTING.md").read_text("utf-8")
     tree = contributing[contributing.index("├── src/prompt_workflow/") :]
     tree = tree[: tree.index("├── scripts/")]
@@ -101,7 +107,7 @@ def _changelog_notes(changelog: str) -> str:
     raise AssertionError("CHANGELOG.md has no released version")
 
 
-def test_changelog_notes_add_the_newest_release():
+def test_changelog_notes_add_the_newest_release() -> None:
     released = (
         "## 1.1.0 - 2026-10-02\n\n- `prompt-workflow doctor`\n\n## 1.0.0 - 2026-10-01\n\n- y\n"
     )
@@ -114,7 +120,7 @@ def test_changelog_notes_add_the_newest_release():
         assert notes.split() == " ".join(expected).split()
 
 
-def _cli():
+def _cli() -> tuple[Command, Context]:
     import typer
 
     from prompt_workflow import cli
@@ -127,7 +133,7 @@ def _cli():
 # newest notes) names exists in the CLI, so a renamed command or option cannot leave the
 # docs behind. Walks the Click tree; the lazy commands load their modules, never textual.
 @pytest.mark.parametrize("doc", ["README.md", "CHANGELOG.md"])
-def test_documented_commands_and_flags_exist(doc):
+def test_documented_commands_and_flags_exist(doc: str) -> None:
     import typer
 
     root, ctx = _cli()
@@ -150,16 +156,18 @@ def test_documented_commands_and_flags_exist(doc):
 
 # A code span that is only options (`--keep-static`, `--yes --preview-token <token>`) names
 # options of some command: each must exist somewhere in the CLI.
-def test_standalone_readme_flags_exist():
+def test_standalone_readme_flags_exist() -> None:
     import typer
 
     root, ctx = _cli()
 
-    def options(command) -> set[str]:
+    def options(command: Command) -> set[str]:
         names = {o for p in command.params for o in (*p.opts, *p.secondary_opts)}
         if isinstance(command, typer.core.TyperGroup):
             for name in command.list_commands(ctx):
-                names |= options(command.get_command(ctx, name))
+                sub = command.get_command(ctx, name)
+                assert sub is not None, name
+                names |= options(sub)
         return names
 
     known = {"--help", *options(root), *_OTHER_TOOLS_FLAGS}
@@ -170,7 +178,7 @@ def test_standalone_readme_flags_exist():
             assert flag in known, f"README: `{span}`: no option {flag} in the CLI"
 
 
-def test_readme_has_no_package_placeholders():
+def test_readme_has_no_package_placeholders() -> None:
     readme = (REPO / "README.md").read_text("utf-8")
     for placeholder in ("<owner>/<tap>", "<bucket>", "<Publisher.Package>"):
         assert placeholder not in readme
@@ -190,7 +198,7 @@ def _result_headings() -> list[str]:
     return re.findall(r"^### (.+)$", results.group(1), re.MULTILINE)
 
 
-def test_benchmark_prompt_pin_is_current():
+def test_benchmark_prompt_pin_is_current() -> None:
     import hashlib
 
     prompt = (REPO / "src" / "prompt_workflow" / "prompts" / "default.md").read_bytes()
@@ -202,7 +210,7 @@ def test_benchmark_prompt_pin_is_current():
 
 # Every results table names the prompt version it scored, newest first, and the newest scores
 # the current prompt, so a table cannot pass for the current prompt's after a prompt change.
-def test_benchmark_results_name_their_prompt_version():
+def test_benchmark_results_name_their_prompt_version() -> None:
     headings = _result_headings()
     assert headings, "docs/benchmark.md lists no results"
     versions = []
@@ -214,7 +222,7 @@ def test_benchmark_results_name_their_prompt_version():
     assert versions == sorted(versions, reverse=True), "results are not newest first"
 
 
-def test_readme_benchmark_summary_links_the_details():
+def test_readme_benchmark_summary_links_the_details() -> None:
     readme = (REPO / "README.md").read_text("utf-8")
     section = re.search(r"^## Model benchmark\n(.*?)(?=^## )", readme, re.MULTILINE | re.DOTALL)
     assert section, "README lost its '## Model benchmark' section (#model-benchmark links)"

@@ -15,8 +15,10 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from collections.abc import Callable
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -58,7 +60,7 @@ _MESSAGES = {
     "profiles": (doctor.OK, "PROMPT_PROFILE default resolves"),
     "previous_install": (doctor.OK, "settings are in place; nothing to look for"),
 }
-_DATA = {
+_DATA: dict[str, dict[str, Any]] = {
     "history": {"lost_writes": 0, "last_lost_utc": None, "tracking_incomplete": False},
     "sqlite": {"version": "3.51.3", "wal_reset_bug": False},
 }
@@ -175,7 +177,7 @@ def previous_state(group_by: str = "trigger") -> State:
 
 
 @pytest.fixture(autouse=True)
-def fixed_paths(monkeypatch):
+def fixed_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     """The paths a pane reads itself (the history file, the profile folder) are fixed too,
     and so is the version in the header."""
     monkeypatch.setattr(app_module, "__version__", VERSION)
@@ -204,11 +206,13 @@ def _check(name: str, svg: str, *also: Path) -> None:
         )
 
 
-def _shoot(key: str | None, theme: str | None = None, loader=fixed_state) -> str:
+def _shoot(
+    key: str | None, theme: str | None = None, loader: Callable[[str], State] = fixed_state
+) -> str:
     app = ManageApp(loader=loader)
     # The active tab's underline slides into place; a snapshot must not catch it midway.
     app.animation_level = "none"
-    shots = []
+    shots: list[str] = []
 
     async def main() -> None:
         async with app.run_test(size=SIZE) as pilot:
@@ -237,13 +241,13 @@ def _shoot(key: str | None, theme: str | None = None, loader=fixed_state) -> str
         ("diagnostics", "6"),
     ],
 )
-def test_snapshot(name, key):
+def test_snapshot(name: str, key: str) -> None:
     _check(name, _shoot(key), *([README_SHOT] if name == "home" else []))
 
 
-def test_snapshot_high_contrast():
+def test_snapshot_high_contrast() -> None:
     _check("home-high-contrast", _shoot("1", HIGH_CONTRAST.name))
 
 
-def test_snapshot_previous_install():
+def test_snapshot_previous_install() -> None:
     _check("previous-install", _shoot(None, loader=previous_state))

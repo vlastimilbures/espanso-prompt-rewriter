@@ -2,9 +2,13 @@
 attempt per HTTP attempt, the outcome of each kind of failure, the --trigger-id allowlist, and
 that nothing about history changes what a trigger pastes."""
 
+from __future__ import annotations
+
 import contextlib
 import sqlite3
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, NoReturn
 
 import pyperclip
 import pytest
@@ -14,6 +18,9 @@ from prompt_workflow import history, recorder
 from prompt_workflow.cli import app
 from prompt_workflow.history import HistoryStore
 from prompt_workflow.providers.usage import AttemptUsage
+
+if TYPE_CHECKING:
+    from conftest import FakeHttp, HistoryRows, SeedHistory, StubProvider
 
 runner = CliRunner()
 
@@ -28,24 +35,24 @@ REPLY = {
 
 
 @pytest.fixture
-def cloud(monkeypatch):
+def cloud(monkeypatch: pytest.MonkeyPatch) -> None:
     # Built at runtime, so no key-shaped literal lands in the repo.
     monkeypatch.setenv("OPENROUTER_API_KEY", "-".join(("test", "key")))
 
 
-def _run(args):
+def _run(args: list[str]) -> str:
     result = runner.invoke(app, args)
     assert result.exit_code == 0
     return result.stdout
 
 
-def _only_op(history_rows):
+def _only_op(history_rows: HistoryRows) -> dict[str, Any]:
     (op,) = history_rows("operations")
     return op
 
 
 # A terminal call with no --trigger-id is direct; the operation keeps no draft or output.
-def test_direct_call_is_recorded(stub_provider, history_rows):
+def test_direct_call_is_recorded(stub_provider: StubProvider, history_rows: HistoryRows) -> None:
     assert _run(LOCAL) == "improved"
     op = _only_op(history_rows)
     assert (op["origin"], op["trigger_id"], op["kind"], op["outcome"]) == (
@@ -72,7 +79,13 @@ def test_direct_call_is_recorded(stub_provider, history_rows):
         ("", "espanso_managed", None),
     ],
 )
-def test_trigger_id_allowlist(stub_provider, history_rows, value, origin, stored):
+def test_trigger_id_allowlist(
+    stub_provider: StubProvider,
+    history_rows: HistoryRows,
+    value: str,
+    origin: str,
+    stored: str | None,
+) -> None:
     # An unknown value is recorded unattributed (managed, no trigger), apart from a terminal
     # call (no option), and never fails the run.
     assert _run([*LOCAL, "--trigger-id", value]) == "improved"
@@ -80,7 +93,7 @@ def test_trigger_id_allowlist(stub_provider, history_rows, value, origin, stored
     assert (op["origin"], op["trigger_id"]) == (origin, stored)
 
 
-def test_attribution_covers_the_allowlist():
+def test_attribution_covers_the_allowlist() -> None:
     assert [recorder.attribution(t)[1] for t in recorder.TRIGGER_IDS] == [
         "-i-",
         "-iok-",
@@ -94,18 +107,18 @@ def test_attribution_covers_the_allowlist():
 
 
 # The trigger is never inferred from the other options, however much they look like one.
-def test_trigger_is_never_inferred(stub_provider, history_rows):
+def test_trigger_is_never_inferred(stub_provider: StubProvider, history_rows: HistoryRows) -> None:
     _run([*CLOUD, "--allow-flagged", "--tier", "pro"])
     op = _only_op(history_rows)
     assert (op["origin"], op["trigger_id"]) == ("direct", None)
 
 
-def test_trigger_id_is_hidden_from_help():
+def test_trigger_id_is_hidden_from_help() -> None:
     result = runner.invoke(app, ["improve", "--help"])
     assert "--trigger-id" not in result.stdout
 
 
-def test_persona_is_recorded(history_rows):
+def test_persona_is_recorded(history_rows: HistoryRows) -> None:
     assert _run(["persona"]) == "I am working as [role] in [company]."
     op = _only_op(history_rows)
     assert (op["kind"], op["origin"], op["profile_id"], op["outcome"]) == (
@@ -117,7 +130,9 @@ def test_persona_is_recorded(history_rows):
 
 
 # A successful cloud call: one operation and its attempt with tokens and the reported charge.
-def test_cloud_call_records_its_attempt(cloud, fake_http, history_rows):
+def test_cloud_call_records_its_attempt(
+    cloud: None, fake_http: FakeHttp, history_rows: HistoryRows
+) -> None:
     fake_http.reply(REPLY)
     assert _run([*CLOUD, "--trigger-id", "i"]) == "rewrite"
     op = _only_op(history_rows)
@@ -134,7 +149,9 @@ def test_cloud_call_records_its_attempt(cloud, fake_http, history_rows):
 
 
 # A retried call is one operation with two attempts.
-def test_retry_adds_two_attempts_to_one_operation(cloud, fake_http, history_rows):
+def test_retry_adds_two_attempts_to_one_operation(
+    cloud: None, fake_http: FakeHttp, history_rows: HistoryRows
+) -> None:
     fake_http.queue({"status_code": 429, "json_data": {"error": {"message": "slow down"}}})
     fake_http.reply(REPLY)
     assert _run(CLOUD) == "rewrite"
@@ -144,11 +161,11 @@ def test_retry_adds_two_attempts_to_one_operation(cloud, fake_http, history_rows
     assert {a["operation_id"] for a in attempts} == {op["id"]}
 
 
-def _outcome(history_rows):
+def _outcome(history_rows: HistoryRows) -> Any:
     return _only_op(history_rows)["outcome"]
 
 
-def test_error_marker_outcome(cloud, fake_http, history_rows):
+def test_error_marker_outcome(cloud: None, fake_http: FakeHttp, history_rows: HistoryRows) -> None:
     fake_http.reply({"error": {"message": "bad key"}}, status_code=401)
     assert _run(CLOUD).startswith("[prompt-workflow: OpenRouter returned HTTP 401")
     assert _outcome(history_rows) == "error_marker"
@@ -156,26 +173,30 @@ def test_error_marker_outcome(cloud, fake_http, history_rows):
     assert (at["status"], at["error_kind"]) == (401, "non_2xx")
 
 
-def test_override_error_is_recorded(stub_provider, history_rows):
+def test_override_error_is_recorded(stub_provider: StubProvider, history_rows: HistoryRows) -> None:
     # Settings loaded, so PROMPT_HISTORY is known; the call's own option was bad.
     assert _run([*LOCAL, "--timeout", "soon"]).startswith("[prompt-workflow: ")
     assert _outcome(history_rows) == "error_marker"
 
 
 # --tier pro on a local provider is refused before any call: an error marker, no attempt.
-def test_openrouter_only_refusal_is_recorded(fake_http, history_rows):
+def test_openrouter_only_refusal_is_recorded(
+    fake_http: FakeHttp, history_rows: HistoryRows
+) -> None:
     assert _run([*LOCAL, "--tier", "pro"]).startswith("[prompt-workflow: --tier pro applies")
     assert _outcome(history_rows) == "error_marker"
     assert history_rows("attempts") == []
     assert fake_http.requests == []
 
 
-def test_empty_input_is_an_error_marker(stub_provider, history_rows):
+def test_empty_input_is_an_error_marker(
+    stub_provider: StubProvider, history_rows: HistoryRows
+) -> None:
     _run(["improve", "--provider", "ollama", "--source", "argument", "--text", "  "])
     assert _outcome(history_rows) == "error_marker"
 
 
-def test_gate_blocked_outcome(cloud, fake_http, history_rows):
+def test_gate_blocked_outcome(cloud: None, fake_http: FakeHttp, history_rows: HistoryRows) -> None:
     draft = "CONFIDENTIAL: summarise the board minutes"
     out = _run(["improve", "--provider", "openrouter", "--source", "argument", "--text", draft])
     assert out.startswith("[prompt-workflow: Blocked cloud call.")
@@ -185,27 +206,33 @@ def test_gate_blocked_outcome(cloud, fake_http, history_rows):
 
 
 # The other data-protection refusals count as gate_blocked too; the markers are unchanged.
-def test_local_only_refusal_is_gate_blocked(monkeypatch, cloud, history_rows):
+def test_local_only_refusal_is_gate_blocked(
+    monkeypatch: pytest.MonkeyPatch, cloud: None, history_rows: HistoryRows
+) -> None:
     monkeypatch.setenv("PROMPT_LOCAL_ONLY", "true")
     refusal = "PROMPT_LOCAL_ONLY=true: openrouter would send the draft off this machine"
     assert _run(CLOUD) == f"[prompt-workflow: {refusal}]"
     assert _outcome(history_rows) == "gate_blocked"
 
 
-def test_plaintext_cloud_url_is_gate_blocked(monkeypatch, cloud, fake_http, history_rows):
+def test_plaintext_cloud_url_is_gate_blocked(
+    monkeypatch: pytest.MonkeyPatch, cloud: None, fake_http: FakeHttp, history_rows: HistoryRows
+) -> None:
     monkeypatch.setenv("OPENROUTER_BASE_URL", "http://openrouter.example/api/v1")
     assert _run(CLOUD) == "[prompt-workflow: OPENROUTER_BASE_URL must be an https:// URL]"
     assert _outcome(history_rows) == "gate_blocked"
     assert fake_http.requests == []
 
 
-def test_missing_key_is_an_error_marker(fake_http, history_rows):
+def test_missing_key_is_an_error_marker(fake_http: FakeHttp, history_rows: HistoryRows) -> None:
     assert _run(CLOUD) == "[prompt-workflow: OPENROUTER_API_KEY is not configured]"
     assert _outcome(history_rows) == "error_marker"
 
 
 # A 2xx reply whose content is rejected: the marker is pasted, and the charge is kept.
-def test_validation_failed_keeps_the_charge(cloud, fake_http, history_rows):
+def test_validation_failed_keeps_the_charge(
+    cloud: None, fake_http: FakeHttp, history_rows: HistoryRows
+) -> None:
     empty = {**REPLY, "choices": [{"message": {"content": ""}, "finish_reason": "stop"}]}
     fake_http.reply(empty)
     assert _run(CLOUD) == "[prompt-workflow: OpenRouter returned empty content]"
@@ -214,15 +241,19 @@ def test_validation_failed_keeps_the_charge(cloud, fake_http, history_rows):
     assert (at["charged_amount"], at["output"]) == ("0.0002", 5)
 
 
-def test_malformed_reply_is_validation_failed(cloud, fake_http, history_rows):
+def test_malformed_reply_is_validation_failed(
+    cloud: None, fake_http: FakeHttp, history_rows: HistoryRows
+) -> None:
     fake_http.reply({"choices": []})
     assert _run(CLOUD) == "[prompt-workflow: OpenRouter response was malformed]"
     assert _outcome(history_rows) == "validation_failed"
 
 
 # --copy fails after a charged reply: the marker is pasted, and the charge is kept.
-def test_clipboard_failure_after_charged_reply(monkeypatch, cloud, fake_http, history_rows):
-    def broken(text):
+def test_clipboard_failure_after_charged_reply(
+    monkeypatch: pytest.MonkeyPatch, cloud: None, fake_http: FakeHttp, history_rows: HistoryRows
+) -> None:
+    def broken(text: str) -> None:
         raise pyperclip.PyperclipException("no clipboard")
 
     monkeypatch.setattr(pyperclip, "copy", broken)
@@ -233,8 +264,10 @@ def test_clipboard_failure_after_charged_reply(monkeypatch, cloud, fake_http, hi
     assert at["charged_amount"] == "0.0002"
 
 
-def test_clipboard_read_failure(monkeypatch, stub_provider, history_rows):
-    def broken():
+def test_clipboard_read_failure(
+    monkeypatch: pytest.MonkeyPatch, stub_provider: StubProvider, history_rows: HistoryRows
+) -> None:
+    def broken() -> None:
         raise pyperclip.PyperclipException("no clipboard")
 
     monkeypatch.setattr(pyperclip, "paste", broken)
@@ -242,7 +275,9 @@ def test_clipboard_read_failure(monkeypatch, stub_provider, history_rows):
     assert _outcome(history_rows) == "clipboard_failed"
 
 
-def test_concealed_refused_outcome(monkeypatch, stub_provider, history_rows):
+def test_concealed_refused_outcome(
+    monkeypatch: pytest.MonkeyPatch, stub_provider: StubProvider, history_rows: HistoryRows
+) -> None:
     import prompt_workflow.cli as cli
 
     monkeypatch.setattr(cli, "is_concealed", lambda: True)
@@ -252,7 +287,7 @@ def test_concealed_refused_outcome(monkeypatch, stub_provider, history_rows):
     assert not stub_provider.calls
 
 
-def test_unexpected_error_outcome(stub_provider, history_rows):
+def test_unexpected_error_outcome(stub_provider: StubProvider, history_rows: HistoryRows) -> None:
     stub_provider.exc = RuntimeError("kaput")
     assert _run(LOCAL) == "[prompt-workflow: unexpected error: kaput]"
     assert _outcome(history_rows) == "unexpected_error"
@@ -260,14 +295,24 @@ def test_unexpected_error_outcome(stub_provider, history_rows):
 
 # Settings that do not load leave PROMPT_HISTORY unknown, so nothing is recorded.
 @pytest.mark.parametrize("args", [LOCAL, ["persona"]], ids=["improve", "persona"])
-def test_settings_error_records_nothing(monkeypatch, stub_provider, history_rows, args):
+def test_settings_error_records_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+    stub_provider: StubProvider,
+    history_rows: HistoryRows,
+    args: list[str],
+) -> None:
     monkeypatch.setenv("PROMPT_LOCAL_ONLY", "maybe")
     _run(args)
     assert not history.history_path().exists()
 
 
 @pytest.mark.parametrize("args", [LOCAL, ["persona"]], ids=["improve", "persona"])
-def test_history_off_records_nothing(monkeypatch, stub_provider, history_rows, args):
+def test_history_off_records_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+    stub_provider: StubProvider,
+    history_rows: HistoryRows,
+    args: list[str],
+) -> None:
     monkeypatch.setenv("PROMPT_HISTORY", "false")
     _run(args)
     assert not history.history_path().parent.exists()
@@ -277,7 +322,7 @@ def test_history_off_records_nothing(monkeypatch, stub_provider, history_rows, a
 
 # A history that cannot be written changes neither the paste nor the exit code, and never
 # makes the provider call again.
-def test_locked_history_changes_nothing(cloud, fake_http):
+def test_locked_history_changes_nothing(cloud: None, fake_http: FakeHttp) -> None:
     fake_http.reply(REPLY)
     assert _run(CLOUD) == "rewrite"  # creates the database
     path = history.history_path()
@@ -289,8 +334,10 @@ def test_locked_history_changes_nothing(cloud, fake_http):
     assert HistoryStore(path).health().lost_writes == 1
 
 
-def test_failing_history_changes_nothing(monkeypatch, cloud, fake_http):
-    def explode(*args, **kwargs):
+def test_failing_history_changes_nothing(
+    monkeypatch: pytest.MonkeyPatch, cloud: None, fake_http: FakeHttp
+) -> None:
+    def explode(*args: Any, **kwargs: Any) -> None:
         raise OSError("read-only file system")
 
     monkeypatch.setattr(HistoryStore, "record", explode)
@@ -303,7 +350,9 @@ def test_failing_history_changes_nothing(monkeypatch, cloud, fake_http):
     assert len(fake_http.requests) == 1
 
 
-def test_read_only_history_dir_changes_nothing(monkeypatch, stub_provider, tmp_path):
+def test_read_only_history_dir_changes_nothing(
+    monkeypatch: pytest.MonkeyPatch, stub_provider: StubProvider, tmp_path: Path
+) -> None:
     blocker = tmp_path / "blocked"
     blocker.write_text("not a directory", encoding="utf-8")
     monkeypatch.setenv("XDG_DATA_HOME", str(blocker))
@@ -312,7 +361,9 @@ def test_read_only_history_dir_changes_nothing(monkeypatch, stub_provider, tmp_p
 
 
 # Writing the same run twice (a retried write) never duplicates a row.
-def test_finishing_twice_writes_once(monkeypatch, history_rows):
+def test_finishing_twice_writes_once(
+    monkeypatch: pytest.MonkeyPatch, history_rows: HistoryRows
+) -> None:
     from prompt_workflow.config import Settings
 
     rec = recorder.Recorder("improve", "i")
@@ -328,7 +379,12 @@ def test_finishing_twice_writes_once(monkeypatch, history_rows):
 
 
 # Each recorded run also prunes, a batch at a time, what is older than the retention.
-def test_recording_prunes_old_operations(monkeypatch, stub_provider, history_rows, seed_history):
+def test_recording_prunes_old_operations(
+    monkeypatch: pytest.MonkeyPatch,
+    stub_provider: StubProvider,
+    history_rows: HistoryRows,
+    seed_history: SeedHistory,
+) -> None:
     monkeypatch.setattr(history, "_PRUNE_BATCH", 2)
     old = datetime.now(UTC) - timedelta(days=400)
     for _ in range(3):
@@ -349,7 +405,12 @@ def test_recording_prunes_old_operations(monkeypatch, stub_provider, history_row
     assert history_rows("attempts") == []
 
 
-def test_retention_setting_drives_the_prune(monkeypatch, stub_provider, history_rows, seed_history):
+def test_retention_setting_drives_the_prune(
+    monkeypatch: pytest.MonkeyPatch,
+    stub_provider: StubProvider,
+    history_rows: HistoryRows,
+    seed_history: SeedHistory,
+) -> None:
     monkeypatch.setenv("PROMPT_HISTORY_RETENTION_DAYS", "5")
     op = {
         "id": history.new_operation_id(),
@@ -365,15 +426,17 @@ def test_retention_setting_drives_the_prune(monkeypatch, stub_provider, history_
 
 # Clipboard output (#134): a success is still `ok`; a failed copy, whose rewrite is pasted
 # after the marker instead, is `clipboard_failed` with the charge kept.
-def test_clipboard_output_outcomes(monkeypatch, cloud, fake_http, history_rows):
+def test_clipboard_output_outcomes(
+    monkeypatch: pytest.MonkeyPatch, cloud: None, fake_http: FakeHttp, history_rows: HistoryRows
+) -> None:
     monkeypatch.setenv("PROMPT_OUTPUT", "clipboard")
-    copied = []
+    copied: list[str] = []
     monkeypatch.setattr(pyperclip, "copy", copied.append)
     fake_http.reply(REPLY)
     assert _run(CLOUD) == ""
     assert copied == ["rewrite"]
 
-    def broken(text):
+    def broken(text: str) -> NoReturn:
         raise pyperclip.PyperclipException("no clipboard")
 
     monkeypatch.setattr(pyperclip, "copy", broken)

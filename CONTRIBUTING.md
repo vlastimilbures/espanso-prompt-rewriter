@@ -32,7 +32,7 @@ Run these before opening a pull request. CI runs the same, except that it runs t
 ```bash
 uv run pytest                                   # unit tests, no network
 uv run ruff check . && uv run ruff format --check .
-uv run mypy                                     # strict, src and scripts
+uv run mypy                                     # strict: src, scripts and tests
 uv run pre-commit run --all-files               # also YAML checks, gitleaks and zizmor
 ```
 

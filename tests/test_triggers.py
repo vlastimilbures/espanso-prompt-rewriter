@@ -2,9 +2,12 @@
 would send: provider, profile (via the system prompt) and tier settings. Testing each option
 on its own missed that a trigger's explicit --profile overrode the tier's profile."""
 
+from __future__ import annotations
+
 import re
 import shlex
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import pytest
 import yaml
@@ -14,13 +17,16 @@ from prompt_workflow.cli import app
 from prompt_workflow.config import Settings
 from prompt_workflow.prompt_builder import PROFILES, system_prompt
 
+if TYPE_CHECKING:
+    from conftest import HistoryRows, StubProvider
+
 MATCH_DIR = Path(__file__).parents[1] / "espanso" / "match"
 runner = CliRunner()
 
 
-def _improve_commands() -> dict[str, tuple[str, dict]]:
+def _improve_commands() -> dict[str, tuple[str, dict[str, Any]]]:
     """trigger -> (shell cmd, form fields by form name) for every match that runs improve."""
-    commands = {}
+    commands: dict[str, tuple[str, dict[str, Any]]] = {}
     for path in sorted(MATCH_DIR.glob("*.yml")):
         for match in yaml.safe_load(path.read_text(encoding="utf-8"))["matches"]:
             vars_ = match.get("vars", [])
@@ -62,7 +68,7 @@ def _argv(trigger: str, **picks: str) -> list[str]:
     return argv[1:]
 
 
-def _replay(stub, trigger: str, **picks: str) -> tuple[str, Settings, str]:
+def _replay(stub: StubProvider, trigger: str, **picks: str) -> tuple[str, Settings, str]:
     """(provider name, settings, system prompt) the trigger's command hands the provider."""
     stub.built.clear()
     stub.options.clear()
@@ -81,13 +87,13 @@ def _profile(prompt: str) -> str:
 
 
 # Every trigger that runs improve has an expected row, so a new one cannot skip this test.
-def test_every_improve_trigger_is_expected():
+def test_every_improve_trigger_is_expected() -> None:
     assert set(COMMANDS) == set(EXPECTED)
 
 
 # Each trigger builds its provider with the expected profile and tier settings.
 @pytest.mark.parametrize("trigger", list(EXPECTED))
-def test_trigger_request(stub_provider, trigger):
+def test_trigger_request(stub_provider: StubProvider, trigger: str) -> None:
     provider, profile, tier = EXPECTED[trigger]
     name, cfg, prompt = _replay(stub_provider, trigger)
     base = Settings()
@@ -106,7 +112,9 @@ def test_trigger_request(stub_provider, trigger):
 
 # OPENROUTER_PRO_MAX_TOKENS reaches the pro triggers only; the -if- popup's max tokens pick
 # beats it and its `default` keeps it (#31).
-def test_pro_max_tokens_reach_triggers(monkeypatch, stub_provider):
+def test_pro_max_tokens_reach_triggers(
+    monkeypatch: pytest.MonkeyPatch, stub_provider: StubProvider
+) -> None:
     monkeypatch.setenv("OPENROUTER_PRO_MAX_TOKENS", "4000")
     for trigger, (_, _, tier) in EXPECTED.items():
         _, cfg, _ = _replay(stub_provider, trigger)
@@ -129,7 +137,7 @@ IF_MODEL_PROFILES = {
 
 
 @pytest.mark.parametrize(("model", "profile"), list(IF_MODEL_PROFILES.items()))
-def test_if_profile_follows_model(stub_provider, model, profile):
+def test_if_profile_follows_model(stub_provider: StubProvider, model: str, profile: str) -> None:
     _, cfg, prompt = _replay(stub_provider, "-if-", model=model)
     slug, _, endpoint = model.partition("@")
     assert _profile(prompt) == profile
@@ -141,7 +149,9 @@ def test_if_profile_follows_model(stub_provider, model, profile):
 
 # The popup's `default` model keeps the OPENROUTER_PRO_* model and endpoint, whatever they are
 # set to, and with them PROMPT_PRO_PROFILE.
-def test_if_default_model_keeps_pro_settings(monkeypatch, stub_provider):
+def test_if_default_model_keeps_pro_settings(
+    monkeypatch: pytest.MonkeyPatch, stub_provider: StubProvider
+) -> None:
     monkeypatch.setenv("OPENROUTER_PRO_MODEL", "vendor/custom-model")
     monkeypatch.setenv("OPENROUTER_PRO_PROVIDER", "custom-endpoint")
     monkeypatch.setenv("PROMPT_PRO_PROFILE", "general")
@@ -154,7 +164,7 @@ def test_if_default_model_keeps_pro_settings(monkeypatch, stub_provider):
 
 
 # The table above covers every model the -if- popup offers.
-def test_if_model_choices_are_covered():
+def test_if_model_choices_are_covered() -> None:
     _, forms = COMMANDS["-if-"]
     assert set(forms["form1"]["model"]["values"]) == set(IF_MODEL_PROFILES)
 
@@ -196,7 +206,14 @@ def test_if_model_choices_are_covered():
         "il-keeps-general",
     ],
 )
-def test_profile_settings_reach_triggers(monkeypatch, stub_provider, env, trigger, picks, profile):
+def test_profile_settings_reach_triggers(
+    monkeypatch: pytest.MonkeyPatch,
+    stub_provider: StubProvider,
+    env: dict[str, str],
+    trigger: str,
+    picks: dict[str, str],
+    profile: str,
+) -> None:
     for key, value in env.items():
         monkeypatch.setenv(key, value)
     _, _, prompt = _replay(stub_provider, trigger, **picks)
@@ -204,7 +221,7 @@ def test_profile_settings_reach_triggers(monkeypatch, stub_provider, env, trigge
 
 
 # An explicit --profile beats the tier's profile, so no pro-tier trigger may pass one.
-def test_pro_triggers_pass_no_profile():
+def test_pro_triggers_pass_no_profile() -> None:
     for trigger, (cmd, _) in COMMANDS.items():
         if re.search(r"--tier[ =]pro\b", cmd):
             assert "--profile" not in cmd, trigger
@@ -213,7 +230,7 @@ def test_pro_triggers_pass_no_profile():
 # Only -iok- sends a flagged draft per call; every other trigger keeps the gate's block.
 # (Each build also gets the usage-history observer, so only allow_flagged is compared.)
 @pytest.mark.parametrize("trigger", list(EXPECTED))
-def test_only_iok_allows_flagged(stub_provider, trigger):
+def test_only_iok_allows_flagged(stub_provider: StubProvider, trigger: str) -> None:
     _replay(stub_provider, trigger)
     assert [o["allow_flagged"] for o in stub_provider.options] == [trigger == "-iok-"]
     assert set(stub_provider.options[0]) == {"allow_flagged", "observer"}
@@ -221,7 +238,9 @@ def test_only_iok_allows_flagged(stub_provider, trigger):
 
 # Each trigger's real command is recorded once in the usage history, as that trigger.
 @pytest.mark.parametrize("trigger", list(EXPECTED))
-def test_trigger_is_recorded_as_itself(stub_provider, history_rows, trigger):
+def test_trigger_is_recorded_as_itself(
+    stub_provider: StubProvider, history_rows: HistoryRows, trigger: str
+) -> None:
     _replay(stub_provider, trigger)
     (op,) = history_rows("operations")
     assert (op["origin"], op["trigger_id"], op["kind"], op["outcome"]) == (
@@ -246,7 +265,7 @@ def _persona_argv() -> list[str]:
 
 
 # -p- is counted once, through persona: its one CLI call, recorded as -p-.
-def test_persona_trigger_is_recorded_once(history_rows):
+def test_persona_trigger_is_recorded_once(history_rows: HistoryRows) -> None:
     result = runner.invoke(app, _persona_argv())
     assert result.exit_code == 0
     (op,) = history_rows("operations")

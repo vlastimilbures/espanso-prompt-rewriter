@@ -1,16 +1,27 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable, Mapping, Sequence
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import httpx
 import pytest
 
-from prompt_workflow.config import env_names
+from prompt_workflow.config import Settings, env_names
 from prompt_workflow.providers import base
+
+if TYPE_CHECKING:
+    from prompt_workflow.history import HistoryStore
+
+# history_rows(table) lists that table of the per-test usage history as dicts.
+HistoryRows = Callable[[str], list[dict[str, Any]]]
+# seed_history(operation, attempts=(), store=None) writes one record and returns the store.
+SeedHistory = Callable[..., "HistoryStore"]
 
 
 @pytest.fixture(autouse=True)
-def isolated_env(tmp_path, monkeypatch):
+def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Prevent the real .env / shell environment from leaking into tests.
 
     Settings.load() reads the real environment and the first .env it finds (it never
@@ -43,7 +54,7 @@ def isolated_env(tmp_path, monkeypatch):
     # ...nor run the real espanso, uv or brew: a deploy test passes or patches in its own.
     import prompt_workflow.deploy as deploy
 
-    def refuse(argv):
+    def refuse(argv: list[str]) -> None:
         raise AssertionError(f"a test ran a real command: {argv}")
 
     monkeypatch.setattr(deploy, "run_command", refuse)
@@ -61,7 +72,13 @@ _HTTPX_OWN_HEADERS = frozenset(
 )
 
 
-def _response(json_data=None, *, status_code=200, bad_json=False, headers=None) -> httpx.Response:
+def _response(
+    json_data: Any = None,
+    *,
+    status_code: int = 200,
+    bad_json: bool = False,
+    headers: Mapping[str, str] | None = None,
+) -> httpx.Response:
     if bad_json:
         return httpx.Response(status_code, content=b"<html>not json", headers=headers)
     return httpx.Response(status_code, json={} if json_data is None else json_data, headers=headers)
@@ -75,25 +92,25 @@ class FakeHttp:
     the last ``reply()``. A queued item is ``_response()`` keyword arguments or an exception.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.requests: list[httpx.Request] = []
-        self.client_kwargs: list[dict] = []
+        self.client_kwargs: list[dict[str, Any]] = []
         # Each wait post_json made before a retry, in seconds; nothing really sleeps.
         self.sleeps: list[float] = []
         self.exc: Exception | None = None
-        self._queue: list = []
-        self._reply: dict = {}
+        self._queue: list[dict[str, Any] | Exception] = []
+        self._reply: dict[str, Any] = {}
 
-    def reply(self, json_data=None, **kwargs):
+    def reply(self, json_data: Any = None, **kwargs: Any) -> FakeHttp:
         self._reply = {"json_data": json_data, **kwargs}
         return self
 
-    def queue(self, *items):
+    def queue(self, *items: dict[str, Any] | Exception) -> FakeHttp:
         self._queue.extend(items)
         return self
 
     @property
-    def calls(self) -> list[dict]:
+    def calls(self) -> list[dict[str, Any]]:
         """Each request as {"url", "json", "headers"}; headers keep the case they were set in."""
         return [
             {
@@ -122,7 +139,7 @@ class FakeHttp:
 
 
 @pytest.fixture
-def fake_http(monkeypatch):
+def fake_http(monkeypatch: pytest.MonkeyPatch) -> FakeHttp:
     """Patch httpx.Client so every client uses a MockTransport; no test may reach the network.
 
     The patched client replaces any transport the code passes (post_json gives loopback URLs
@@ -132,7 +149,7 @@ def fake_http(monkeypatch):
     fake = FakeHttp()
     real_client = httpx.Client
 
-    def client(*args, **kwargs):
+    def client(*args: Any, **kwargs: Any) -> httpx.Client:
         assert not {"proxy", "mounts"} & kwargs.keys(), "fake_http cannot honour a proxy"
         fake.client_kwargs.append(kwargs)
         return real_client(*args, **{**kwargs, "transport": httpx.MockTransport(fake.handler)})
@@ -146,19 +163,19 @@ class StubProvider:
     """Stands in for cli.make_provider and the provider it builds: records each build
     and generate() call, and returns ``result`` or raises ``exc``."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.result = "improved"
-        self.exc = None
-        self.built = []
-        self.options = []
-        self.calls = []
+        self.exc: Exception | None = None
+        self.built: list[tuple[str, Settings]] = []
+        self.options: list[dict[str, Any]] = []
+        self.calls: list[dict[str, str]] = []
 
-    def __call__(self, name, cfg, **options):
+    def __call__(self, name: str, cfg: Settings, **options: Any) -> StubProvider:
         self.built.append((name, cfg))
         self.options.append(options)
         return self
 
-    def generate(self, prompt, system_prompt):
+    def generate(self, prompt: str, system_prompt: str) -> str:
         self.calls.append({"prompt": prompt, "system_prompt": system_prompt})
         if self.exc:
             raise self.exc
@@ -166,7 +183,7 @@ class StubProvider:
 
 
 @pytest.fixture
-def stub_provider(monkeypatch):
+def stub_provider(monkeypatch: pytest.MonkeyPatch) -> StubProvider:
     """Replace the CLI's make_provider, so CLI tests never build a real provider."""
     import prompt_workflow.cli as cli
 
@@ -176,7 +193,7 @@ def stub_provider(monkeypatch):
 
 
 @pytest.fixture
-def history_rows(monkeypatch):
+def history_rows(monkeypatch: pytest.MonkeyPatch) -> HistoryRows:
     """Gives history writes a generous time budget (the real ~0.25 s drops writes on a loaded
     CI runner) and returns a reader: history_rows("operations") lists that table of the
     per-test usage history as dicts, [] when nothing was written."""
@@ -188,7 +205,7 @@ def history_rows(monkeypatch):
     monkeypatch.setattr(history, "_BUDGET", 2.25)
     monkeypatch.setattr(history, "_WRITE_BUDGET", 2.0)
 
-    def read(table: str) -> list[dict]:
+    def read(table: str) -> list[dict[str, Any]]:
         path = history.history_path()
         if not path.is_file():
             return []
@@ -201,7 +218,7 @@ def history_rows(monkeypatch):
 
 
 @pytest.fixture
-def seed_history(monkeypatch):
+def seed_history(monkeypatch: pytest.MonkeyPatch) -> SeedHistory:
     """Returns seed(operation, attempts=(), store=None), which writes one record to the
     per-test usage history (or ``store``) and fails the test if it is dropped. Tests that only
     need rows use it instead of asserting record() directly: the write runs with a budget no
@@ -212,12 +229,16 @@ def seed_history(monkeypatch):
 
     from prompt_workflow import history
 
-    def seed(operation, attempts=(), store=None):
+    def seed(
+        operation: Mapping[str, Any],
+        attempts: Sequence[Mapping[str, Any]] = (),
+        store: HistoryStore | None = None,
+    ) -> HistoryStore:
         store = store or history.HistoryStore(history.history_path())
         errors: list[BaseException | None] = []
         mark_lost = store._mark_lost
 
-        def capture(*args, **kwargs):
+        def capture(*args: Any, **kwargs: Any) -> bool:
             errors.append(sys.exception())  # record() calls it inside its except block
             return mark_lost(*args, **kwargs)
 

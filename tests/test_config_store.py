@@ -5,13 +5,17 @@ editable-install root there, and these tests unset PROMPT_WORKFLOW_ENV only thro
 ``saved_mode``.
 """
 
+from __future__ import annotations
+
 import json
 import os
 import shutil
 import stat
 import subprocess
 import sys
+from collections.abc import Mapping
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from typer.testing import CliRunner
@@ -27,6 +31,9 @@ from prompt_workflow.config_store import (
     StaleEditError,
 )
 
+if TYPE_CHECKING:
+    from conftest import StubProvider
+
 REPO = Path(__file__).resolve().parents[1]
 runner = CliRunner()
 
@@ -37,7 +44,7 @@ ANTHROPIC_VALUE = "-".join(["sk", "ant", "api03", "c0ffee" * 10])
 
 
 @pytest.fixture
-def saved_mode(tmp_path, monkeypatch):
+def saved_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Leave legacy mode (PROMPT_WORKFLOW_ENV unset); returns the per-test user config dir."""
     monkeypatch.delenv("PROMPT_WORKFLOW_ENV")
     directory = config._user_config_dir(os.environ)
@@ -47,7 +54,7 @@ def saved_mode(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def project(tmp_path):
+def project(tmp_path: Path) -> Path:
     """The editable-install checkout (conftest points _PROJECT_ROOT at it)."""
     root = tmp_path / "project"
     root.mkdir()
@@ -75,7 +82,7 @@ def _tree(*roots: Path, skip: Path) -> dict[str, bytes]:
 
 
 # Precedence: default < config.toml < secret store < real environment.
-def test_saved_layers_precedence(saved_mode, monkeypatch):
+def test_saved_layers_precedence(saved_mode: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _write(
         saved_mode / "config.toml",
         'config_version = 1\nOPENROUTER_MODEL = "x/saved"\nOLLAMA_THINK = true\n'
@@ -103,7 +110,7 @@ def test_saved_layers_precedence(saved_mode, monkeypatch):
 
 # Once config.toml exists, no .env is read: a lingering one never shadows a saved value.
 # Repair mode says it is ignored; strict mode (the triggers) stays silent.
-def test_lingering_env_never_shadows_saved_toml(saved_mode, project):
+def test_lingering_env_never_shadows_saved_toml(saved_mode: Path, project: Path) -> None:
     _write(saved_mode / "config.toml", 'OPENROUTER_MODEL = "x/saved"\n')
     _write(project / ".env", "OPENROUTER_MODEL=x/old\nOLLAMA_MODEL=old\n")
     _write(saved_mode / ".env", "OPENROUTER_MODEL=x/older\n")
@@ -121,7 +128,7 @@ def test_lingering_env_never_shadows_saved_toml(saved_mode, project):
 
 # Without config.toml everything is as before, except that a secret in the secret store wins
 # over the .env's.
-def test_without_toml_env_still_applies_and_store_beats_it(saved_mode, project):
+def test_without_toml_env_still_applies_and_store_beats_it(saved_mode: Path, project: Path) -> None:
     _write(
         project / ".env", f"OLLAMA_MODEL=from-env-file\nOPENROUTER_API_KEY={OPENROUTER_VALUE}x\n"
     )
@@ -131,7 +138,7 @@ def test_without_toml_env_still_applies_and_store_beats_it(saved_mode, project):
 
 
 # Legacy mode: the PROMPT_WORKFLOW_ENV file alone, exactly as before.
-def test_legacy_mode_ignores_saved_files(tmp_path):
+def test_legacy_mode_ignores_saved_files(tmp_path: Path) -> None:
     directory = config._user_config_dir(os.environ)
     _write(directory / "config.toml", 'OLLAMA_MODEL = "saved"\n')
     FileSecretStore(directory / "secrets.toml").set("OPENROUTER_API_KEY", OPENROUTER_VALUE)
@@ -150,7 +157,7 @@ def test_legacy_mode_ignores_saved_files(tmp_path):
 
 # A broken config.toml fails closed (strict raises with the position only, no content); the
 # .env does not step in. Repair mode reports it and falls back to the defaults.
-def test_invalid_toml_fails_closed(saved_mode, project):
+def test_invalid_toml_fails_closed(saved_mode: Path, project: Path) -> None:
     _write(
         saved_mode / "config.toml",
         f'OPENROUTER_MODEL = "x\nOPENROUTER_API_KEY = "{OPENROUTER_VALUE}"\n',
@@ -175,7 +182,7 @@ def test_invalid_toml_fails_closed(saved_mode, project):
     ],
     ids=["bad-value", "array", "text-version", "bool-version"],
 )
-def test_invalid_toml_values_raise(saved_mode, text, error):
+def test_invalid_toml_values_raise(saved_mode: Path, text: str, error: str) -> None:
     _write(saved_mode / "config.toml", text)
     with pytest.raises(ValueError, match=error):
         ConfigLayers.resolve()
@@ -184,7 +191,7 @@ def test_invalid_toml_values_raise(saved_mode, text, error):
 
 # Unknown keys and a newer config_version are read but noted in repair mode only; a secret
 # in config.toml is used, and repair mode says to move it.
-def test_toml_notes(saved_mode):
+def test_toml_notes(saved_mode: Path) -> None:
     _write(
         saved_mode / "config.toml",
         'config_version = 9\nFOO = 1\nOLLAMA_MODEL = "m"\n'
@@ -201,7 +208,7 @@ def test_toml_notes(saved_mode):
 
 
 # The secret store only contributes secrets; anything else in it is ignored.
-def test_secret_store_holds_only_secrets(saved_mode):
+def test_secret_store_holds_only_secrets(saved_mode: Path) -> None:
     _write(
         saved_mode / "secrets.toml",
         f'OLLAMA_MODEL = "x"\nOPENROUTER_API_KEY = "{OPENROUTER_VALUE}"\n',
@@ -213,7 +220,7 @@ def test_secret_store_holds_only_secrets(saved_mode):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX file modes")
-def test_exposed_secrets_file_is_reported(saved_mode):
+def test_exposed_secrets_file_is_reported(saved_mode: Path) -> None:
     path = _write(saved_mode / "secrets.toml", f'OPENROUTER_API_KEY = "{OPENROUTER_VALUE}"\n')
     path.chmod(0o644)
     repair = ConfigLayers.resolve(strict=False)
@@ -226,7 +233,7 @@ def test_exposed_secrets_file_is_reported(saved_mode):
 
 # An invalid config makes improve print its marker without building a provider; persona still
 # prints a persona that an unrelated bad value does not affect (#32).
-def test_invalid_config_fails_closed_in_cli(saved_mode, stub_provider):
+def test_invalid_config_fails_closed_in_cli(saved_mode: Path, stub_provider: StubProvider) -> None:
     _write(saved_mode / "config.toml", "OPENROUTER_MAX_TOKENS = 0\n")
     result = runner.invoke(app, ["improve", "--source", "argument", "--text", "draft"])
     assert result.exit_code == 0
@@ -242,17 +249,19 @@ def test_invalid_config_fails_closed_in_cli(saved_mode, stub_provider):
 
 # A secret store that fails (a future keyring) fails the call: the marker, no provider and no
 # fallback to a plaintext file.
-def test_store_error_never_falls_back(saved_mode, monkeypatch, stub_provider):
+def test_store_error_never_falls_back(
+    saved_mode: Path, monkeypatch: pytest.MonkeyPatch, stub_provider: StubProvider
+) -> None:
     class Broken:
         source = "keyring:test"
 
-        def read(self):
+        def read(self) -> None:
             raise SecretStoreError("keyring is locked")
 
-        def set(self, name, value):
+        def set(self, name: str, value: str) -> None:
             raise SecretStoreError("keyring is locked")
 
-        def delete(self, name):
+        def delete(self, name: str) -> None:
             raise SecretStoreError("keyring is locked")
 
     monkeypatch.setattr(config_files, "secret_store", lambda _directory: Broken())
@@ -265,7 +274,7 @@ def test_store_error_never_falls_back(saved_mode, monkeypatch, stub_provider):
 
 
 # The trigger path never imports the TOML writer, even with saved files present.
-def test_trigger_path_does_not_import_writer(saved_mode, tmp_path):
+def test_trigger_path_does_not_import_writer(saved_mode: Path, tmp_path: Path) -> None:
     _write(saved_mode / "config.toml", 'OLLAMA_MODEL = "m"\n')
     FileSecretStore(saved_mode / "secrets.toml").set("OPENROUTER_API_KEY", OPENROUTER_VALUE)
     code = (
@@ -283,7 +292,7 @@ def test_trigger_path_does_not_import_writer(saved_mode, tmp_path):
 # --- saving config.toml --------------------------------------------------------------------
 
 
-def test_save_settings_round_trip(saved_mode):
+def test_save_settings_round_trip(saved_mode: Path) -> None:
     snapshot = config_store.read_settings()
     assert (snapshot.digest, snapshot.values) == (None, {})
 
@@ -313,7 +322,7 @@ def test_save_settings_round_trip(saved_mode):
 
 # An empty value is saved as "" (PROMPT_TEMPERATURE: omit the temperature), never taken for
 # None, which removes the setting so its default applies again.
-def test_save_settings_empty_value(saved_mode):
+def test_save_settings_empty_value(saved_mode: Path) -> None:
     saved = config_store.save_settings(config_store.read_settings(), {"PROMPT_TEMPERATURE": ""})
     assert saved.table["PROMPT_TEMPERATURE"] == ""
     assert Settings.load().temperature is None
@@ -332,7 +341,9 @@ def test_save_settings_empty_value(saved_mode):
     ],
     ids=["secret", "bad-bool", "unknown", "secret-as-value"],
 )
-def test_save_settings_validates_first(saved_mode, changes, error):
+def test_save_settings_validates_first(
+    saved_mode: Path, changes: dict[str, str], error: str
+) -> None:
     with pytest.raises(ValueError, match=error) as exc:
         config_store.save_settings(config_store.read_settings(), changes)
     assert OPENROUTER_VALUE not in str(exc.value)
@@ -340,7 +351,7 @@ def test_save_settings_validates_first(saved_mode, changes, error):
 
 
 # A concurrent edit is refused and reported by setting name, never by value.
-def test_concurrent_edit_is_refused_with_diff(saved_mode):
+def test_concurrent_edit_is_refused_with_diff(saved_mode: Path) -> None:
     path = _write(saved_mode / "config.toml", 'OLLAMA_MODEL = "a"\nLMSTUDIO_MODEL = "b"\n')
     snapshot = config_store.read_settings()
     _write(path, 'OLLAMA_MODEL = "changed"\nLMSTUDIO_MODEL = "b"\nPROMPT_PROFILE = "general"\n')
@@ -361,7 +372,7 @@ def test_concurrent_edit_is_refused_with_diff(saved_mode):
 
 
 # A newer config_version is read-only; a secret already in config.toml blocks a rewrite.
-def test_save_settings_refusals(saved_mode):
+def test_save_settings_refusals(saved_mode: Path) -> None:
     path = _write(saved_mode / "config.toml", "config_version = 2\n")
     with pytest.raises(ReadOnlyConfigError, match="unknown config_version"):
         config_store.save_settings(config_store.read_settings(), {"OLLAMA_MODEL": "m"})
@@ -373,7 +384,7 @@ def test_save_settings_refusals(saved_mode):
 # --- the secret store ----------------------------------------------------------------------
 
 
-def test_save_and_delete_secret(saved_mode):
+def test_save_and_delete_secret(saved_mode: Path) -> None:
     config_store.save_secret("OPENROUTER_API_KEY", f"  {OPENROUTER_VALUE}\n")
     config_store.save_secret("ANTHROPIC_API_KEY", ANTHROPIC_VALUE)
     assert config_store.saved_secret_names() == ("OPENROUTER_API_KEY", "ANTHROPIC_API_KEY")
@@ -391,7 +402,7 @@ def test_save_and_delete_secret(saved_mode):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX file modes")
-def test_secrets_file_is_mode_600_from_creation(saved_mode):
+def test_secrets_file_is_mode_600_from_creation(saved_mode: Path) -> None:
     old = os.umask(0)  # even with no umask, the file is never group or world readable
     try:
         config_store.save_secret("OPENROUTER_API_KEY", OPENROUTER_VALUE)
@@ -420,7 +431,7 @@ def _icacls_principals(path: Path) -> list[str]:
 # inherited, even though Python creates the config dir with mode 0o700 (a protected DACL of
 # its own on Windows).
 @pytest.mark.skipif(os.name != "nt", reason="native Windows ACL check")
-def test_secrets_file_is_private_to_the_user_on_windows(saved_mode):
+def test_secrets_file_is_private_to_the_user_on_windows(saved_mode: Path) -> None:
     config_store.save_secret("OPENROUTER_API_KEY", OPENROUTER_VALUE)
     config_store.save_secret("ANTHROPIC_API_KEY", ANTHROPIC_VALUE)  # a rewrite keeps it private
     path = saved_mode / "secrets.toml"
@@ -466,7 +477,7 @@ SID = "S-1-5-21-1-2-3-1001"
         "null-dacl",
     ],
 )
-def test_only_user(sddl, private):
+def test_only_user(sddl: str, private: bool) -> None:
     assert config_files.only_user(sddl, (SID, "LA")) is private
 
 
@@ -481,10 +492,12 @@ def test_only_user(sddl, private):
     ],
     ids=["leftover-ace", "os-error"],
 )
-def test_restrict_to_user_refuses_leftovers(saved_mode, monkeypatch, read_back, error):
-    applied = []
+def test_restrict_to_user_refuses_leftovers(
+    saved_mode: Path, monkeypatch: pytest.MonkeyPatch, read_back: str | OSError, error: str
+) -> None:
+    applied: list[str] = []
 
-    def read_dacl(path):
+    def read_dacl(path: Path) -> str:
         if isinstance(read_back, Exception):
             raise read_back
         return read_back
@@ -515,7 +528,7 @@ def _example_env() -> str:
     )
 
 
-def test_migration_preview_apply_and_idempotence(saved_mode, project):
+def test_migration_preview_apply_and_idempotence(saved_mode: Path, project: Path) -> None:
     repo_env = _write(project / ".env", _example_env())
     user_env = _write(saved_mode / ".env", "OLLAMA_MODEL=never-active\n")
     original = repo_env.read_bytes()
@@ -563,7 +576,7 @@ def test_migration_preview_apply_and_idempotence(saved_mode, project):
     assert Settings.load() == before
 
 
-def test_rollback_restores_exact_state(saved_mode, project):
+def test_rollback_restores_exact_state(saved_mode: Path, project: Path) -> None:
     _write(project / ".env", _example_env())
     _write(saved_mode / ".env", "OLLAMA_MODEL=never-active\n")
     FileSecretStore(saved_mode / "secrets.toml").set("ANTHROPIC_API_KEY", ANTHROPIC_VALUE)
@@ -593,7 +606,9 @@ def test_rollback_restores_exact_state(saved_mode, project):
 
 # Across file systems the .env is renamed in place instead (still never deleted); rollback
 # finds it there.
-def test_migration_falls_back_to_rename_in_place(saved_mode, project, monkeypatch):
+def test_migration_falls_back_to_rename_in_place(
+    saved_mode: Path, project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     repo_env = _write(project / ".env", "OLLAMA_MODEL=m\n")
     original = repo_env.read_bytes()
     real_move = config_store._move
@@ -617,7 +632,9 @@ def test_migration_falls_back_to_rename_in_place(saved_mode, project, monkeypatc
     assert repo_env.read_bytes() == original
 
 
-def test_migration_unmovable_env_is_left_and_ignored(saved_mode, project, monkeypatch):
+def test_migration_unmovable_env_is_left_and_ignored(
+    saved_mode: Path, project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     repo_env = _write(project / ".env", "OLLAMA_MODEL=m\n")
     real_move = config_store._move
     monkeypatch.setattr(config_store, "_move", lambda s, t: False)
@@ -634,7 +651,9 @@ def test_migration_unmovable_env_is_left_and_ignored(saved_mode, project, monkey
 
 # A failed verification undoes the writes: no config.toml, the old secrets.toml bytes, the
 # .env in place, no marker.
-def test_failed_verification_undoes_everything(saved_mode, project, monkeypatch):
+def test_failed_verification_undoes_everything(
+    saved_mode: Path, project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     repo_env = _write(project / ".env", _example_env())
     secrets = _write(saved_mode / "secrets.toml", f'ANTHROPIC_API_KEY = "{ANTHROPIC_VALUE}"\n')
     old_secrets = secrets.read_bytes()
@@ -642,7 +661,7 @@ def test_failed_verification_undoes_everything(saved_mode, project, monkeypatch)
     real = config_store._effective
     calls = []
 
-    def effective(environ):
+    def effective(environ: Mapping[str, str]) -> dict[str, tuple[Any, str]]:
         calls.append(1)
         result = real(environ)
         if len(calls) == 2:
@@ -662,11 +681,13 @@ def test_failed_verification_undoes_everything(saved_mode, project, monkeypatch)
 
 
 # A store that fails mid-migration also undoes the writes.
-def test_migration_store_failure_undoes(saved_mode, project, monkeypatch):
+def test_migration_store_failure_undoes(
+    saved_mode: Path, project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _write(project / ".env", _example_env())
     plan = config_store.plan_migration()
 
-    def broken(self, name, value):
+    def broken(self: FileSecretStore, name: str, value: str) -> None:
         raise SecretStoreError("disk full")
 
     monkeypatch.setattr(FileSecretStore, "set", broken)
@@ -684,7 +705,9 @@ def test_migration_store_failure_undoes(saved_mode, project, monkeypatch):
     ],
     ids=["invalid-value", "not-utf8"],
 )
-def test_migration_refuses_invalid_env(saved_mode, project, env_text, error):
+def test_migration_refuses_invalid_env(
+    saved_mode: Path, project: Path, env_text: str | bytes, error: str
+) -> None:
     path = project / ".env"
     path.write_bytes(env_text if isinstance(env_text, bytes) else env_text.encode())
     with pytest.raises(MigrationError, match=error):
@@ -692,14 +715,18 @@ def test_migration_refuses_invalid_env(saved_mode, project, env_text, error):
 
 
 # A bad .env value hidden by a real environment variable is still caught before migrating.
-def test_migration_refuses_shadowed_invalid_value(saved_mode, project, monkeypatch):
+def test_migration_refuses_shadowed_invalid_value(
+    saved_mode: Path, project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _write(project / ".env", "OLLAMA_THINK=maybe\n")
     monkeypatch.setenv("OLLAMA_THINK", "true")
     with pytest.raises(MigrationError, match=r"fix the \.env first: OLLAMA_THINK must be"):
         config_store.plan_migration()
 
 
-def test_migration_statuses(saved_mode, project, tmp_path, monkeypatch):
+def test_migration_statuses(
+    saved_mode: Path, project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     assert config_store.plan_migration().status == "nothing"
     assert "nothing to migrate" in config_store.plan_migration().describe()[0]
     _write(saved_mode / "config.toml", "")
@@ -714,7 +741,7 @@ def test_migration_statuses(saved_mode, project, tmp_path, monkeypatch):
 
 
 # A secret already in the store wins today, so the .env's is not migrated over it.
-def test_migration_keeps_stored_secret(saved_mode, project):
+def test_migration_keeps_stored_secret(saved_mode: Path, project: Path) -> None:
     _write(project / ".env", f"OPENROUTER_API_KEY={OPENROUTER_VALUE}x\n")
     FileSecretStore(saved_mode / "secrets.toml").set("OPENROUTER_API_KEY", OPENROUTER_VALUE)
     plan = config_store.plan_migration()
@@ -723,7 +750,7 @@ def test_migration_keeps_stored_secret(saved_mode, project):
     assert Settings.load().openrouter_api_key == OPENROUTER_VALUE
 
 
-def test_rollback_refusals(saved_mode, project):
+def test_rollback_refusals(saved_mode: Path, project: Path) -> None:
     repo_env = _write(project / ".env", "OLLAMA_MODEL=m\n")
     result = config_store.apply_migration(consent=config_store.plan_migration().token)
     _write(repo_env, "OLLAMA_MODEL=new\n")
@@ -744,7 +771,7 @@ def test_rollback_refusals(saved_mode, project):
 # --- sentinel: a secret never reaches config.toml or anything shown ------------------------
 
 
-def test_secret_sentinel(saved_mode, project):
+def test_secret_sentinel(saved_mode: Path, project: Path) -> None:
     _write(project / ".env", _example_env() + f"ANTHROPIC_API_KEY={ANTHROPIC_VALUE}\n")
     plan = config_store.plan_migration()
     shown = [repr(plan), *plan.describe()]
@@ -765,7 +792,7 @@ def test_secret_sentinel(saved_mode, project):
 
 
 # Every secret field is flagged, so it can never be saved in config.toml.
-def test_secret_names():
+def test_secret_names() -> None:
     assert secret_names() == ("OPENROUTER_API_KEY", "ANTHROPIC_API_KEY")
     assert set(secret_names()) <= set(env_names())
 
@@ -775,7 +802,7 @@ def test_secret_names():
 
 # Copying .env.example sets only the key and the persona: the model, endpoint and effort keep
 # following the defaults (#28).
-def test_copied_env_example_pins_no_defaults(tmp_path):
+def test_copied_env_example_pins_no_defaults(tmp_path: Path) -> None:
     shutil.copy(REPO / ".env.example", tmp_path / ".env")
     layers = ConfigLayers.resolve()
     active = {k for layer in layers.layers[1:-1] for k in layer.values}
@@ -793,7 +820,9 @@ def test_copied_env_example_pins_no_defaults(tmp_path):
     ],
     ids=["secrets-syntax", "config-encoding"],
 )
-def test_unreadable_saved_file_fails_closed(saved_mode, name, data, error):
+def test_unreadable_saved_file_fails_closed(
+    saved_mode: Path, name: str, data: bytes, error: str
+) -> None:
     (saved_mode / name).write_bytes(data)
     with pytest.raises(ValueError, match=error):
         Settings.load()
@@ -801,12 +830,14 @@ def test_unreadable_saved_file_fails_closed(saved_mode, name, data, error):
 
 
 # A .env edited after the preview is left where it is (ignored from now on), never moved.
-def test_env_edited_during_migration_is_left(saved_mode, project, monkeypatch):
+def test_env_edited_during_migration_is_left(
+    saved_mode: Path, project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     repo_env = _write(project / ".env", "OLLAMA_MODEL=m\n")
     plan = config_store.plan_migration()
     real = config_store._effective
 
-    def effective(environ):
+    def effective(environ: Mapping[str, str]) -> dict[str, tuple[Any, str]]:
         if (saved_mode / "config.toml").exists():
             _write(repo_env, "OLLAMA_MODEL=m\n# edited\n")
         return real(environ)
@@ -822,12 +853,12 @@ def test_env_edited_during_migration_is_left(saved_mode, project, monkeypatch):
 # --- odd config paths behave exactly as when nothing is saved -----------------------------
 
 
-def _baseline(project: Path) -> dict:
+def _baseline(project: Path) -> dict[str, tuple[object, str]]:
     _write(project / ".env", "OLLAMA_MODEL=from-repo\n")
     return {k: (e.value, e.source) for k, e in ConfigLayers.resolve().entries.items()}
 
 
-def _check_same(baseline: dict) -> list[str]:
+def _check_same(baseline: dict[str, tuple[object, str]]) -> list[str]:
     """Strict mode matches the baseline exactly; repair mode runs and returns its messages."""
     assert {k: (e.value, e.source) for k, e in ConfigLayers.resolve().entries.items()} == baseline
     assert Settings.load().ollama_model == "from-repo"
@@ -835,7 +866,7 @@ def _check_same(baseline: dict) -> list[str]:
 
 
 # The config dir is a file: there is no config.toml or secrets.toml, as before #84.
-def test_config_dir_that_is_a_file(saved_mode, project):
+def test_config_dir_that_is_a_file(saved_mode: Path, project: Path) -> None:
     baseline = _baseline(project)
     saved_mode.rmdir()
     saved_mode.write_text("not a folder\n")
@@ -847,7 +878,7 @@ def test_config_dir_that_is_a_file(saved_mode, project):
 
 # config.toml or secrets.toml is a folder: ignored, reported in repair mode only.
 @pytest.mark.parametrize("name", ["config.toml", "secrets.toml"])
-def test_saved_file_that_is_a_folder(saved_mode, project, name):
+def test_saved_file_that_is_a_folder(saved_mode: Path, project: Path, name: str) -> None:
     baseline = _baseline(project)
     (saved_mode / name).mkdir()
     assert _check_same(baseline) == [f"{name} is not a file; it was ignored"]
@@ -855,7 +886,7 @@ def test_saved_file_that_is_a_folder(saved_mode, project, name):
 
 # An unreadable config dir (mode 000) cannot even be checked: as if absent, never a crash.
 @pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0, reason="POSIX permissions")
-def test_unreadable_config_dir(saved_mode, project):
+def test_unreadable_config_dir(saved_mode: Path, project: Path) -> None:
     baseline = _baseline(project)
     saved_mode.chmod(0)
     try:
@@ -866,7 +897,7 @@ def test_unreadable_config_dir(saved_mode, project):
 
 # A config.toml that is a real file but cannot be read still fails closed.
 @pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0, reason="POSIX permissions")
-def test_unreadable_config_toml_fails_closed(saved_mode, project):
+def test_unreadable_config_toml_fails_closed(saved_mode: Path, project: Path) -> None:
     _baseline(project)
     path = _write(saved_mode / "config.toml", 'OLLAMA_MODEL = "saved"\n')
     path.chmod(0)
@@ -878,7 +909,7 @@ def test_unreadable_config_toml_fails_closed(saved_mode, project):
 
 
 # A byte-order mark (Windows Notepad) is not a syntax error.
-def test_bom_is_accepted(saved_mode):
+def test_bom_is_accepted(saved_mode: Path) -> None:
     (saved_mode / "config.toml").write_bytes(b'\xef\xbb\xbfOLLAMA_MODEL = "m"\n')
     (saved_mode / "secrets.toml").write_bytes(
         b"\xef\xbb\xbf" + f'OPENROUTER_API_KEY = "{OPENROUTER_VALUE}"\n'.encode()
@@ -891,11 +922,13 @@ def test_bom_is_accepted(saved_mode):
 
 
 # The marker is written before anything changes; if it cannot be written, nothing changes.
-def test_marker_write_failure_changes_nothing(saved_mode, project, monkeypatch):
+def test_marker_write_failure_changes_nothing(
+    saved_mode: Path, project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     repo_env = _write(project / ".env", _example_env())
     plan = config_store.plan_migration()
 
-    def broken(directory, record):
+    def broken(directory: Path, record: Mapping[str, Any]) -> None:
         raise OSError(28, "No space left on device")
 
     monkeypatch.setattr(config_store, "_write_marker", broken)
@@ -909,12 +942,14 @@ def test_marker_write_failure_changes_nothing(saved_mode, project, monkeypatch):
 
 # A run cut short after the writes (here: before any .env moved) is rolled back from the
 # marker written up front.
-def test_interrupted_migration_can_be_rolled_back(saved_mode, project, monkeypatch):
+def test_interrupted_migration_can_be_rolled_back(
+    saved_mode: Path, project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     repo_env = _write(project / ".env", _example_env())
     plan = config_store.plan_migration()
     real_move = config_store._move
 
-    def crash(source, target):
+    def crash(source: Path, target: Path) -> bool:
         raise KeyboardInterrupt
 
     monkeypatch.setattr(config_store, "_move", crash)
@@ -928,7 +963,7 @@ def test_interrupted_migration_can_be_rolled_back(saved_mode, project, monkeypat
 
 
 # A preview's token cannot be replayed once a migration and its rollback restored the files.
-def test_consent_token_is_not_replayable(saved_mode, project):
+def test_consent_token_is_not_replayable(saved_mode: Path, project: Path) -> None:
     _write(project / ".env", _example_env())
     first = config_store.plan_migration().token
     config_store.apply_migration(consent=first)
@@ -939,7 +974,7 @@ def test_consent_token_is_not_replayable(saved_mode, project):
 
 
 # Smaller refusals: each is an error naming no value, and nothing is written.
-def test_more_refusals(saved_mode, project, monkeypatch):
+def test_more_refusals(saved_mode: Path, project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _write(project / ".env", _example_env())
     monkeypatch.setattr(
         FileSecretStore, "read", lambda self: (_ for _ in ()).throw(SecretStoreError("locked"))
@@ -948,7 +983,7 @@ def test_more_refusals(saved_mode, project, monkeypatch):
         config_store.plan_migration()
 
 
-def test_store_write_failure_and_odd_sid(saved_mode, monkeypatch):
+def test_store_write_failure_and_odd_sid(saved_mode: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     saved_mode.rmdir()
     saved_mode.write_text("")
     with pytest.raises(SecretStoreError, match=r"could not write secrets\.toml"):
@@ -958,14 +993,14 @@ def test_store_write_failure_and_odd_sid(saved_mode, monkeypatch):
         config_files.restrict_to_user(saved_mode)
 
 
-def test_move_never_overwrites(tmp_path):
+def test_move_never_overwrites(tmp_path: Path) -> None:
     source, target = _write(tmp_path / "a", "a"), _write(tmp_path / "b", "b")
     assert config_store._move(source, target) is False
     assert config_store._move(tmp_path / "missing", tmp_path / "c") is False
     assert target.read_text() == "b"
 
 
-def test_damaged_marker(saved_mode):
+def test_damaged_marker(saved_mode: Path) -> None:
     _write(saved_mode / "migration.json", "{not json")
     with pytest.raises(MigrationError, match="damaged"):
         config_store.plan_rollback()
@@ -973,11 +1008,13 @@ def test_damaged_marker(saved_mode):
 
 # Windows reports a config dir that is a file as FileExistsError on mkdir: still refused
 # cleanly, with nothing changed.
-def test_backup_folder_failure(saved_mode, project, monkeypatch):
+def test_backup_folder_failure(
+    saved_mode: Path, project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     repo_env = _write(project / ".env", _example_env())
     plan = config_store.plan_migration()
 
-    def broken(directory):
+    def broken(directory: Path) -> tuple[Path, str]:
         raise FileExistsError(183, "Cannot create a file when that file already exists")
 
     monkeypatch.setattr(config_store, "_new_backup_dir", broken)
@@ -987,7 +1024,7 @@ def test_backup_folder_failure(saved_mode, project, monkeypatch):
 
 
 # A UTF-8 byte order mark is not part of the first key, so migration keeps it (#32).
-def test_migration_reads_env_with_byte_order_mark(saved_mode, project):
+def test_migration_reads_env_with_byte_order_mark(saved_mode: Path, project: Path) -> None:
     (project / ".env").write_bytes(b"\xef\xbb\xbfOLLAMA_MODEL=m\n")
     plan = config_store.plan_migration()
     assert dict(plan.settings) == {"OLLAMA_MODEL": "m"}
@@ -996,7 +1033,7 @@ def test_migration_reads_env_with_byte_order_mark(saved_mode, project):
 
 # A value cut at an unquoted ` #` is never carried into config.toml: the migration is refused
 # until the value is quoted (#32).
-def test_migration_refuses_a_value_cut_at_a_comment(saved_mode, project):
+def test_migration_refuses_a_value_cut_at_a_comment(saved_mode: Path, project: Path) -> None:
     _write(project / ".env", "PROMPT_EXTRA_PATTERNS=ticket #\\d{5}\n")
     with pytest.raises(
         MigrationError,
@@ -1010,6 +1047,6 @@ def test_migration_refuses_a_value_cut_at_a_comment(saved_mode, project):
 
 
 # Any other setting's ` # note` is an ordinary comment: migrated without it, not refused.
-def test_migration_keeps_an_ordinary_inline_comment(saved_mode, project):
+def test_migration_keeps_an_ordinary_inline_comment(saved_mode: Path, project: Path) -> None:
     _write(project / ".env", "OLLAMA_MODEL=m  # a note\n")
     assert dict(config_store.plan_migration().settings) == {"OLLAMA_MODEL": "m"}

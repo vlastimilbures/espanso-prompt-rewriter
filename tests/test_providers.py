@@ -1,11 +1,14 @@
+from __future__ import annotations
+
 import json
 import socket
 import threading
 import time
 import urllib.request
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import TYPE_CHECKING, Any
 
 import httpx
 import pytest
@@ -27,21 +30,24 @@ from prompt_workflow.providers.base import (
 from prompt_workflow.providers.ollama import OllamaProvider
 from prompt_workflow.providers.openai_compatible import OpenAICompatibleProvider
 
+if TYPE_CHECKING:
+    from conftest import FakeHttp
 
-def _ollama_body(text):
+
+def _ollama_body(text: str | None) -> dict[str, Any]:
     return {"message": {"content": text}}
 
 
-def _openai_body(text):
+def _openai_body(text: str | None) -> dict[str, Any]:
     return {"choices": [{"message": {"content": text}}]}
 
 
-def _anthropic_body(text):
+def _anthropic_body(text: str | None) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": text}]}
 
 
 # (provider factory, success-body builder, error label) for every provider.
-PROVIDERS = {
+PROVIDERS: dict[str, tuple[Callable[[], Provider], Callable[[str | None], dict[str, Any]], str]] = {
     "ollama": (lambda: OllamaProvider("http://x/", "m", timeout=1), _ollama_body, "Ollama"),
     "openai_compatible": (
         lambda: OpenAICompatibleProvider("http://x/v1/", "m", timeout=1, label="LM Studio"),
@@ -62,7 +68,7 @@ ALL = pytest.mark.parametrize("name", list(PROVIDERS))
 
 # Ollama speaks /api/chat with system+user messages, no streaming, the think flag and
 # the temperature as an option.
-def test_ollama_request_shape(fake_http):
+def test_ollama_request_shape(fake_http: FakeHttp) -> None:
     fake_http.reply(_ollama_body("ok"))
     OllamaProvider("http://x/", "m", timeout=7, think=True, temperature=0.2).generate(
         "draft", "sys"
@@ -88,7 +94,7 @@ def test_ollama_request_shape(fake_http):
 
 
 # OpenAI-compatible sends bearer auth, extra headers, max_tokens, temperature, extra_body.
-def test_openai_compatible_request_shape(fake_http):
+def test_openai_compatible_request_shape(fake_http: FakeHttp) -> None:
     fake_http.reply(_openai_body("ok"))
     OpenAICompatibleProvider(
         "http://x/v1/",
@@ -124,7 +130,7 @@ def test_openai_compatible_request_shape(fake_http):
 
 # Without a key (LM Studio) no Authorization header is sent, and unset optional
 # fields (max_tokens, temperature) are omitted: some models reject temperature.
-def test_openai_compatible_minimal_request(fake_http):
+def test_openai_compatible_minimal_request(fake_http: FakeHttp) -> None:
     fake_http.reply(_openai_body("ok"))
     OpenAICompatibleProvider("http://x/v1", "m").generate("d", "s")
     call = fake_http.calls[0]
@@ -133,7 +139,7 @@ def test_openai_compatible_minimal_request(fake_http):
 
 
 # Anthropic puts the system prompt top-level, requires max_tokens and a version header.
-def test_anthropic_request_shape(fake_http):
+def test_anthropic_request_shape(fake_http: FakeHttp) -> None:
     fake_http.reply(_anthropic_body("ok"))
     AnthropicProvider("http://x/", "m", "key", timeout=7, temperature=0.2).generate("draft", "sys")
     assert fake_http.calls == [
@@ -156,7 +162,7 @@ def test_anthropic_request_shape(fake_http):
 
 
 # The CLI's OpenRouter provider sends the pinned route, X-Title, key and max_tokens.
-def test_openrouter_request_shape(fake_http, monkeypatch):
+def test_openrouter_request_shape(fake_http: FakeHttp, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     fake_http.reply(_openai_body("ok"))
     make_provider("openrouter", Settings()).generate("draft", "sys")
@@ -181,10 +187,10 @@ def test_openrouter_request_shape(fake_http, monkeypatch):
 
 
 # on_response receives the raw body (scripts/bench_models.py reads usage/cost from it).
-def test_openai_compatible_on_response_gets_raw_body(fake_http):
+def test_openai_compatible_on_response_gets_raw_body(fake_http: FakeHttp) -> None:
     body = {**_openai_body("ok"), "usage": {"cost": 0.1}}
     fake_http.reply(body)
-    seen = []
+    seen: list[dict[str, object]] = []
     OpenAICompatibleProvider("http://x/v1", "m", on_response=seen.append).generate("d", "s")
     assert seen == [body]
 
@@ -194,7 +200,7 @@ def test_openai_compatible_on_response_gets_raw_body(fake_http):
 
 # Every provider returns the text content, with <think> reasoning stripped.
 @ALL
-def test_success_strips_thinking(fake_http, name):
+def test_success_strips_thinking(fake_http: FakeHttp, name: str) -> None:
     build, body, _ = PROVIDERS[name]
     fake_http.reply(body("<think>reason</think>\n improved prompt "))
     assert build().generate("d", "s") == "improved prompt"
@@ -210,7 +216,9 @@ def test_success_strips_thinking(fake_http, name):
     ],
 )
 @ALL
-def test_transport_errors_become_provider_errors(fake_http, name, exc, message, transient):
+def test_transport_errors_become_provider_errors(
+    fake_http: FakeHttp, name: str, exc: httpx.HTTPError, message: str, transient: bool
+) -> None:
     build, _, label = PROVIDERS[name]
     fake_http.exc = exc
     with pytest.raises(ProviderError, match=f"^{label} {message}") as caught:
@@ -219,7 +227,7 @@ def test_transport_errors_become_provider_errors(fake_http, name, exc, message, 
 
 
 @ALL
-def test_http_error_status(fake_http, name):
+def test_http_error_status(fake_http: FakeHttp, name: str) -> None:
     build, _, label = PROVIDERS[name]
     fake_http.reply(status_code=401)
     with pytest.raises(ProviderError, match=f"^{label} returned HTTP 401"):
@@ -242,7 +250,9 @@ def test_http_error_status(fake_http, name):
         (529, "provider unavailable, try again", True),
     ],
 )
-def test_http_error_carries_hint_and_reason(fake_http, name, status, hint, transient):
+def test_http_error_carries_hint_and_reason(
+    fake_http: FakeHttp, name: str, status: int, hint: str, transient: bool
+) -> None:
     build, _, label = PROVIDERS[name]
     fake_http.reply({"error": {"message": "Upstream said no."}}, status_code=status)
     with pytest.raises(ProviderError) as caught:
@@ -253,7 +263,7 @@ def test_http_error_carries_hint_and_reason(fake_http, name, status, hint, trans
 
 
 # Ollama reports errors as a plain string.
-def test_ollama_string_error(fake_http):
+def test_ollama_string_error(fake_http: FakeHttp) -> None:
     fake_http.reply({"error": "model 'x' not found"}, status_code=404)
     with pytest.raises(ProviderError) as caught:
         OllamaProvider("http://x", "m").generate("d", "s")
@@ -263,14 +273,14 @@ def test_ollama_string_error(fake_http):
 
 
 # An error page that is not JSON still gets the status and the hint.
-def test_http_error_without_json_body(fake_http):
+def test_http_error_without_json_body(fake_http: FakeHttp) -> None:
     fake_http.reply(bad_json=True, status_code=502)
     with pytest.raises(ProviderError, match=r"^Ollama returned HTTP 502: provider unavailable"):
         OllamaProvider("http://x", "m").generate("d", "s")
 
 
 # The provider's reason is cut to one short printable line before it reaches the paste.
-def test_error_detail_is_short_and_printable():
+def test_error_detail_is_short_and_printable() -> None:
     long = error_detail({"error": {"message": "x" * 500}})
     assert len(long) == SERVER_MESSAGE_MAX
     assert long.endswith("…")
@@ -280,7 +290,7 @@ def test_error_detail_is_short_and_printable():
 
 # A reason that quotes something secret-shaped (some providers echo the rejected key) is
 # dropped; the status and hint still show.
-def test_error_detail_drops_sensitive_text(fake_http):
+def test_error_detail_drops_sensitive_text(fake_http: FakeHttp) -> None:
     key = "sk-or-v1-" + "cd" * 32
     assert error_detail({"error": {"message": f"Incorrect API key provided: {key}"}}) == ""
     fake_http.reply({"error": {"message": f"Incorrect API key provided: {key}"}}, status_code=401)
@@ -290,14 +300,14 @@ def test_error_detail_drops_sensitive_text(fake_http):
 
 
 @pytest.mark.parametrize("body", [None, [], {}, {"error": None}, {"error": {"code": 1}}])
-def test_error_detail_without_a_reason(body):
+def test_error_detail_without_a_reason(body: object) -> None:
     assert error_detail(body) == ""
 
 
 # OpenRouter reports an error raised after generation started as HTTP 200 with an error
 # object; it is reported as that error, not as a malformed response.
 @ALL
-def test_ok_status_with_error_body(fake_http, name):
+def test_ok_status_with_error_body(fake_http: FakeHttp, name: str) -> None:
     build, _, label = PROVIDERS[name]
     fake_http.reply({"error": {"code": 502, "message": "Upstream provider error"}})
     with pytest.raises(ProviderError) as caught:
@@ -307,7 +317,7 @@ def test_ok_status_with_error_body(fake_http, name):
     assert caught.value.transient is True
 
 
-def test_ok_status_with_error_without_code(fake_http):
+def test_ok_status_with_error_without_code(fake_http: FakeHttp) -> None:
     fake_http.reply({"error": "boom"})
     with pytest.raises(ProviderError, match=r"^Ollama returned an error: boom$") as caught:
         OllamaProvider("http://x", "m").generate("d", "s")
@@ -316,7 +326,7 @@ def test_ok_status_with_error_without_code(fake_http):
 
 
 # The error can also sit inside the choice it cut short; its partial text is not pasted.
-def test_choice_level_error(fake_http):
+def test_choice_level_error(fake_http: FakeHttp) -> None:
     fake_http.reply(
         {
             "choices": [
@@ -337,7 +347,7 @@ def test_choice_level_error(fake_http):
 # A key with a character httpx cannot put in a header (a smart quote, an accented letter)
 # fails before anything is sent, without being repeated, and is not called invalid JSON.
 @pytest.mark.parametrize("key", ["sk-or-v1-t\u00ebst", "sk-or-v1-\u201ctest\u201d"])
-def test_non_ascii_key_is_a_header_error(fake_http, key):
+def test_non_ascii_key_is_a_header_error(fake_http: FakeHttp, key: str) -> None:
     for provider in (
         OpenAICompatibleProvider("http://x/v1", "m", api_key=key),
         AnthropicProvider("http://x", "m", key),
@@ -351,7 +361,7 @@ def test_non_ascii_key_is_a_header_error(fake_http, key):
 
 # A non-JSON body is a ProviderError, not a raw JSONDecodeError.
 @ALL
-def test_invalid_json(fake_http, name):
+def test_invalid_json(fake_http: FakeHttp, name: str) -> None:
     build, _, label = PROVIDERS[name]
     fake_http.reply(bad_json=True)
     with pytest.raises(ProviderError, match=f"^{label} returned invalid JSON"):
@@ -368,7 +378,7 @@ def test_invalid_json(fake_http, name):
         ("anthropic", {"content": ["text"]}),
     ],
 )
-def test_malformed_response(fake_http, name, body):
+def test_malformed_response(fake_http: FakeHttp, name: str, body: dict[str, Any]) -> None:
     build, _, label = PROVIDERS[name]
     fake_http.reply(body)
     with pytest.raises(ProviderError, match=f"^{label} response was malformed"):
@@ -378,7 +388,7 @@ def test_malformed_response(fake_http, name, body):
 # Whitespace-only (or think-only) content is an error, not a blank Espanso expansion.
 @ALL
 @pytest.mark.parametrize("text", ["   ", "<think>only reasoning</think>"])
-def test_empty_content(fake_http, name, text):
+def test_empty_content(fake_http: FakeHttp, name: str, text: str | None) -> None:
     build, body, label = PROVIDERS[name]
     fake_http.reply(body(text))
     with pytest.raises(ProviderError, match=f"^{label} returned empty content"):
@@ -387,7 +397,7 @@ def test_empty_content(fake_http, name, text):
 
 # A <think> tag inside the answer is text, not reasoning: the rewrite is not cut short.
 @ALL
-def test_mid_text_think_survives(fake_http, name):
+def test_mid_text_think_survives(fake_http: FakeHttp, name: str) -> None:
     build, body, _ = PROVIDERS[name]
     text = "<INSTRUCTIONS>\n1/ Reason inside <think> tags.\n2/ Keep it short.\n</INSTRUCTIONS>"
     fake_http.reply(body(text))
@@ -396,7 +406,7 @@ def test_mid_text_think_survives(fake_http, name):
 
 # A null content field (some reasoning models) raises ProviderError, not TypeError.
 @pytest.mark.parametrize("name", ["ollama", "openai_compatible", "anthropic"])
-def test_null_content(fake_http, name):
+def test_null_content(fake_http: FakeHttp, name: str) -> None:
     build, body, label = PROVIDERS[name]
     fake_http.reply(body(None))
     with pytest.raises(ProviderError, match=f"^{label} returned no text content"):
@@ -404,7 +414,7 @@ def test_null_content(fake_http, name):
 
 
 # Anthropic joins every text block in order, skipping the others (#32).
-def test_anthropic_joins_text_blocks(fake_http):
+def test_anthropic_joins_text_blocks(fake_http: FakeHttp) -> None:
     fake_http.reply(
         {
             "content": [
@@ -418,7 +428,7 @@ def test_anthropic_joins_text_blocks(fake_http):
 
 
 # Anthropic picks the first text block, skipping thinking blocks.
-def test_anthropic_skips_non_text_blocks(fake_http):
+def test_anthropic_skips_non_text_blocks(fake_http: FakeHttp) -> None:
     fake_http.reply(
         {"content": [{"type": "thinking", "thinking": "reasoning"}, {"type": "text", "text": "ok"}]}
     )
@@ -427,13 +437,13 @@ def test_anthropic_skips_non_text_blocks(fake_http):
 
 # A response with no text block at all (only thinking) has no text content.
 @pytest.mark.parametrize("blocks", [[], [{"type": "thinking", "thinking": "x"}]])
-def test_anthropic_without_text_block(fake_http, blocks):
+def test_anthropic_without_text_block(fake_http: FakeHttp, blocks: list[dict[str, str]]) -> None:
     fake_http.reply({"content": blocks})
     with pytest.raises(ProviderError, match=r"^Anthropic returned no text content"):
         AnthropicProvider("http://x", "m", "key").generate("d", "s")
 
 
-def _stopped(name, text, reason):
+def _stopped(name: str, text: str | None, reason: object) -> dict[str, Any]:
     body = PROVIDERS[name][1](text)
     if name == "ollama":
         body["done_reason"] = reason
@@ -444,13 +454,13 @@ def _stopped(name, text, reason):
     return body
 
 
-def _truncated(name, text):
+def _truncated(name: str, text: str | None) -> dict[str, Any]:
     return _stopped(name, text, "max_tokens" if name == "anthropic" else "length")
 
 
 # A rewrite cut off at the token cap is pasted with a visible note, never as if complete.
 @ALL
-def test_truncated_output_is_marked(fake_http, name):
+def test_truncated_output_is_marked(fake_http: FakeHttp, name: str) -> None:
     build, _, _ = PROVIDERS[name]
     fake_http.reply(_truncated(name, "<CONTEXT>\nhalf a prompt"))
     assert build().generate("d", "s") == "<CONTEXT>\nhalf a prompt" + TRUNCATED_NOTE
@@ -460,7 +470,9 @@ def test_truncated_output_is_marked(fake_http, name):
 # generic "no text content".
 @ALL
 @pytest.mark.parametrize("text", [None, "<think>still thinking"])
-def test_truncated_without_text_asks_for_more_tokens(fake_http, name, text):
+def test_truncated_without_text_asks_for_more_tokens(
+    fake_http: FakeHttp, name: str, text: str | None
+) -> None:
     build, _, label = PROVIDERS[name]
     body = _truncated(name, text)
     if name == "anthropic" and text is None:
@@ -473,7 +485,7 @@ def test_truncated_without_text_asks_for_more_tokens(fake_http, name, text):
 
 
 # An OpenAI-compatible call that sends max_tokens (OpenRouter) suggests --max-tokens.
-def test_truncated_capped_openai_compatible_suggests_max_tokens(fake_http):
+def test_truncated_capped_openai_compatible_suggests_max_tokens(fake_http: FakeHttp) -> None:
     fake_http.reply(_truncated("openai_compatible", None))
     provider = OpenAICompatibleProvider("http://x/v1/", "m", max_tokens=10, label="OpenRouter")
     with pytest.raises(ProviderError, match="output limit before writing any text; raise --max"):
@@ -481,7 +493,7 @@ def test_truncated_capped_openai_compatible_suggests_max_tokens(fake_http):
 
 
 # The note names no provider-specific setting (#32).
-def test_truncated_note_is_provider_neutral():
+def test_truncated_note_is_provider_neutral() -> None:
     assert (
         TRUNCATED_NOTE
         == "\n\n[prompt-workflow: the reply hit the model's output limit and is cut off]"
@@ -491,7 +503,7 @@ def test_truncated_note_is_provider_neutral():
 # A reply that ended normally is pasted as is.
 @ALL
 @pytest.mark.parametrize("reason", ["stop", "end_turn", None, {"unexpected": "shape"}])
-def test_normal_stop_reason(fake_http, name, reason):
+def test_normal_stop_reason(fake_http: FakeHttp, name: str, reason: object) -> None:
     build, _, _ = PROVIDERS[name]
     fake_http.reply(_stopped(name, "a prompt", reason))
     assert build().generate("d", "s") == "a prompt"
@@ -499,7 +511,7 @@ def test_normal_stop_reason(fake_http, name, reason):
 
 # A reply that stopped on an error is a marker, never the partial text.
 @ALL
-def test_error_stop_reason_pastes_nothing(fake_http, name):
+def test_error_stop_reason_pastes_nothing(fake_http: FakeHttp, name: str) -> None:
     build, _, label = PROVIDERS[name]
     fake_http.reply(_stopped(name, "<CONTEXT>\nhalf a", "error"))
     with pytest.raises(ProviderError, match=f"^{label} stopped with an error before") as caught:
@@ -510,7 +522,7 @@ def test_error_stop_reason_pastes_nothing(fake_http, name):
 # A filtered or refused reply keeps its text but says it may be incomplete.
 @ALL
 @pytest.mark.parametrize("reason", ["content_filter", "refusal"])
-def test_filtered_stop_reason_is_marked(fake_http, name, reason):
+def test_filtered_stop_reason_is_marked(fake_http: FakeHttp, name: str, reason: object) -> None:
     build, _, _ = PROVIDERS[name]
     fake_http.reply(_stopped(name, "<CONTEXT>\nhalf a", reason))
     assert build().generate("d", "s") == "<CONTEXT>\nhalf a" + FILTERED_NOTE.format(reason=reason)
@@ -519,7 +531,9 @@ def test_filtered_stop_reason_is_marked(fake_http, name, reason):
 # With no text at all, a refusal says so instead of "no text content".
 @ALL
 @pytest.mark.parametrize("text", [None, ""])
-def test_filtered_without_text_is_declined(fake_http, name, text):
+def test_filtered_without_text_is_declined(
+    fake_http: FakeHttp, name: str, text: str | None
+) -> None:
     build, _, label = PROVIDERS[name]
     body = _stopped(name, text, "refusal")
     if name == "anthropic" and text is None:
@@ -530,7 +544,7 @@ def test_filtered_without_text_is_declined(fake_http, name, text):
 
 
 # API keys never appear in a provider's repr().
-def test_provider_repr_hides_api_key():
+def test_provider_repr_hides_api_key() -> None:
     assert "sekret" not in repr(OpenAICompatibleProvider("http://x", "m", api_key="sekret"))
     assert "sekret" not in repr(AnthropicProvider("http://x", "m", "sekret"))
 
@@ -541,16 +555,16 @@ _PROXY_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY")
 
 
 @contextmanager
-def _http_server(reply: dict) -> Iterator[tuple[str, list[str]]]:
+def _http_server(reply: dict[str, Any]) -> Iterator[tuple[str, list[str]]]:
     """A loopback HTTP server that answers every POST with ``reply`` and records the
     request lines it saw. Used both as a local model server and as a stand-in proxy."""
     seen: list[str] = []
 
     class Handler(BaseHTTPRequestHandler):
-        def log_message(self, *args):
+        def log_message(self, *args: Any) -> None:
             pass
 
-        def do_POST(self):
+        def do_POST(self) -> None:
             self.rfile.read(int(self.headers["Content-Length"]))
             seen.append(self.requestline)
             body = json.dumps(reply).encode()
@@ -570,7 +584,7 @@ def _http_server(reply: dict) -> Iterator[tuple[str, list[str]]]:
         server.server_close()
 
 
-def _route_through_proxy(monkeypatch, route: str, proxy: str) -> None:
+def _route_through_proxy(monkeypatch: pytest.MonkeyPatch, route: str, proxy: str) -> None:
     """Point httpx at ``proxy`` the way a machine can: an env var, or the macOS/Windows
     system proxy that urllib.request.getproxies() reports (patched where httpx calls it)."""
     for var in _PROXY_VARS:
@@ -597,7 +611,9 @@ _LOOPBACK = {
 # A loopback provider connects straight to this machine, whatever proxy is configured.
 @pytest.mark.parametrize("route", ["HTTP_PROXY", "ALL_PROXY", "system"])
 @pytest.mark.parametrize("name", list(_LOOPBACK))
-def test_loopback_provider_bypasses_proxy(monkeypatch, name, route):
+def test_loopback_provider_bypasses_proxy(
+    monkeypatch: pytest.MonkeyPatch, name: str, route: str
+) -> None:
     setting, path, body = _LOOPBACK[name]
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
@@ -611,7 +627,7 @@ def test_loopback_provider_bypasses_proxy(monkeypatch, name, route):
 
 # A remote endpoint still goes through the configured proxy, which corporate networks need.
 @pytest.mark.parametrize("route", ["HTTP_PROXY", "system"])
-def test_remote_provider_keeps_proxy(monkeypatch, route):
+def test_remote_provider_keeps_proxy(monkeypatch: pytest.MonkeyPatch, route: str) -> None:
     monkeypatch.setenv("OLLAMA_BASE_URL", "http://ollama.example.test:11434")
     with _http_server(_ollama_body("ok")) as (proxy, proxy_seen):
         _route_through_proxy(monkeypatch, route, proxy)
@@ -634,7 +650,7 @@ def test_remote_provider_keeps_proxy(monkeypatch, route):
         ("http://localhost.example.com/api/chat", True),
     ],
 )
-def test_post_json_direct_only_on_loopback(fake_http, url, remote):
+def test_post_json_direct_only_on_loopback(fake_http: FakeHttp, url: str, remote: bool) -> None:
     post_json("X", url, 5, json={})
     (kwargs,) = fake_http.client_kwargs
     assert kwargs["timeout"] == httpx.Timeout(5)
@@ -645,7 +661,7 @@ def test_post_json_direct_only_on_loopback(fake_http, url, remote):
 # An API key with a character HTTP forbids in a header (a stray newline) fails without the
 # error repeating the key: httpx's own message quotes the whole header value.
 @pytest.mark.parametrize("name", ["openrouter", "anthropic"])
-def test_bad_header_value_is_not_repeated(monkeypatch, name):
+def test_bad_header_value_is_not_repeated(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
     for var in ("HTTP_PROXY", "ALL_PROXY", "http_proxy", "all_proxy"):
         monkeypatch.delenv(var, raising=False)
     key = "sk-or-v1-" + "cd" * 32 + "\n"
@@ -667,13 +683,13 @@ def test_bad_header_value_is_not_repeated(monkeypatch, name):
 OK = {"json_data": _ollama_body("ok")}
 
 
-def _remote(timeout=30):
+def _remote(timeout: float = 30) -> OllamaProvider:
     return OllamaProvider("http://x", "m", timeout=timeout)
 
 
 # A rate limit or an unavailable upstream is tried once more after a short wait.
 @pytest.mark.parametrize("status", [429, 502, 503, 504, 529])
-def test_transient_status_is_retried_once(fake_http, status):
+def test_transient_status_is_retried_once(fake_http: FakeHttp, status: int) -> None:
     fake_http.queue({"status_code": status}, OK)
     assert _remote().generate("d", "s") == "ok"
     assert len(fake_http.requests) == 2
@@ -682,7 +698,7 @@ def test_transient_status_is_retried_once(fake_http, status):
 
 # The retry waits as long as Retry-After asks, up to 3 seconds.
 @pytest.mark.parametrize(("retry_after", "wait"), [("2", 2.0), ("0", 0.0), ("2.5", 2.5)])
-def test_retry_after_is_honoured(fake_http, retry_after, wait):
+def test_retry_after_is_honoured(fake_http: FakeHttp, retry_after: str, wait: float) -> None:
     fake_http.queue({"status_code": 429, "headers": {"Retry-After": retry_after}}, OK)
     assert _remote().generate("d", "s") == "ok"
     assert fake_http.sleeps == [wait]
@@ -691,7 +707,7 @@ def test_retry_after_is_honoured(fake_http, retry_after, wait):
 # A server that asks for a longer wait, or gives a date, gets no retry: a sooner one would
 # only be refused again, and Espanso is blocked while the CLI waits.
 @pytest.mark.parametrize("retry_after", ["30", "Wed, 21 Oct 2026 07:28:00 GMT", "nan"])
-def test_long_retry_after_is_not_retried(fake_http, retry_after):
+def test_long_retry_after_is_not_retried(fake_http: FakeHttp, retry_after: str) -> None:
     fake_http.queue({"status_code": 429, "headers": {"Retry-After": retry_after}}, OK)
     with pytest.raises(ProviderError, match=r"^Ollama returned HTTP 429"):
         _remote().generate("d", "s")
@@ -701,7 +717,7 @@ def test_long_retry_after_is_not_retried(fake_http, retry_after):
 
 # Other errors are not retried: a 500 is usually the request itself, a 4xx always is.
 @pytest.mark.parametrize("status", [400, 401, 402, 404, 500])
-def test_other_statuses_are_not_retried(fake_http, status):
+def test_other_statuses_are_not_retried(fake_http: FakeHttp, status: int) -> None:
     fake_http.queue({"status_code": status}, OK)
     with pytest.raises(ProviderError, match=f"^Ollama returned HTTP {status}"):
         _remote().generate("d", "s")
@@ -710,7 +726,7 @@ def test_other_statuses_are_not_retried(fake_http, status):
 
 # A refused connection to another machine is retried; to this machine it means the local
 # server is not running, so it is reported at once.
-def test_connect_error_is_retried_only_for_a_remote_host(fake_http):
+def test_connect_error_is_retried_only_for_a_remote_host(fake_http: FakeHttp) -> None:
     fake_http.queue(httpx.ConnectError("refused"), OK)
     assert _remote().generate("d", "s") == "ok"
     assert len(fake_http.requests) == 2
@@ -723,7 +739,7 @@ def test_connect_error_is_retried_only_for_a_remote_host(fake_http):
 
 
 # A timeout is never retried: the server may still be generating, and billing, the reply.
-def test_timeout_is_not_retried(fake_http):
+def test_timeout_is_not_retried(fake_http: FakeHttp) -> None:
     fake_http.queue(httpx.ReadTimeout("slow"), OK)
     with pytest.raises(ProviderError, match=r"^Ollama timed out after 30s"):
         _remote().generate("d", "s")
@@ -731,7 +747,7 @@ def test_timeout_is_not_retried(fake_http):
 
 
 # An unavailable upstream reported inside a 200 reply is retried; another code is not.
-def test_ok_status_with_upstream_error_is_retried(fake_http):
+def test_ok_status_with_upstream_error_is_retried(fake_http: FakeHttp) -> None:
     fake_http.queue({"json_data": {"error": {"code": 502, "message": "Upstream down"}}}, OK)
     assert _remote().generate("d", "s") == "ok"
     assert len(fake_http.requests) == 2
@@ -743,7 +759,7 @@ def test_ok_status_with_upstream_error_is_retried(fake_http):
 
 
 # Only one retry: a second failure is reported, as itself.
-def test_second_failure_is_reported(fake_http):
+def test_second_failure_is_reported(fake_http: FakeHttp) -> None:
     fake_http.queue({"status_code": 503}, {"status_code": 502}, OK)
     with pytest.raises(ProviderError, match=r"^Ollama returned HTTP 502") as caught:
         _remote().generate("d", "s")
@@ -753,7 +769,7 @@ def test_second_failure_is_reported(fake_http):
 
 # The retry shares the call's time limit: none is made without a second of it left, and a
 # retry gets only what is left.
-def test_retry_fits_the_time_limit(fake_http):
+def test_retry_fits_the_time_limit(fake_http: FakeHttp) -> None:
     fake_http.queue({"status_code": 503})
     with pytest.raises(ProviderError, match=r"^Ollama returned HTTP 503"):
         _remote(timeout=1.5).generate("d", "s")
@@ -774,10 +790,10 @@ def _trickle_server(interval: float, chunks: int) -> Iterator[str]:
     and only then the JSON reply: httpx's read timer restarts with every newline."""
 
     class Handler(BaseHTTPRequestHandler):
-        def log_message(self, *args):
+        def log_message(self, *args: Any) -> None:
             pass
 
-        def do_POST(self):
+        def do_POST(self) -> None:
             self.rfile.read(int(self.headers["Content-Length"]))
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -804,7 +820,7 @@ def _trickle_server(interval: float, chunks: int) -> Iterator[str]:
 
 # The time limit holds even when the server keeps the connection alive with a byte now and
 # then: the call ends within one gap between bytes of the limit, not when the server is done.
-def test_trickling_server_hits_the_time_limit(monkeypatch):
+def test_trickling_server_hits_the_time_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     for var in ("HTTP_PROXY", "ALL_PROXY", "http_proxy", "all_proxy"):
         monkeypatch.delenv(var, raising=False)
     with _trickle_server(interval=0.2, chunks=25) as url:

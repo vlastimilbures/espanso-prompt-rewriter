@@ -1,6 +1,8 @@
 import base64
 import re
 import time
+from collections.abc import Iterable
+from typing import Any
 
 import pytest
 
@@ -8,52 +10,52 @@ from prompt_workflow.redaction import compile_extra, is_bare_token, safe_repr, s
 
 
 # scan() flags a Luhn-valid payment card number.
-def test_detects_payment_card():
+def test_detects_payment_card() -> None:
     assert "payment_card" in scan("card 4111 1111 1111 1111")
 
 
 # scan() does not flag a digit run that fails the Luhn checksum.
-def test_ignores_non_luhn_digit_run():
+def test_ignores_non_luhn_digit_run() -> None:
     assert "payment_card" not in scan("order id 1234 5678 9012 3456")
 
 
 # scan() flags an email address.
-def test_detects_email():
+def test_detects_email() -> None:
     assert "email" in scan("contact john.doe@example.com")
 
 
 # scan() flags a confidentiality label like "CONFIDENTIAL".
-def test_detects_confidential_label():
+def test_detects_confidential_label() -> None:
     assert "confidential_label" in scan("This is CONFIDENTIAL material")
 
 
 # scan() flags a Vietnamese national ID number.
-def test_detects_vietnam_id():
+def test_detects_vietnam_id() -> None:
     assert "vietnam_id_12" in scan("ID 012345678901")
 
 
 # scan() flags a 9-digit Vietnamese ID only alongside a context keyword.
-def test_detects_vietnam_id_9_with_context():
+def test_detects_vietnam_id_9_with_context() -> None:
     assert "vietnam_id_9" in scan("CMND so 123456789")
 
 
 # scan() does not flag a bare 9-digit number with no ID context.
-def test_ignores_bare_9_digit_number():
+def test_ignores_bare_9_digit_number() -> None:
     assert scan("123456789") == []
 
 
 # scan() does not flag a large plain number like a formatted amount.
-def test_ignores_large_plain_number():
+def test_ignores_large_plain_number() -> None:
     assert scan("budget is 1,500,000,000 VND") == []
 
 
 # scan() flags an AWS access key ID.
-def test_detects_aws_access_key():
+def test_detects_aws_access_key() -> None:
     assert "aws_access_key" in scan("key AKIAIOSFODNN7EXAMPLE")
 
 
 # scan() flags a JWT (assembled at runtime, like the fake keys below).
-def test_detects_jwt():
+def test_detects_jwt() -> None:
     token = ".".join(
         [
             "eyJhbGciOiJIUzI1NiJ9",
@@ -68,17 +70,17 @@ def test_detects_jwt():
 @pytest.mark.parametrize(
     "kind", ["RSA PRIVATE KEY", "OPENSSH PRIVATE KEY", "PGP PRIVATE KEY BLOCK"]
 )
-def test_detects_pem_private_key(kind):
+def test_detects_pem_private_key(kind: str) -> None:
     assert "pem_private_key" in scan(f"-----BEGIN {kind}-----\nMIIB...")
 
 
 # Text with no sensitive matches returns no findings.
-def test_clean_text_has_no_findings():
+def test_clean_text_has_no_findings() -> None:
     assert scan("Summarize the quarterly risk trend in plain terms") == []
 
 
 # Text with a sensitive match returns findings.
-def test_dirty_text_has_findings():
+def test_dirty_text_has_findings() -> None:
     assert scan("customer data for account 4111 1111 1111 1111") != []
 
 
@@ -105,12 +107,12 @@ _BODY = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"
         ("xai-" + _BODY, "xai_key"),
     ],
 )
-def test_detects_vendor_keys(text, name):
+def test_detects_vendor_keys(text: str, name: str) -> None:
     assert name in scan(f"use key {text} please")
 
 
 # An OpenRouter or Anthropic key is reported under its own name, not also as an OpenAI key.
-def test_vendor_keys_are_not_double_reported_as_openai():
+def test_vendor_keys_are_not_double_reported_as_openai() -> None:
     assert "openai_key" not in scan("sk-or-v1-" + "0123456789abcdef" * 4)
     assert "openai_key" not in scan("sk-ant-api03-" + _BODY)
 
@@ -134,7 +136,7 @@ def test_vendor_keys_are_not_double_reported_as_openai():
     ],
     ids=["jwt-x5c", "openrouter", "anthropic", "openai-proj", "github-pat", "bearer", "bearer-6k"],
 )
-def test_detects_longest_real_secrets(text, name):
+def test_detects_longest_real_secrets(text: str, name: str) -> None:
     assert name in scan(f"use {text} please")
 
 
@@ -170,20 +172,20 @@ _SIG = "s1-G_" * 137
         "pem-70-label",
     ],
 )
-def test_bounded_patterns_flag_what_unbounded_ones_did(text, name):
+def test_bounded_patterns_flag_what_unbounded_ones_did(text: str, name: str) -> None:
     assert re.search(_UNBOUNDED[name], text)
     assert name in scan(f"use {text} please")
 
 
 # Every repeat in a built-in pattern has an upper bound, as the comment on _PATTERNS says:
 # an unbounded one is tried at every start position and makes a long run quadratic.
-def test_builtin_patterns_have_no_unbounded_repeat():
+def test_builtin_patterns_have_no_unbounded_repeat() -> None:
     import re._constants as sre
     import re._parser as parser
 
     from prompt_workflow.redaction import _PATTERNS
 
-    def unbounded(items) -> bool:
+    def unbounded(items: Iterable[tuple[Any, Any]]) -> bool:
         for op, av in items:
             if op in (sre.MAX_REPEAT, sre.MIN_REPEAT, sre.POSSESSIVE_REPEAT):
                 if av[1] == sre.MAXREPEAT or unbounded(av[2]):
@@ -217,23 +219,23 @@ _B64_JSON = "eyJ" + "a1B2" * 5
     ],
     ids=["jsonl-backup", "plain-payload", "bearer-dashes", "bearer-dots"],
 )
-def test_short_patterns_add_no_false_positive(text, name):
+def test_short_patterns_add_no_false_positive(text: str, name: str) -> None:
     assert name not in scan(text)
 
 
 # Short or prose-like near misses are not flagged as keys.
 @pytest.mark.parametrize("text", ["sk-learn is a library", "the ghp_ prefix", "AIza short"])
-def test_ignores_key_near_misses(text):
+def test_ignores_key_near_misses(text: str) -> None:
     assert scan(text) == []
 
 
 # scan() flags credentials embedded in a URL.
-def test_detects_url_credentials():
+def test_detects_url_credentials() -> None:
     assert "url_credentials" in scan("dsn postgres://app:s3cretpw@db.internal:5432/x")
 
 
 # A URL without a user:password part is not flagged.
-def test_ignores_url_without_credentials():
+def test_ignores_url_without_credentials() -> None:
     assert scan("see https://example.com:8080/path") == []
 
 
@@ -256,7 +258,7 @@ _VALUE = "a1b2c3" * 2
         "export GITHUB_TOKEN=",
     ],
 )
-def test_detects_secret_assignment(name):
+def test_detects_secret_assignment(name: str) -> None:
     assert "secret_assignment" in scan(f"{name}'{_VALUE}'")
 
 
@@ -271,41 +273,41 @@ def test_detects_secret_assignment(name):
         "passwords: see policy doc",
     ],
 )
-def test_ignores_secret_assignment_near_misses(text):
+def test_ignores_secret_assignment_near_misses(text: str) -> None:
     assert scan(text) == []
 
 
 # A dot-separated card number is still a card.
-def test_detects_dotted_payment_card():
+def test_detects_dotted_payment_card() -> None:
     assert "payment_card" in scan("card 4111.1111.1111.1111")
 
 
 # User-defined patterns are reported by position, never by pattern text.
-def test_extra_patterns_reported_by_position():
+def test_extra_patterns_reported_by_position() -> None:
     extra = compile_extra("project[- ]falcon; CUST-\\d{6}")
     assert scan("status of Project Falcon for CUST-123456", extra) == ["custom_1", "custom_2"]
 
 
 # Empty entries in PROMPT_EXTRA_PATTERNS are skipped.
-def test_extra_patterns_skip_empty_entries():
+def test_extra_patterns_skip_empty_entries() -> None:
     assert compile_extra(" ; ;") == ()
 
 
 # An invalid user regex raises ValueError naming its position, not its text, with the
 # custom_N name a finding of that entry gets (both count the non-empty entries from 1).
-def test_extra_patterns_invalid_regex():
+def test_extra_patterns_invalid_regex() -> None:
     with pytest.raises(ValueError, match=r"entry 2 \(custom_2\) is not") as exc:
         compile_extra("ok;secret[")
     assert "secret" not in str(exc.value)
 
 
 # scan() flags a Bearer token.
-def test_detects_bearer_token():
+def test_detects_bearer_token() -> None:
     assert "bearer_token" in scan("Authorization: Bearer abcdefghijklmnop1234")
 
 
 # scan() flags confidentiality labels in English and Vietnamese.
-def test_detects_confidentiality_label_variants():
+def test_detects_confidentiality_label_variants() -> None:
     for text in (
         "marked RESTRICTED",
         "for internal only use",
@@ -316,19 +318,19 @@ def test_detects_confidentiality_label_variants():
 
 
 # scan() returns every matching finding, not just the first.
-def test_scan_returns_multiple_findings():
+def test_scan_returns_multiple_findings() -> None:
     findings = scan("CONFIDENTIAL: contact john.doe@example.com about card 4111 1111 1111 1111")
     assert {"confidential_label", "email", "payment_card"} <= set(findings)
 
 
 # A Luhn-failing digit run before a real card must not hide the card: scan() checks
 # every candidate match, not just the first one.
-def test_detects_card_after_non_luhn_digit_run():
+def test_detects_card_after_non_luhn_digit_run() -> None:
     assert "payment_card" in scan("order 1234 5678 9012 3456, card 4111 1111 1111 1111")
 
 
 # A Luhn-failing digit run after a real card is irrelevant to the finding.
-def test_detects_card_before_non_luhn_digit_run():
+def test_detects_card_before_non_luhn_digit_run() -> None:
     assert "payment_card" in scan("card 4111 1111 1111 1111, order 1234 5678 9012 3456")
 
 
@@ -356,18 +358,18 @@ def test_detects_card_before_non_luhn_digit_run():
         + "4111 1111 1111 1111".translate({ord(d): ord(d) + 0xFF10 - 0x30 for d in "0123456789"}),
     ],
 )
-def test_detects_card_behind_unicode_separators(text):
+def test_detects_card_behind_unicode_separators(text: str) -> None:
     assert "payment_card" in scan(text)
 
 
 # A zero-width space inside a vendor key does not hide it.
-def test_detects_key_split_by_zero_width_space():
+def test_detects_key_split_by_zero_width_space() -> None:
     key = "sk-ant-" + "\u200b".join("a" * 30)
     assert "anthropic_key" in scan(key)
 
 
 # Normalization only adds findings: a raw-text match still counts.
-def test_custom_pattern_matches_raw_text():
+def test_custom_pattern_matches_raw_text() -> None:
     assert scan("\uff21BC", compile_extra("\uff21BC")) == ["custom_1"]
 
 
@@ -466,7 +468,7 @@ def test_custom_pattern_matches_raw_text():
         "bearer-dashes",
     ],
 )
-def test_scan_is_fast_on_adversarial_input(text):
+def test_scan_is_fast_on_adversarial_input(text: str) -> None:
     started = time.process_time()
     scan_draft(text)
     assert time.process_time() - started < 2
@@ -485,7 +487,7 @@ def test_scan_is_fast_on_adversarial_input(text):
         ("a=b", "<redacted, 3 chars; two .env lines may have run together>"),
     ],
 )
-def test_safe_repr(raw, expected):
+def test_safe_repr(raw: str, expected: str) -> None:
     assert safe_repr(raw) == expected
 
 
@@ -709,19 +711,19 @@ MUST_PASS = [
 
 
 @pytest.mark.parametrize(("text", "name"), MUST_DETECT)
-def test_gate_corpus_detects(text, name):
+def test_gate_corpus_detects(text: str, name: str) -> None:
     assert name in scan_draft(text)
 
 
 @pytest.mark.parametrize("text", MUST_PASS)
-def test_gate_corpus_passes(text):
+def test_gate_corpus_passes(text: str) -> None:
     assert scan_draft(text) == []
 
 
 # The camelCase name boundary is case-sensitive: MYAPIKEY is one word, not MY + APIKEY, even
 # though the pattern ignores case. Names that end a compound env name (PASSWORD, TOKEN,
 # SECRET) match anywhere, but not as the start of a longer word.
-def test_secret_name_boundaries():
+def test_secret_name_boundaries() -> None:
     assert "secret_assignment" not in scan("rename MYAPIKEY=abc12345678 to X")
     assert "secret_assignment" in scan("rename myApiKey=abc12345678 to X")
     assert "secret_assignment" in scan("rename MYTOKEN=abc12345678 to X")
@@ -730,7 +732,7 @@ def test_secret_name_boundaries():
 
 # bare_token is a whole-draft rule: a password-like word inside a sentence is left to the
 # other patterns, and only the gate applies it (safe_repr still quotes a short setting value).
-def test_bare_token_is_whole_draft_only():
+def test_bare_token_is_whole_draft_only() -> None:
     assert not is_bare_token(f"my vault entry {_PW}x is old")
     assert is_bare_token(_PW + "x")
     assert scan(_PW + "x") == []
@@ -741,7 +743,7 @@ def test_bare_token_is_whole_draft_only():
 @pytest.mark.parametrize(
     "text", ["Ab1!x", "A" * 201 + "b1!", "abcdefgh1", "ABCD-1234", "Abcdefghij", "abc_def!x"]
 )
-def test_bare_token_needs_length_and_classes(text):
+def test_bare_token_needs_length_and_classes(text: str) -> None:
     assert not is_bare_token(text)
 
 
@@ -750,7 +752,7 @@ def test_bare_token_needs_length_and_classes(text):
 @pytest.mark.parametrize(
     "text", ["CZ65 0800 0000 1920 0014 5398", "QQ65 0800 0000 1920 0014 5399", "DE89 3704 0044"]
 )
-def test_iban_needs_checksum_and_length(text):
+def test_iban_needs_checksum_and_length(text: str) -> None:
     assert "iban" not in scan(text)
 
 
@@ -763,7 +765,7 @@ def test_iban_needs_checksum_and_length(text):
         "Basic abc=defgh",
     ],
 )
-def test_basic_auth_needs_user_password(text):
+def test_basic_auth_needs_user_password(text: str) -> None:
     assert "basic_auth" not in scan(text)
 
 
@@ -778,7 +780,7 @@ def test_basic_auth_needs_user_password(text):
     ],
     ids=["continued-twice", "next-line", "other-word", "other-command"],
 )
-def test_curl_user_needs_the_curl_command(text, flagged):
+def test_curl_user_needs_the_curl_command(text: str, flagged: bool) -> None:
     assert ("curl_user" in scan(text)) == flagged
 
 
@@ -791,13 +793,13 @@ def test_curl_user_needs_the_curl_command(text, flagged):
         "jane@example.com about the Q3 plan",
     ],
 )
-def test_email_without_password_is_soft(text):
+def test_email_without_password_is_soft(text: str) -> None:
     assert scan_draft(text) == ["email"]
 
 
 # safe_repr() and redact_words() also describe a value that matches one of the user's
 # PROMPT_EXTRA_PATTERNS once settings have loaded them (#32).
-def test_safe_repr_honours_user_patterns(monkeypatch):
+def test_safe_repr_honours_user_patterns(monkeypatch: pytest.MonkeyPatch) -> None:
     from prompt_workflow import redaction
     from prompt_workflow.config import Settings
 

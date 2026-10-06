@@ -8,6 +8,7 @@ import tomllib
 from datetime import date
 from pathlib import Path
 from types import ModuleType
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -25,8 +26,12 @@ def _load(name: str) -> ModuleType:
     return module
 
 
-notes = _load("release_notes")
-check_wheel = _load("check_wheel")
+if TYPE_CHECKING:
+    import check_wheel
+    import release_notes as notes
+else:
+    notes = _load("release_notes")
+    check_wheel = _load("check_wheel")
 
 GOOD = """# Changelog
 
@@ -56,20 +61,20 @@ First release.
 
 # The release workflow tags the pyproject version with the notes of its CHANGELOG section, so
 # the newest section must be that version, dated (#28).
-def test_changelog_newest_version_is_the_pyproject_version():
+def test_changelog_newest_version_is_the_pyproject_version() -> None:
     pyproject = tomllib.loads((REPO / "pyproject.toml").read_text("utf-8"))
     changelog = (REPO / "CHANGELOG.md").read_text("utf-8")
     release = notes.current(changelog, pyproject["project"]["version"])
     assert release.notes
 
 
-def test_every_changelog_version_is_dated():
+def test_every_changelog_version_is_dated() -> None:
     found = notes.releases((REPO / "CHANGELOG.md").read_text("utf-8"))
     assert "0.10.0" in [r.version for r in found]
     assert all(isinstance(r.date, date) for r in found)
 
 
-def test_releases_parses_sections():
+def test_releases_parses_sections() -> None:
     found = notes.releases(GOOD)
     assert [r.version for r in found] == ["1.2.0", "1.1.0", "1.0.0"]
     assert found[0].date == date(2026, 10, 4)
@@ -91,12 +96,12 @@ def test_releases_parses_sections():
         ("## Unreleased\n\n- x\n", "no released version"),
     ],
 )
-def test_releases_rejects(text, error):
+def test_releases_rejects(text: str, error: str) -> None:
     with pytest.raises(ValueError, match=error):
         notes.releases(text)
 
 
-def test_current_requires_the_newest_version():
+def test_current_requires_the_newest_version() -> None:
     assert notes.current(GOOD, "1.2.0").version == "1.2.0"
     with pytest.raises(
         ValueError, match=r"newest CHANGELOG version is 1\.2\.0, pyproject has 1\.3"
@@ -104,7 +109,7 @@ def test_current_requires_the_newest_version():
         notes.current(GOOD, "1.3.0")
 
 
-def _project(tmp_path, version="1.2.0"):
+def _project(tmp_path: Path, version: str = "1.2.0") -> list[str]:
     (tmp_path / "CHANGELOG.md").write_text(GOOD, encoding="utf-8")
     (tmp_path / "pyproject.toml").write_text(
         f'[project]\nname = "x"\nversion = "{version}"\n', encoding="utf-8"
@@ -117,7 +122,7 @@ def _project(tmp_path, version="1.2.0"):
     ]
 
 
-def test_main_prints_version_and_notes(tmp_path, capsys):
+def test_main_prints_version_and_notes(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     args = _project(tmp_path)
     notes.main(["version", *args])
     assert capsys.readouterr().out == "1.2.0"
@@ -125,7 +130,7 @@ def test_main_prints_version_and_notes(tmp_path, capsys):
     assert capsys.readouterr().out == "Upgrading: read this.\n\n### Fixed\n- A bug.\n"
 
 
-def test_main_prints_an_older_release(tmp_path, capsys):
+def test_main_prints_an_older_release(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     args = _project(tmp_path, "9.9.9")  # --release does not look at the pyproject version
     notes.main(["notes", "--release", "1.0.0", *args])
     assert capsys.readouterr().out == "First release.\n"
@@ -133,7 +138,7 @@ def test_main_prints_an_older_release(tmp_path, capsys):
         notes.main(["notes", "--release", "0.9.0", *args])
 
 
-def test_main_fails_on_a_mismatch(tmp_path):
+def test_main_fails_on_a_mismatch(tmp_path: Path) -> None:
     with pytest.raises(SystemExit, match="release_notes: the newest CHANGELOG version"):
         notes.main(["version", *_project(tmp_path, "2.0.0")])
 
@@ -149,13 +154,13 @@ httpx==0.28.1
 """
 
 
-def test_constraints_match_the_installed_versions():
+def test_constraints_match_the_installed_versions() -> None:
     # Name normalisation; a marker-excluded pin (colorama off Windows) has nothing to compare.
     installed = {"HTTPX": "0.28.1", "typing_extensions": "4.16.0"}
     assert check_wheel.constraint_mismatches(CONSTRAINTS, installed) == []
 
 
-def test_constraints_report_drift_and_unpinned():
+def test_constraints_report_drift_and_unpinned() -> None:
     installed = {"httpx": "0.28.2", "rich": "15.0.0"}
     assert check_wheel.constraint_mismatches(CONSTRAINTS, installed) == [
         "httpx 0.28.2 (constraints: 0.28.1)",
@@ -163,14 +168,14 @@ def test_constraints_report_drift_and_unpinned():
     ]
 
 
-def test_constraints_reject_an_unpinned_line():
+def test_constraints_reject_an_unpinned_line() -> None:
     with pytest.raises(ValueError, match="not name==version"):
         check_wheel.constraint_mismatches("httpx>=0.27\n", {})
 
 
 # The release's constraints.txt is the workflow's `uv export` of uv.lock: every pin is the
 # locked version, and every locked runtime dependency is pinned.
-def test_constraints_export_matches_the_lock():
+def test_constraints_export_matches_the_lock() -> None:
     uv = shutil.which("uv")
     if uv is None:
         pytest.skip("uv not on PATH")
