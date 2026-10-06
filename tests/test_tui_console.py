@@ -842,14 +842,13 @@ async def _open_recipes(app: ManageApp, pilot: Pilot[int]) -> PickModal:
     app.main.query_one("#home-recipes", Button).press()
     await settle(pilot)
     picker = _picker(app)
-    assert picker.query_one("#cancel", Button).has_focus
+    assert picker.query_one("#pick", OptionList).has_focus
     return picker
 
 
 async def _pick(app: ManageApp, pilot: Pilot[int], argv: tuple[str, ...]) -> None:
     picker = await _open_recipes(app, pilot)
     options = picker.query_one("#pick", OptionList)
-    options.focus()
     options.highlighted = [r.argv for r in teach.RECIPES].index(argv)
     await pilot.press("enter")
     await settle(pilot)
@@ -919,7 +918,7 @@ def test_cancel_keeps_the_typed_line(how: str) -> None:
         if how == "esc":
             await pilot.press("escape")
         else:
-            await pilot.press("enter")  # Cancel has the focus
+            _picker(app).query_one("#cancel", Button).press()
         await settle(pilot)
         assert not isinstance(app.screen, PickModal)
         assert line.value == "doctor --js"
@@ -955,7 +954,9 @@ def test_copy_command_copies_the_latest_command(
         button.press()
         await settle(pilot)
         assert copied == ["promptmend doctor --json --no-clipboard"]
-        assert _home(app).last_message == "Copied: promptmend doctor --json --no-clipboard"
+        assert _home(app).last_message == (
+            "Sent to the terminal clipboard (OSC 52): promptmend doctor --json --no-clipboard"
+        )
         # Copying is not an action of its own in the session log.
         assert len(app.session) == 2
 
@@ -974,3 +975,16 @@ def test_copy_command_with_an_empty_session_copies_nothing(
         assert copied == []
 
     drive(scenario)
+
+
+@pytest.mark.parametrize("recipe", teach.RECIPES, ids=lambda r: r.argv[0][:6] + str(len(r.argv)))
+def test_a_recipe_line_splits_back_and_parses(recipe: teach.Recipe) -> None:
+    line = teach.line(*recipe.argv)
+    assert console.split(line) == list(recipe.argv)
+    console.resolve(console.split(line))
+
+
+def test_line_quotes_a_value_that_needs_it() -> None:
+    line = teach.line("config", "set", "X", "a b'c")
+    assert line.startswith("config set X ")
+    assert console.split(line) == ["config", "set", "X", "a b'c"]

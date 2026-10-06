@@ -3,6 +3,7 @@ a list to pick from (Home's recipes).
 
 A destructive action always goes through one of them: nothing is deleted, overwritten or
 deployed until its button is pressed, and Cancel (or Escape, or n) is the focused default.
+The pick list, which changes nothing by itself, focuses its list instead.
 """
 
 from __future__ import annotations
@@ -110,8 +111,8 @@ class TextModal(_Dialog[None]):
 
 class PickModal(_Dialog[str | None]):
     """A list to pick one line from (Home's recipes); returns the picked value, or None when
-    cancelled. Picking changes nothing by itself. Cancel has the focus when it opens, as in
-    every dialog; Tab (or shift+Tab) reaches the list, Enter or a click picks."""
+    cancelled. Picking changes nothing by itself, so the list has the focus when it opens
+    (Enter or a click picks); Escape or Cancel closes it."""
 
     def __init__(self, title: str, choices: Sequence[tuple[str, str]], preview: str = "") -> None:
         super().__init__(title, preview, None)
@@ -129,7 +130,7 @@ class PickModal(_Dialog[str | None]):
                 yield Button("Cancel", id="cancel")
 
     def on_mount(self) -> None:
-        self.query_one("#cancel", Button).focus()
+        self.query_one("#pick", OptionList).focus()
 
     @on(OptionList.OptionSelected, "#pick")
     def _picked(self, event: OptionList.OptionSelected) -> None:

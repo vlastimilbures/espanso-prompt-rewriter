@@ -29,9 +29,10 @@ All notable changes to this project are documented here. The format follows
 - Home has two more buttons (#111). Recipes… lists the commands Home suggests before you
   have done anything; picking one puts it on the command line, ready to edit, and runs
   nothing until Enter (`secrets set OPENROUTER_API_KEY` only fills in the key's name: Enter
-  then opens the hidden key dialog). Copy command copies this session's latest command, as
-  Home's session log shows it (a key withheld), through the terminal (OSC 52); it is disabled
-  until there is one, and the interface never reads the clipboard.
+  then opens the hidden key dialog). Copy last sends this session's latest command, exactly
+  as Home's session log shows it (withheld values such as `<value withheld>` and placeholders
+  included), to the terminal's clipboard (OSC 52; a terminal may need it allowed, or drop
+  it); it is disabled until there is one, and the interface never reads the clipboard.
 - The interface has a seventh tab, Try (#111, key `7`): type a draft, pick Local stub or Real
   provider, the provider, profile ("as configured" by default, as a trigger) and tier, and
   press Run to see the rewrite a trigger would paste. It never reads or writes the clipboard

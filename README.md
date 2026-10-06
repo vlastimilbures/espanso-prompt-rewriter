@@ -220,9 +220,11 @@ Every button's tooltip shows the command that does the same in a terminal, every
 starts with that command (`$ promptmend config set …`), and Home lists this session's
 commands, or a few useful ones before you have done anything. Home's Recipes… button lists
 those useful ones; picking one puts it on the command line below (nothing runs until you
-press Enter there; Cancel leaves the line as it was). Copy command copies the session's
-latest command in full (such as `promptmend doctor --json --no-clipboard`) through the
-terminal (OSC 52; some terminals need it allowed); the interface never reads the clipboard.
+press Enter there; Escape or Cancel leaves the line as it was). Copy last sends the
+session's latest command, exactly as the session log shows it (withheld values such as
+`<value withheld>` and placeholders included), to the terminal's clipboard (OSC 52; some
+terminals, tmux or SSH sessions need it allowed, or drop it); the interface never reads the
+clipboard.
 
 Home also has a command line: press `c` (from any tab) and type a command, such as
 `espanso status --diff`. It completes the word you are typing (Tab or the Right arrow takes

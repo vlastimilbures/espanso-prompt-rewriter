@@ -71,7 +71,8 @@ NOTES = {
 NO_COMMAND = {
     "import-check": "Imports the CLI in a fresh interpreter and times it; no command.",
     "home-recipes": "Puts a recipe on the command line below; runs nothing until Enter.",
-    "home-copy": "Copies the session's latest command to the clipboard (terminal: OSC 52).",
+    "home-copy": "Copy the latest command of this session, as Home's log shows it, to the\n"
+    "terminal clipboard (OSC 52); the clipboard is never read.",
     "previous-enter": "",
     "previous-skip": "",
     "previous-close": "",

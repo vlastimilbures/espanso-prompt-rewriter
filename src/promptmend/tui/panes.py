@@ -257,7 +257,7 @@ class HomePane(Pane):
             ("home-reload", "Check again"),
             ("home-previous", "Previous install…"),
             ("home-recipes", "Recipes…"),
-            ("home-copy", "Copy command"),
+            ("home-copy", "Copy last"),
         )
         # The command line (#111): completes, explains and runs a command (console.POLICY).
         help_line = Static(describe(""), id="home-command-help", markup=False)
@@ -378,13 +378,14 @@ class HomePane(Pane):
 
     @on(Button.Pressed, "#home-copy")
     def _copy(self) -> None:
-        """Copy this session's latest command, in full (it pastes into a script), through the
-        terminal (Textual's OSC 52): written only, the clipboard is never read."""
+        """Send this session's latest command, as the session log shows it (withheld values
+        and placeholders included), to the terminal's clipboard (Textual's OSC 52): written
+        only, the clipboard is never read. The terminal may drop it, so the report says sent."""
         if not self.manage.session:
             return
         command = self.manage.session[-1].command
         self.app.copy_to_clipboard(command)
-        self.report(f"Copied: {command}")
+        self.report(f"Sent to the terminal clipboard (OSC 52): {command}")
 
 
 # --- Providers ----------------------------------------------------------------------------
