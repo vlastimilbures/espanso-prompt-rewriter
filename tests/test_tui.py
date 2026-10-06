@@ -6,6 +6,7 @@ test calls a provider."""
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import os
 import re
@@ -17,19 +18,21 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from textual.pilot import Pilot
-from textual.widgets import Button, Input, Select
+from textual.widgets import Button, Input, Select, Static
 
 from prompt_workflow import config, config_store, deploy, doctor, history, smoke
 from prompt_workflow import profiles as profile_service
 from prompt_workflow.history import HistoryStore
 from prompt_workflow.tui import panes
 from prompt_workflow.tui.app import HIGH_CONTRAST, ManageApp
+from prompt_workflow.tui.home import pill
 from prompt_workflow.tui.modals import ConfirmModal, FormModal, TextModal
 from prompt_workflow.tui.previous import PreviousInstallScreen
 from prompt_workflow.tui.state import State, gather
 
 if TYPE_CHECKING:
     from conftest import SeedHistory
+    from textual.widget import Widget
     from typer.testing import Result
 
 # Built at runtime, so no key-shaped literal lands in the repo (gitleaks).
@@ -223,9 +226,13 @@ def test_header_shows_the_name_and_installed_version(
         seen.append(str(app.main.query_one(HeaderTitle).render()))
         await pilot.press("6")
         seen.append(str(app.main.query_one(HeaderTitle).render()))
+        assert app.state is not None
+        seen.append(pill(app.state.report))
 
     drive(scenario)
-    assert seen == ["prompt-workflow 9.8.7 — set up and manage"] * 2
+    # Then the status pill (#112): the espanso fixture leaves the key unset, a problem.
+    assert "problem" in seen[-1]
+    assert seen[:2] == [f"prompt-workflow 9.8.7 — set up and manage · {seen[-1]}"] * 2
 
 
 def test_a_failing_load_is_shown_not_raised(espanso: FakeRunner) -> None:
@@ -289,6 +296,16 @@ def test_no_color_is_left_to_textual(monkeypatch: pytest.MonkeyPatch, espanso: F
 # --- Home ---------------------------------------------------------------------------------
 
 
+def _rendered(widget: Widget, selector: str, width: int = 116) -> str:
+    """What a Static shows, as plain text at ``width`` columns (Home's grids are Rich
+    tables, not Text)."""
+    from rich.console import Console
+
+    console = Console(width=width, record=True, color_system=None, file=io.StringIO())
+    console.print(widget.query_one(selector, Static).content)
+    return console.export_text()
+
+
 def test_home_shows_doctor_and_checks_again(espanso: FakeRunner) -> None:
     calls: list[str] = []
 
@@ -297,9 +314,18 @@ def test_home_shows_doctor_and_checks_again(espanso: FakeRunner) -> None:
         return gather(group_by)
 
     async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
-        text = str(pane(app, "home").query_one("#home-checks").render())
-        assert "espanso: running" in text
-        assert "keys: PROMPT_PROVIDER is openrouter but OPENROUTER_API_KEY is not set" in text
+        home = app.main.query_one("#home-pane", panes.HomePane)
+        rows = {row.label: row for row in home.rows}
+        assert rows["Triggers"].text.endswith("Espanso running")
+        assert (rows["Rewrites"].status, rows["Rewrites"].detail) == ("fail", "key not set")
+        assert rows["Checks"].problem == (
+            "keys: PROMPT_PROVIDER is openrouter but OPENROUTER_API_KEY is not set"
+        )
+        shown = _rendered(home, "#home-headline") + _rendered(home, "#home-rows")
+        assert "Not ready: OPENROUTER_API_KEY is not set, so -i- cannot rewrite." in shown
+        assert "fail  Rewrites" not in shown  # the label is FAIL, as in Diagnostics
+        assert "FAIL  Rewrites" in shown
+        assert "-> 2 Providers & keys" in shown
         await press(app, pilot, "#home-reload")
         await pilot.press("r")
         await settle(pilot)
@@ -323,8 +349,11 @@ def test_home_warns_of_a_persona_matching_the_patterns(
     )
 
     async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
-        home = str(pane(app, "home").query_one("#home-checks").render())
-        assert "[warn] " + warning in home
+        home = _rendered(pane(app, "home"), "#home-rows")
+        home_pane = app.main.query_one("#home-pane", panes.HomePane)
+        checks = {row.label: row for row in home_pane.rows}["Checks"]
+        assert checks.status == "fail"  # the missing key; the persona is the warning
+        assert " 0 warn" not in checks.text
         everything = str(pane(app, "diagnostics").query_one("#all-checks").render())
         assert warning in everything
         assert address not in home + everything

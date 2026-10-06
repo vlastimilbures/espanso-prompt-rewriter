@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import typer
+from rich.table import Table
 from rich.text import Text
 from textual import on, work
 from textual.app import ComposeResult
@@ -30,6 +31,7 @@ from ..config import env_names, secret_names
 from ..config_files import SecretStoreError
 from ..factory import PROVIDER_NAMES, routes
 from ..prompt_builder import ADDED, ALIASES, PROFILES, user_profiles_dir
+from .home import TAB_LABELS, HomeRow, headline, home_rows
 from .modals import ConfirmModal, Field, FormModal, TextModal
 from .state import State, current_plan
 
@@ -146,35 +148,59 @@ def _error(exc: Exception) -> str:
 
 # --- Home ---------------------------------------------------------------------------------
 
-HOME_CHECKS = (
-    "version",
-    "install",
-    "config",
-    "keys",
-    "persona",
-    "espanso",
-    "match_files",
-    "launcher",
-    "previous_install",
-)
+
+def _jump(tab: str | None) -> str:
+    return f"-> {TAB_LABELS[tab]}" if tab else ""
+
+
+def home_table(rows: Sequence[HomeRow]) -> Table:
+    """Home's rows as a grid: the status word (coloured, but the word says it), the label, the
+    text (cut with … when the terminal is narrow), the detail and, for a row that is not ok,
+    the tab to go to."""
+    grid = Table.grid(padding=(0, 2), expand=True)
+    grid.add_column(width=4, no_wrap=True)
+    grid.add_column(no_wrap=True)
+    grid.add_column(ratio=1, no_wrap=True, overflow="ellipsis")
+    grid.add_column(no_wrap=True, justify="right")
+    for row in rows:
+        label, color = doctor_cmd._LABEL[row.status]
+        side = [row.detail] if row.detail else []
+        if row.status != doctor.OK:
+            side.append(_jump(row.jump))
+        grid.add_row(
+            Text(label, style=color),
+            Text(row.label, style="bold"),
+            Text(row.text),
+            Text("  ".join(p for p in side if p)),
+        )
+    return grid
+
+
+def home_headline(rows: Sequence[HomeRow]) -> Table:
+    text, jump = headline(list(rows))
+    grid = Table.grid(padding=(0, 2), expand=True)
+    grid.add_column(ratio=1)
+    grid.add_column(no_wrap=True, justify="right")
+    grid.add_row(Text(text, style="bold"), Text(_jump(jump)))
+    return grid
 
 
 class HomePane(Pane):
+    """This install at a glance: a headline naming the worst problem, then one row per part
+    (Mockup B, #112). The Diagnostics tab has every check; nothing here calls a provider."""
+
+    rows: tuple[HomeRow, ...] = ()
+
     def compose(self) -> ComposeResult:
-        yield Static(
-            "This install at a glance (the `doctor` command). The Diagnostics tab has every "
-            "check; nothing here calls a provider.",
-            classes="note",
-            markup=False,
-        )
-        yield Static("Checking…", markup=False, id="home-checks")
-        yield Static("", markup=False, id="home-history")
+        yield Static("Checking…", markup=False, id="home-headline")
+        yield Static("", id="home-rows")
         yield _buttons(("home-reload", "Check again"), ("home-previous", "Previous install…"))
         yield self.result()
 
     def show(self, state: State) -> None:
-        self.query_one("#home-checks", Static).update(_checks(state.report, HOME_CHECKS))
-        self.query_one("#home-history", Static).update(_checks(state.report, ("history",)))
+        self.rows = tuple(home_rows(state))
+        self.query_one("#home-headline", Static).update(home_headline(self.rows))
+        self.query_one("#home-rows", Static).update(home_table(self.rows))
 
     @on(Button.Pressed, "#home-reload")
     def _reload(self) -> None:
