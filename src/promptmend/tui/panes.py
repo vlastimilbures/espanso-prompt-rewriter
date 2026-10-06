@@ -32,6 +32,7 @@ from ..config_files import SecretStoreError
 from ..factory import PROVIDER_NAMES, routes
 from ..prompt_builder import ADDED, ALIASES, PROFILES, user_profiles_dir
 from . import teach
+from .console import CommandLine, describe
 from .home import TAB_LABELS, HomeRow, headline, home_rows
 from .modals import ConfirmModal, Field, FormModal, TextModal
 from .state import State, current_plan
@@ -246,6 +247,10 @@ class HomePane(Pane):
         yield Static("Checking…", markup=False, id="home-headline")
         yield Static("", id="home-rows")
         yield _buttons(("home-reload", "Check again"), ("home-previous", "Previous install…"))
+        # The command line (#111): completes and explains a command, runs none yet.
+        help_line = Static(describe(""), id="home-command-help", markup=False)
+        yield CommandLine(help_line)
+        yield help_line
         yield self.result()
         yield Static(session_text(()), id="home-session")
 

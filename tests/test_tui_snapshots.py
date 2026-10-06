@@ -29,6 +29,7 @@ from promptmend.prompt_builder import UserProfile
 from promptmend.tui import app as app_module
 from promptmend.tui import brand
 from promptmend.tui.app import HIGH_CONTRAST, ManageApp
+from promptmend.tui.console import CommandLine
 from promptmend.tui.state import State
 
 pytestmark = pytest.mark.skipif(
@@ -215,6 +216,7 @@ def _shoot(
     loader: Callable[[str], State] = fixed_state,
     size: tuple[int, int] = SIZE,
     intro: bool = False,
+    typed: str = "",
 ) -> str:
     app = ManageApp(loader=loader, intro=intro)
     # The active tab's underline slides into place; a snapshot must not catch it midway.
@@ -230,6 +232,13 @@ def _shoot(
                 app.theme = theme
             if key:
                 await pilot.press(key)
+            if typed:
+                # A steady cursor, so the shot does not depend on the blink.
+                app.main.query_one(CommandLine).cursor_blink = False
+                await pilot.press(*typed)
+                for _ in range(3):
+                    await pilot.pause()
+                    await app.workers.wait_for_complete()
             await pilot.pause()
             shots.append(app.export_screenshot(title=brand.NAME))
 
@@ -268,6 +277,11 @@ def test_snapshot_home_80_columns() -> None:
 # The header's status pill comes first (#174), so a 70-column terminal still shows it.
 def test_snapshot_home_70_columns() -> None:
     _check("home-70", _shoot("1", size=(70, 24)))
+
+
+# Home's command line (#111): `c`, a half-typed command, its suggestion and help.
+def test_snapshot_home_console() -> None:
+    _check("home-console", _shoot("c", typed="espanso st"))
 
 
 # The intro (#112), wide enough for the wordmark and on a narrow terminal (text only), with

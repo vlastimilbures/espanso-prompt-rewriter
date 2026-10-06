@@ -355,7 +355,15 @@ Rules for agents:
   shows a muted `$ promptmend …` above the result and appends to `ManageApp.session`,
   which Home shows as a read-only log (`session_text()`, latest `SESSION_LINES`), or
   `teach.RECIPES` while it is empty. A value that looks like a key is shown as
-  `<value withheld>` (`shown_arg()`). `tests/test_tui_teach.py` parses every button command
+  `<value withheld>` (`shown_arg()`). `tui/console.py` (#111 stage 2) is Home's command line
+  (`CommandLine`, `#home-command`; `c` on `MainScreen` switches to Home and focuses it, and
+  nothing is focused at launch): `resolve()` walks the Click tree (no callback runs; the
+  drift test in `tests/test_tui_teach.py` uses it too), `words_for()` gives the candidates
+  (key names only after `secrets set|remove`, never elsewhere), `CommandSuggester` completes
+  the last word and `describe()` the help line (a usage error through `redact_words()`, a
+  key-like line only `<value withheld>`). Enter runs nothing until the next PR: it shows
+  `teach.equivalent()` and keeps the line in an in-memory Up/Down history (not a key-like
+  one). `tests/test_tui_console.py` checks every candidate parses. `tests/test_tui_teach.py` parses every button command
   and recipe against the Click tree (the drift test).
 - `relocate.py` — `migrate_folders(environ)` (#169), never on the trigger path
   (`tests/test_trigger_contract.py`, `doctor.HEAVY_MODULES`): `cli._LazyGroup.invoke()` runs it
