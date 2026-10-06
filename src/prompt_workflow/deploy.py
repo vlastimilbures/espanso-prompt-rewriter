@@ -470,6 +470,9 @@ class Plan:
     manifest: Manifest
     # Manifest entries outside this plan whose file is gone: apply forgets them.
     orphans: list[str] = field(default_factory=list)
+    # The other match files in the folder (Espanso's base.yml, the user's overlays): listed
+    # by status only (#38); deploy and detach never touch them.
+    yours: list[Path] = field(default_factory=list)
 
     @property
     def _files_in_sync(self) -> bool:
@@ -556,6 +559,29 @@ def _legacy_base(match_dir: Path) -> Path | None:
     return None
 
 
+def _yours(match_dir: Path, legacy: Path | None) -> list[Path]:
+    """The ``.yml``/``.yaml`` files (or links to one) directly in ``match_dir`` that are not
+    ours: no packaged name and not the legacy base.yml deploy retires. Our backups and
+    side-by-side copies end in another suffix, so Espanso never loads them and neither are
+    listed; subfolders (packages/) are skipped. Names only, nothing is opened or followed;
+    an unreadable folder lists nothing."""
+    ours = set(assets.match_names())
+    found = []
+    try:
+        children = sorted(match_dir.iterdir())
+    except OSError:
+        return []
+    for path in children:
+        if path.name in ours or path == legacy or path.suffix.lower() not in (".yml", ".yaml"):
+            continue
+        try:
+            if path.is_symlink() or path.is_file():  # a link is listed, never followed
+                found.append(path)
+        except OSError:
+            continue
+    return found
+
+
 def plan(espanso: Path, launcher: str, manifest: Manifest) -> Plan:
     match_dir = espanso / "match"
     steps = []
@@ -580,7 +606,8 @@ def plan(espanso: Path, launcher: str, manifest: Manifest) -> Plan:
     orphans = sorted(
         key for key, e in manifest.entries.items() if key not in planned and is_gone(e)
     )
-    return Plan(espanso, launcher, steps, _legacy_base(match_dir), manifest, orphans)
+    legacy = _legacy_base(match_dir)
+    return Plan(espanso, launcher, steps, legacy, manifest, orphans, _yours(match_dir, legacy))
 
 
 # --- Apply --------------------------------------------------------------------------------

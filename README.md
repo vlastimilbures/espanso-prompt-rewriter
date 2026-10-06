@@ -240,7 +240,7 @@ with `espanso path config`, else Espanso's default folder) and keeps a manifest 
 
 | Command | What it does |
 |---------|--------------|
-| `prompt-workflow espanso status [--diff]` | Each file: `missing`, `in sync`, `stale` (an older deploy of ours, such as after an upgrade), `modified` (you edited it) or `foreign` (not ours) |
+| `prompt-workflow espanso status [--diff]` | Each file: `missing`, `in sync`, `stale` (an older deploy of ours, such as after an upgrade), `modified` (you edited it) or `foreign` (not ours), then each other `.yml`/`.yaml` file in `match/` as `yours` (Espanso's own `base.yml`, your overlays: never touched by `deploy` or `detach`) |
 | `prompt-workflow espanso deploy` | Shows the plan and a diff, asks, then writes and restarts Espanso. `--yes` skips the question, `--dry-run` stops after the diff; a second run with nothing to change does nothing |
 | `prompt-workflow espanso detach` | Removes the matches that call the CLI and keeps `-risk-` as a static snippet (`--keep-static`, the default); `--remove-all` removes every file we deployed |
 
@@ -449,8 +449,9 @@ with other lists) in a file of your own in Espanso's `match/` folder, such as
 `my-prompts.yml`. Copy the match from the deployed `prompts-llm.yml`, which already holds the
 CLI's absolute path, give it a trigger no other match uses, and keep its `--trigger-id`
 only if its runs should count as that trigger in the usage history. `prompt-workflow espanso
-deploy`, `status` and `detach` handle only the files they deployed (`prompts-core.yml`,
-`prompts-llm.yml`, `prompts-template.yml`), so they never list or change yours. Editing a
+deploy` and `detach` handle only the files they deployed (`prompts-core.yml`,
+`prompts-llm.yml`, `prompts-template.yml`), so they never change yours; `status` lists yours
+as `yours`. Editing a
 deployed file instead marks it `modified`: deploy then keeps your copy (or replaces it, with a
 backup, if you choose ours), so it no longer receives updates.
 

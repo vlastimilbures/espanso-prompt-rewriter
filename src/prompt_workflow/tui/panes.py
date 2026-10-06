@@ -617,6 +617,9 @@ class TriggersPane(Pane):
                 f"Espanso match folder: {state.plan.espanso_dir / 'match'}\n"
                 f"Launcher: {state.plan.launcher}"
             )
+            if state.plan.yours:
+                names = ", ".join(p.name for p in state.plan.yours)
+                text += f"\nYour own match files (never touched by deploy or detach): {names}"
             espanso = next((c for c in state.report.checks if c.id == "espanso"), None)
             if espanso and (espanso.data.get("found") is False or espanso.data.get("query_failed")):
                 # Deploy and detach then use the default folder: never silently (#115).

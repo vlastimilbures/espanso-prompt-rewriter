@@ -975,6 +975,65 @@ def test_cli_status_bad_manifest(espanso, fake_run):
     assert "cannot be read" in result.stderr
 
 
+def _your_files(espanso: Path) -> None:
+    """Espanso's own base.yml, a user overlay, and what is not a match file of the user's:
+    our backup and side-by-side copy, a note, a package subfolder."""
+    match = espanso / "match"
+    (match / "base.yml").write_text("matches:\n  - trigger: ':me'\n", "utf-8")
+    (match / "work.YAML").write_text("matches: []\n", "utf-8")
+    (match / "prompts-llm.yml.bak-20260101000000").write_text("old", "utf-8")
+    (match / "prompts-llm.yml.prompt-workflow-new").write_text("new", "utf-8")
+    (match / "notes.txt").write_text("notes", "utf-8")
+    (match / "packages" / "pkg.yml").mkdir(parents=True)
+
+
+# #38 (O2): status also names the user's own match files; nothing else lists or touches them.
+def test_plan_lists_your_match_files(espanso):
+    _your_files(espanso)
+    assert [p.name for p in _plan(espanso).yours] == ["base.yml", "work.YAML"]
+    deploy.apply(_plan(espanso))  # our files now exist too: still not listed
+    assert [p.name for p in _plan(espanso).yours] == ["base.yml", "work.YAML"]
+
+
+def test_plan_lists_nothing_without_a_match_folder(tmp_path):
+    assert deploy.plan(tmp_path / "none", LAUNCHER, deploy.Manifest.load()).yours == []
+
+
+def test_legacy_base_is_not_listed_as_yours(espanso):
+    (espanso / "match" / "base.yml").write_text('trigger: "-p-" prompt-workflow', "utf-8")
+    the_plan = _plan(espanso)
+    assert the_plan.legacy == espanso / "match" / "base.yml"
+    assert the_plan.yours == []
+
+
+def test_symlinked_match_file_is_listed_as_yours(tmp_path, espanso):
+    real = tmp_path / "dotfiles" / "mine.yml"
+    real.parent.mkdir()
+    real.write_text("matches: []\n", "utf-8")
+    _symlink(espanso / "match" / "mine.yml", real)
+    _symlink(espanso / "match" / "gone.yml", tmp_path / "missing.yml")
+    assert [p.name for p in _plan(espanso).yours] == ["gone.yml", "mine.yml"]
+    result = _cli("status", *_where(espanso))
+    assert "  yours     mine.yml (not managed, a link; never touched" in result.stdout
+
+
+def test_cli_status_lists_yours_and_deploy_detach_leave_them(espanso, fake_run):
+    _your_files(espanso)
+    before = _tree(espanso)
+    result = _cli("status", *_where(espanso))
+    assert result.exit_code == 0, result.output
+    lines = [line for line in result.stdout.splitlines() if line.startswith("  yours")]
+    assert lines == [
+        "  yours     base.yml (not managed; never touched by deploy or detach)",
+        "  yours     work.YAML (not managed; never touched by deploy or detach)",
+    ]
+    assert fake_run.calls == []
+    assert _tree(espanso) == before
+    assert _cli("deploy", "--yes", *_where(espanso)).exit_code == 0
+    assert _cli("detach", "--remove-all", "--yes", "--espanso-dir", str(espanso)).exit_code == 0
+    assert _tree(espanso) == before
+
+
 def test_cli_detach(espanso, fake_run):
     where = ["--espanso-dir", str(espanso)]
     assert "Nothing to do" in _cli("detach", "--yes", *where).stdout
