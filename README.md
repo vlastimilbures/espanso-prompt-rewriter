@@ -406,6 +406,11 @@ refused (an accidental copy of a log or document should not go to the cloud). If
 at its output limit, the partial rewrite is pasted with
 `[prompt-workflow: the reply hit the model's output limit and is cut off]` at the end.
 
+For scripts, the exit code says nothing: `improve` exits 0 whether or not it rewrote. A run failed
+when its whole output is one `[prompt-workflow: …]` marker. A rewrite starts with a marker only
+after `--allow-flagged` (`[prompt-workflow: sent despite: …]`) and ends with one only when it is
+cut off. This prefix is stable.
+
 #### Management commands
 
 | Command | What it does |

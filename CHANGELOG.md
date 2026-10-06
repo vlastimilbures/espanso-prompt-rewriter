@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Changed
+- README "CLI" documents the `[prompt-workflow: …]` marker as the stable way for a script to
+  tell a failed `improve` run from a rewrite, since the exit code is always 0 (#32).
+
 ## 0.18.0 - 2026-10-06
 
 ### Security
