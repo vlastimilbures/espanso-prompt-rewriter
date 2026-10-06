@@ -45,6 +45,12 @@ All notable changes to this project are documented here. The format follows
   earlier checkout install is found, its screen opens once the intro has closed.
 - `a` in the interface opens an About screen: version, install channel, Python and Textual
   versions, the settings and history folders, licence and repository (#112).
+- The interface teaches its headless commands (#111). Each button's tooltip shows the command
+  that does the same in a terminal; each result of a change starts with the command it was
+  (`$ prompt-workflow config set PROMPT_TIMEOUT_SECONDS 45`, a value that looks like a key
+  shown as `<value withheld>`); and Home lists this session's commands, or six recipes such
+  as `prompt-workflow espanso status --diff` before there are any. A test parses every one
+  of these commands against the CLI.
 
 ### Fixed
 - `prompt-workflow espanso deploy` finds Homebrew's stable `bin/` launcher also when Python

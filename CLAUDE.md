@@ -327,6 +327,16 @@ Rules for agents:
   (`_maybe_offer()`, called again when it closes). `a` opens `AboutScreen`
   (`brand.about_facts()`: version, doctor's install channel, Python/Textual via
   `brand.runtime()`, which the snapshots pin, the config and data dirs, licence, repo).
+  Every action names its headless command (#111 stage 1, `tui/teach.py`, no Textual):
+  `teach.BUTTONS` maps each button id to its commands (placeholders like `<NAME>`), shown as
+  the tooltip by `_buttons()`; a button with none goes in `teach.NO_COMMAND`
+  (`test_every_button_has_its_command_as_tooltip` fails otherwise). `Pane.report(...,
+  command=teach.equivalent(...))` (and `attempt(command=)`, `PreviousInstallScreen.report`)
+  shows a muted `$ prompt-workflow …` above the result and appends to `ManageApp.session`,
+  which Home shows as a read-only log (`session_text()`, latest `SESSION_LINES`), or
+  `teach.RECIPES` while it is empty. A value that looks like a key is shown as
+  `<value withheld>` (`shown_arg()`). `tests/test_tui_teach.py` parses every button command
+  and recipe against the Click tree (the drift test).
 - `doctor.py` — `run()` returns a `Report` of the fixed `CHECK_IDS` (JSON `schema_version` 1:
   only add ids/keys). Read-only: `espanso path config`/`espanso status` and the launcher lookup
   via `run_command`; keys as set/not set; the clipboard only as a length (never read when

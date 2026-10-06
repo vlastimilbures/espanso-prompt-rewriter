@@ -215,6 +215,10 @@ runs `improve` against a stub on `127.0.0.1` with a placeholder key.
 
 ![The Home tab of the prompt-workflow interface](docs/interface.svg)
 
+Every button's tooltip shows the command that does the same in a terminal, every result
+starts with that command (`$ prompt-workflow config set …`), and Home lists this session's
+commands, or a few useful ones before you have done anything.
+
 It opens with a short intro (under a second; any key closes it). `prompt-workflow ui
 --no-intro`, or `PROMPT_UI_INTRO=false`, skips it.
 
