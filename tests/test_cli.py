@@ -999,3 +999,17 @@ def test_persona_ignores_clipboard_output(monkeypatch, copied):
     monkeypatch.setenv("PROMPT_PERSONA", "I am a tester.")
     assert runner.invoke(app, ["persona"]).stdout == "I am a tester."
     assert copied == []
+
+
+# A failed copy after --allow-flagged keeps each marker on its own line, then the rewrite.
+def test_clipboard_output_copy_failure_with_sent_despite(monkeypatch, fake_http):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setattr(cli.pyperclip, "copy", _no_clipboard)
+    fake_http.reply({"choices": [{"message": {"content": "rewrite"}}]})
+    args = ("--provider", "openrouter", "--allow-flagged", "--output", "clipboard")
+    result = improve(*args, "--source", "argument", "--text", "Output is CONFIDENTIAL")
+    assert result.stdout == (
+        "[prompt-workflow: sent despite: confidential_label]\n\n"
+        "[prompt-workflow: Clipboard unavailable: no clipboard mechanism; the rewrite is pasted "
+        "instead]\n\nrewrite"
+    )
