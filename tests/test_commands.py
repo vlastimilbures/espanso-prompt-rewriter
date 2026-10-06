@@ -63,9 +63,9 @@ def _changes(calls: list[list[str]]) -> list[list[str]]:
 
 @pytest.fixture
 def saved(monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Saved mode: no PROMPT_WORKFLOW_ENV, so config.toml and the secret store are read (in
+    """Saved mode: no PROMPTMEND_ENV, so config.toml and the secret store are read (in
     conftest's per-test config dir)."""
-    monkeypatch.delenv("PROMPT_WORKFLOW_ENV")
+    monkeypatch.delenv("PROMPTMEND_ENV")
     return config._user_config_dir()
 
 
@@ -240,7 +240,7 @@ def test_config_set_refuses_a_secret_and_a_key_shaped_value(saved: Path) -> None
 def test_config_set_refuses_in_legacy_mode(tmp_path: Path) -> None:
     result = _run("config", "set", "PROMPT_PROFILE", "general")
     assert result.exit_code == 1
-    assert "PROMPT_WORKFLOW_ENV is set" in result.stderr
+    assert "PROMPTMEND_ENV is set" in result.stderr
     assert not config.settings_file().exists()
 
 
@@ -411,7 +411,7 @@ def test_secrets_set_without_terminal_or_stdin(saved: Path) -> None:
 def test_secrets_refused_in_legacy_mode() -> None:
     result = _run("secrets", "set", "OPENROUTER_API_KEY", "--stdin", input=f"{KEY}\n")
     assert result.exit_code == 1
-    assert "PROMPT_WORKFLOW_ENV is set" in result.stderr
+    assert "PROMPTMEND_ENV is set" in result.stderr
 
 
 def test_secrets_set_rejects_a_non_secret_name(saved: Path) -> None:
@@ -573,7 +573,7 @@ def _break(kind: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
             "utf-8",
         )
         return
-    monkeypatch.delenv("PROMPT_WORKFLOW_ENV")
+    monkeypatch.delenv("PROMPTMEND_ENV")
     directory = config._user_config_dir()
     directory.mkdir(parents=True)
     name = "config.toml" if kind == "toml" else "secrets.toml"
@@ -1038,7 +1038,7 @@ def test_setup_in_legacy_mode_writes_no_settings(
     monkeypatch.setattr(smoke, "run", lambda p: smoke.SmokeResult(True, smoke.REPLY, 1, "ok"))
     result = _setup(espanso, "--non-interactive")
     assert result.exit_code == 0, result.output
-    assert "PROMPT_WORKFLOW_ENV is set" in result.stdout
+    assert "PROMPTMEND_ENV is set" in result.stdout
     assert not config.settings_file().exists()
 
 

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import typer
 
-from .. import config_files, config_store, deploy, previous_install, profiles, smoke
+from .. import config, config_files, config_store, deploy, previous_install, profiles, smoke
 from ..config import setting_fields
 from ..factory import PROVIDER_NAMES
 from ..prompt_builder import PROFILES, system_prompt
@@ -85,7 +85,7 @@ def _settings_writable(
     (copy mode): declined, nothing is written either, so the offer comes back next time."""
     if common.legacy_env():
         steps.later(
-            "PROMPT_WORKFLOW_ENV is set, so settings and keys stay in that file; setup "
+            f"{config.env_file_var()} is set, so settings and keys stay in that file; setup "
             "does not write config.toml or the secret store"
         )
         return False

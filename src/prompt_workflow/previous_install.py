@@ -77,7 +77,7 @@ def gate(environ: Mapping[str, str]) -> str | None:
     """Why detection does not run, or None: legacy mode keeps its own .env, and once
     config.toml or the secret store exists the user's settings are no longer missing. A deploy
     manifest does not count: an editable install had one before the switch."""
-    if environ.get("PROMPT_WORKFLOW_ENV"):
+    if config.env_file_override(environ):
         return LEGACY
     if config_files.is_file(config.settings_file(environ)):
         return SAVED

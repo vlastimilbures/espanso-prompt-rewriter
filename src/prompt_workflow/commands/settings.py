@@ -150,7 +150,7 @@ def _layers_lines(layers: ConfigLayers, raw: bool) -> list[str]:
                     lines.append(f"      {name} = {common.shown_value(name, entry)}")
     if common.legacy_env():
         lines.append(
-            "  (PROMPT_WORKFLOW_ENV is set: config.toml and the secret store are not read)"
+            f"  ({config.env_file_var()} is set: config.toml and the secret store are not read)"
         )
     return lines
 

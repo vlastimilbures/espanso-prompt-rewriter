@@ -47,28 +47,67 @@ def _env_text(data: bytes) -> str:
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
-def _user_config_dir(environ: Mapping[str, str] = os.environ) -> Path:
+# The user folders' name (#169). Folders made by 0.18.0 and earlier have the legacy name until
+# a management command moves them (relocate.py); until then they stay in use as they are.
+APP_DIR = "promptmend"
+LEGACY_APP_DIR = "prompt-workflow"
+# The .env that replaces config.toml and the secret store (legacy mode): the first variable set
+# (non-empty) wins. PROMPT_WORKFLOW_ENV is the old name, kept as an alias.
+ENV_FILE_VARS = ("PROMPTMEND_ENV", "PROMPT_WORKFLOW_ENV")
+
+
+def env_file_var(environ: Mapping[str, str] = os.environ) -> str:
+    """The name of the variable that names the legacy-mode .env: the one in effect, else the
+    documented one."""
+    return next((name for name in ENV_FILE_VARS if environ.get(name)), ENV_FILE_VARS[0])
+
+
+def env_file_override(environ: Mapping[str, str] = os.environ) -> str | None:
+    """The .env PROMPTMEND_ENV (or its alias PROMPT_WORKFLOW_ENV) names, or None: then it alone
+    holds the saved settings. An empty value counts as unset."""
+    return environ.get(env_file_var(environ)) or None
+
+
+def config_folders(environ: Mapping[str, str] = os.environ) -> tuple[Path, Path]:
+    """The user config folder under its new and its legacy name, in that order."""
     if os.name == "nt":
-        appdata = environ.get("APPDATA")
-        return Path(appdata or Path.home() / "AppData" / "Roaming") / "prompt-workflow"
-    return Path(environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "prompt-workflow"
+        base = Path(environ.get("APPDATA") or Path.home() / "AppData" / "Roaming")
+    else:
+        base = Path(environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+    return base / APP_DIR, base / LEGACY_APP_DIR
+
+
+def data_folders(environ: Mapping[str, str] = os.environ) -> tuple[Path, Path]:
+    """The user data folder under its new and its legacy name, in that order."""
+    if os.name == "nt":
+        base = Path(environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+    else:
+        base = Path(environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
+    return base / APP_DIR, base / LEGACY_APP_DIR
+
+
+def folder_in_use(folders: tuple[Path, Path]) -> Path:
+    """The new folder, unless only the legacy one exists: then that one, for reads and writes
+    alike. Decided on every call and never creates anything, so a trigger run between an
+    upgrade and the move (relocate.py) keeps its settings, keys and history."""
+    new, old = folders
+    return old if not new.is_dir() and old.is_dir() else new
+
+
+def _user_config_dir(environ: Mapping[str, str] = os.environ) -> Path:
+    return folder_in_use(config_folders(environ))
 
 
 def user_data_dir(environ: Mapping[str, str] = os.environ) -> Path:
     """Per-device data (the usage history): never roamed or synced with the settings, since
     it describes this machine's calls. %LOCALAPPDATA% on Windows, $XDG_DATA_HOME or
     ~/.local/share elsewhere."""
-    if os.name == "nt":
-        local = environ.get("LOCALAPPDATA")
-        return Path(local or Path.home() / "AppData" / "Local") / "prompt-workflow"
-    return (
-        Path(environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share") / "prompt-workflow"
-    )
+    return folder_in_use(data_folders(environ))
 
 
 def settings_file(environ: Mapping[str, str] = os.environ) -> Path:
     """The user TOML settings file (non-secret settings): once it exists it is the saved
-    source, and no .env is read (unless PROMPT_WORKFLOW_ENV names one)."""
+    source, and no .env is read (unless PROMPTMEND_ENV names one)."""
     return _user_config_dir(environ) / config_files.SETTINGS_FILE
 
 
@@ -79,7 +118,7 @@ def _env_file_candidates(environ: Mapping[str, str] = os.environ) -> list[Path]:
     untrusted checkout must not let a planted .env redirect OPENROUTER_BASE_URL (and so the
     API key) or switch on ALLOW_CLOUD_OVERRIDE.
     """
-    explicit = environ.get("PROMPT_WORKFLOW_ENV")
+    explicit = env_file_override(environ)
     if explicit:
         return [Path(explicit).expanduser()]
     candidates = [_user_config_dir(environ) / ".env"]
@@ -90,8 +129,8 @@ def _env_file_candidates(environ: Mapping[str, str] = os.environ) -> list[Path]:
 
 def _env_file_label(candidate: Path, environ: Mapping[str, str]) -> str:
     """Which .env an error means, without its path (errors are pasted into the focused app)."""
-    if environ.get("PROMPT_WORKFLOW_ENV"):
-        return "the .env named by PROMPT_WORKFLOW_ENV"
+    if env_file_override(environ):
+        return f"the .env named by {env_file_var(environ)}"
     if candidate == _PROJECT_ROOT / ".env":
         return "the checkout's .env"
     return "the .env in the user config folder"
@@ -717,7 +756,7 @@ class ConfigLayers:
     ) -> ConfigLayers:
         """Merge default < saved settings < secret store < ``environ`` (os.environ by default).
 
-        The saved settings are, in order of preference: the .env named by PROMPT_WORKFLOW_ENV
+        The saved settings are, in order of preference: the .env named by PROMPTMEND_ENV
         (legacy mode: that file alone, no config.toml or secret store, exactly as before);
         config.toml in the user config dir once it exists (a .env elsewhere is then ignored,
         so it can never shadow a saved value); else the first readable .env candidate. The
@@ -769,7 +808,7 @@ class ConfigLayers:
         known = env_names()
         defaults = {f.metadata["env"]: f.metadata["default"] for f in setting_fields()}
         layers = [Layer(DEFAULT_SOURCE, defaults)]
-        legacy = bool(environ.get("PROMPT_WORKFLOW_ENV"))
+        legacy = env_file_override(environ) is not None
         saved = None if legacy else _saved_layer(settings_file(environ), fail, note)
         if saved is not None:
             layers.append(saved)

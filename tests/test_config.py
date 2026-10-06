@@ -265,13 +265,13 @@ def test_repr_hides_api_keys(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "openrouter_model=" in text
 
 
-# PROMPT_WORKFLOW_ENV names the .env to load; real env vars still win over it.
+# PROMPTMEND_ENV names the .env to load; real env vars still win over it.
 def test_load_dotenv_explicit_path_does_not_override(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     env_file = tmp_path / "custom.env"
     env_file.write_text("PROMPT_PROVIDER=ollama\nOLLAMA_MODEL=from-file\n")
-    monkeypatch.setenv("PROMPT_WORKFLOW_ENV", str(env_file))
+    monkeypatch.setenv("PROMPTMEND_ENV", str(env_file))
     monkeypatch.setenv("PROMPT_PROVIDER", "anthropic")
 
     settings = Settings.load()
@@ -303,7 +303,7 @@ def test_load_dotenv_exports_only_known_settings(
 def _no_explicit_env(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, project: Path, user: Path
 ) -> None:
-    monkeypatch.delenv("PROMPT_WORKFLOW_ENV")
+    monkeypatch.delenv("PROMPTMEND_ENV")
     monkeypatch.setattr(config, "_PROJECT_ROOT", project)
     monkeypatch.setattr(config, "_user_config_dir", lambda _environ: user)
 
@@ -741,7 +741,7 @@ def test_repair_mode_falls_back_to_next_layer(
 def test_resolve_takes_an_environment_mapping(tmp_path: Path) -> None:
     env_file = tmp_path / "other.env"
     env_file.write_text("OLLAMA_MODEL=from-file\n")
-    environ = {"PROMPT_WORKFLOW_ENV": str(env_file), "PROMPT_PROVIDER": "ollama"}
+    environ = {"PROMPTMEND_ENV": str(env_file), "PROMPT_PROVIDER": "ollama"}
     settings = ConfigLayers.resolve(environ).settings()
     assert (settings.provider, settings.ollama_model) == ("ollama", "from-file")
 

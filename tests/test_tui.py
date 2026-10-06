@@ -77,7 +77,7 @@ def espanso(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FakeRunner:
 @pytest.fixture
 def saved(monkeypatch: pytest.MonkeyPatch) -> Path:
     """Saved mode: config.toml and the secret store are read and written (per-test dirs)."""
-    monkeypatch.delenv("PROMPT_WORKFLOW_ENV")
+    monkeypatch.delenv("PROMPTMEND_ENV")
     return config._user_config_dir()
 
 
@@ -395,10 +395,10 @@ def test_providers_refuse_an_empty_key_and_legacy_mode(espanso: FakeRunner) -> N
         await press(app, pilot, "#set-key")
         await fill(app, pilot, key_value=KEY)
         message = pane(app, "providers").last_message
-        assert message.startswith("error: PROMPT_WORKFLOW_ENV is set")
+        assert message.startswith("error: PROMPTMEND_ENV is set")
         assert KEY not in message
         await press(app, pilot, "#remove-key")
-        assert "PROMPT_WORKFLOW_ENV is set" in pane(app, "providers").last_message
+        assert "PROMPTMEND_ENV is set" in pane(app, "providers").last_message
 
     drive(scenario)
 
@@ -1097,7 +1097,7 @@ def test_files_under_home_show_as_tilde(
     monkeypatch: pytest.MonkeyPatch, espanso: FakeRunner
 ) -> None:
     # #174: display only, so the From column keeps the file name on a narrow terminal.
-    monkeypatch.delenv("PROMPT_WORKFLOW_ENV")
+    monkeypatch.delenv("PROMPTMEND_ENV")
     # The config dir is $XDG_CONFIG_HOME on POSIX and %APPDATA% on Windows.
     monkeypatch.setenv("XDG_CONFIG_HOME", str(Path.home() / ".config"))
     monkeypatch.setenv("APPDATA", str(Path.home() / ".config"))
@@ -1111,13 +1111,13 @@ def test_files_under_home_show_as_tilde(
         keys = table_rows(app, "providers", "#keys")
         assert keys["OPENROUTER_API_KEY"][2:4] == [
             "environment",
-            "~/.config/prompt-workflow/secrets.toml",
+            "~/.config/promptmend/secrets.toml",
         ]
         await pilot.press("6")
         rows = table_rows(app, "diagnostics", "#settings")
         assert rows["PROMPT_PROFILE"][2:4] == [
             "environment",
-            "overrides ~/.config/prompt-workflow/config.toml",
+            "overrides ~/.config/promptmend/config.toml",
         ]
         assert rows["PROMPT_HISTORY"][2] == "default"
 
@@ -1299,7 +1299,7 @@ def test_bare_command_in_a_real_process(tmp_path: Path) -> None:
     import subprocess
     import sys
 
-    env = {**os.environ, "COLUMNS": "100", "PROMPT_WORKFLOW_ENV": str(tmp_path / ".env")}
+    env = {**os.environ, "COLUMNS": "100", "PROMPTMEND_ENV": str(tmp_path / ".env")}
     env.pop("GITHUB_ACTIONS", None)
 
     def run(*args: str) -> subprocess.CompletedProcess[bytes]:

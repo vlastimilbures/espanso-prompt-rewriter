@@ -88,7 +88,7 @@ def _check_persona() -> None:
             # persona records its run in the usage history: keep it out of the real one.
             "XDG_DATA_HOME": str(home / "data"),
             "LOCALAPPDATA": str(home / "localappdata"),
-            "PROMPT_WORKFLOW_ENV": str(env_file),
+            "PROMPTMEND_ENV": str(env_file),
         }
         env.pop("PROMPT_PERSONA", None)
         result = subprocess.run(  # noqa: S603 - the venv's own entry point

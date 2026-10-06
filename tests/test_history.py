@@ -91,7 +91,7 @@ def _use_real_budget(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def store(tmp_path: Path) -> HistoryStore:
-    return HistoryStore(tmp_path / "data" / "prompt-workflow" / history.DB_NAME)
+    return HistoryStore(tmp_path / "data" / "promptmend" / history.DB_NAME)
 
 
 def _op(**changes: Any) -> dict[str, Any]:
@@ -158,11 +158,11 @@ def test_history_settings_parse_strictly(monkeypatch: pytest.MonkeyPatch) -> Non
 
 def test_data_dir_is_per_device(tmp_path: Path) -> None:
     if os.name == "nt":
-        assert user_data_dir({"LOCALAPPDATA": str(tmp_path)}) == tmp_path / "prompt-workflow"
+        assert user_data_dir({"LOCALAPPDATA": str(tmp_path)}) == tmp_path / "promptmend"
         assert user_data_dir({}).parent.name == "Local"
     else:
-        assert user_data_dir({"XDG_DATA_HOME": str(tmp_path)}) == tmp_path / "prompt-workflow"
-        assert user_data_dir({}) == Path.home() / ".local" / "share" / "prompt-workflow"
+        assert user_data_dir({"XDG_DATA_HOME": str(tmp_path)}) == tmp_path / "promptmend"
+        assert user_data_dir({}) == Path.home() / ".local" / "share" / "promptmend"
 
 
 def test_from_settings_uses_the_data_and_config_dirs(
@@ -171,8 +171,8 @@ def test_from_settings_uses_the_data_and_config_dirs(
     monkeypatch.setenv("PROMPT_HISTORY", "false")
     monkeypatch.setenv("PROMPT_HISTORY_RETENTION_DAYS", "30")
     store = HistoryStore.from_settings(Settings.load())
-    assert store.path == tmp_path / "data" / "prompt-workflow" / history.DB_NAME
-    assert store.prices_path == tmp_path / "config" / "prompt-workflow" / history.PRICES_NAME
+    assert store.path == tmp_path / "data" / "promptmend" / history.DB_NAME
+    assert store.prices_path == tmp_path / "config" / "promptmend" / history.PRICES_NAME
     assert (store.enabled, store.retention_days) == (False, 30)
 
 

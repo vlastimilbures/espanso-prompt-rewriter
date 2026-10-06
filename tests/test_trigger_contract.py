@@ -246,6 +246,7 @@ FORBIDDEN = (
     "prompt_workflow.smoke",
     "prompt_workflow.config_store",
     "prompt_workflow.previous_install",
+    "prompt_workflow.relocate",
 )
 # The usage history (#89) writes each run after its output, so sqlite3 loads on the trigger
 # path when tracking is on (PROMPT_HISTORY, the default), and never when it is off.
@@ -272,7 +273,7 @@ def trigger_run(
     # and keep the run's config, data (the usage history) and home in this temp dir.
     dropped = {*env_names(), *_PRELOADING}
     env = {key: value for key, value in os.environ.items() if key not in dropped}
-    env["PROMPT_WORKFLOW_ENV"] = str(tmp / ".env")
+    env["PROMPTMEND_ENV"] = str(tmp / ".env")
     for name in ("XDG_CONFIG_HOME", "APPDATA", "XDG_DATA_HOME", "LOCALAPPDATA"):
         env[name] = str(tmp / name.lower())
     for name in ("HOME", "USERPROFILE"):
@@ -381,7 +382,7 @@ def test_management_commands_do_not_import_the_interface(tmp_path: Path) -> None
     env = {
         key: value for key, value in os.environ.items() if key not in {*env_names(), *_PRELOADING}
     }
-    env["PROMPT_WORKFLOW_ENV"] = str(tmp_path / ".env")
+    env["PROMPTMEND_ENV"] = str(tmp_path / ".env")
     for name in ("XDG_CONFIG_HOME", "APPDATA", "XDG_DATA_HOME", "LOCALAPPDATA"):
         env[name] = str(tmp_path / name.lower())
     for name in ("HOME", "USERPROFILE"):

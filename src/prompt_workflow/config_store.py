@@ -356,7 +356,7 @@ def plan_migration(
 
     Only values that differ from their default are saved, so a copied .env.example stops
     pinning defaults. A secret already in the secret store wins today and is kept. Refused
-    (MigrationError) while PROMPT_WORKFLOW_ENV is set (legacy mode keeps that file as it
+    (MigrationError) while PROMPTMEND_ENV is set (legacy mode keeps that file as it
     is), or while the current settings are invalid.
 
     With ``source`` (copy mode, #110), the .env of the earlier checkout at that root is
@@ -365,9 +365,10 @@ def plan_migration(
     never moved; retire it later with plan_retire().
     """
     env = _env(environ)
-    if env.get("PROMPT_WORKFLOW_ENV"):
+    if config.env_file_override(env):
         raise MigrationError(
-            "PROMPT_WORKFLOW_ENV is set, so that .env stays in use as it is; unset it to migrate"
+            f"{config.env_file_var(env)} is set, so that .env stays in use as it is; "
+            "unset it to migrate"
         )
     directory = config_dir(env)
     if config_files.is_file(_marker(directory)):
@@ -850,9 +851,10 @@ def plan_retire(
     from . import previous_install
 
     env = _env(environ)
-    if env.get("PROMPT_WORKFLOW_ENV"):
+    if config.env_file_override(env):
         raise MigrationError(
-            "PROMPT_WORKFLOW_ENV is set, so that .env stays in use as it is; unset it to retire"
+            f"{config.env_file_var(env)} is set, so that .env stays in use as it is; "
+            "unset it to retire"
         )
     directory = config_dir(env)
     root = previous_install.resolved(source.expanduser())

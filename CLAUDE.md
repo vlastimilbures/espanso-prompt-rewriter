@@ -106,8 +106,9 @@ Rules for agents:
   before that point, and Click usage errors before any load, see only the built-in patterns. `Settings.load()` builds from `ConfigLayers.resolve()`, a pure merge
   of layers (lowest first): built-in default < saved settings < the secret store < the real
   environment; per-call overrides come after, in `Settings.with_overrides()`. Saved settings
-  are `$PROMPT_WORKFLOW_ENV` alone if set (legacy mode: no TOML, no secret store, exactly as
-  before); else the user config dir's `config.toml` once it exists (then no `.env` is read, so
+  are the `.env` that `env_file_override()` names alone if set (`$PROMPTMEND_ENV`, else its
+  alias `$PROMPT_WORKFLOW_ENV`, empty = unset; messages name `env_file_var()`, the one in
+  effect) (legacy mode: no TOML, no secret store, exactly as before); else the user config dir's `config.toml` once it exists (then no `.env` is read, so
   one can never shadow a saved value; repair mode reports a lingering one); else the first
   readable of the editable-install repo root's `.env` (derived from `__file__`) or the user
   config dir `.env` (read as UTF-8, a byte order mark dropped; one that is not UTF-8 is an error,
@@ -128,8 +129,14 @@ Rules for agents:
   `.env` and lines without `=`, which strict mode skips silently. It deliberately never reads the
   cwd, so a planted `.env` cannot redirect the base URL or enable the override. This matters
   because Espanso runs the CLI as a GUI-spawned subprocess without an inherited login-shell
-  environment. `tests/conftest.py` points `PROMPT_WORKFLOW_ENV` at a temp file per test, and
-  `HOME`, `XDG_CONFIG_HOME`, `APPDATA` and `_PROJECT_ROOT` at temp dirs.
+  environment. The user folders (#169): `config_folders()`/`data_folders()` give the new
+  (`APP_DIR`, `promptmend`) and legacy (`LEGACY_APP_DIR`, `prompt-workflow`) folder under
+  `$XDG_CONFIG_HOME`/`%APPDATA%` and `$XDG_DATA_HOME`/`%LOCALAPPDATA%`; `folder_in_use()`
+  (behind `_user_config_dir()` and `user_data_dir()`, on every call, trigger path included)
+  takes the new one unless only the legacy one exists, then reads and writes the legacy one,
+  and never creates a folder. `tests/conftest.py` points `PROMPTMEND_ENV` at a temp file per
+  test (and drops `PROMPT_WORKFLOW_ENV`), and `HOME`, `XDG_CONFIG_HOME`, `APPDATA` and
+  `_PROJECT_ROOT` at temp dirs.
 - `config_files.py` — the light read side (on the trigger path: `tomllib` only once a file
   exists) and `write_atomic()` (temp file in the same dir + `os.replace`; mode 600 from creation
   on POSIX; on Windows a protected single-ACE DACL for the current user's SID, set via Win32
@@ -274,7 +281,7 @@ Rules for agents:
   (`stdin_is_tty()`, which tests patch), colour only on a TTY without `NO_COLOR`, and take a key
   only from stdin or `getpass` (`read_secret()`); `config set` refuses secret names and any
   value `scan()` flags as a credential. `config set`/`secrets set` refuse in legacy
-  `PROMPT_WORKFLOW_ENV` mode, and `config set` refuses while a `.env` is in use without
+  `PROMPTMEND_ENV` mode, and `config set` refuses while a `.env` is in use without
   `config.toml` (it would be orphaned): migrate first. `config migrate|rollback` apply only with
   an interactive yes or `--yes --preview-token <token printed by the preview>`.
   `tests/test_commands.py` walks the whole command tree: no option named like a secret, a key
@@ -342,6 +349,19 @@ Rules for agents:
   `teach.RECIPES` while it is empty. A value that looks like a key is shown as
   `<value withheld>` (`shown_arg()`). `tests/test_tui_teach.py` parses every button command
   and recipe against the Click tree (the drift test).
+- `relocate.py` — `migrate_folders(environ)` (#169), never on the trigger path
+  (`tests/test_trigger_contract.py`, `doctor.HEAVY_MODULES`): `cli._LazyGroup.invoke()` runs it
+  before every subcommand except `improve`/`persona`, a `--help`/`-h` anywhere, an unknown
+  command and resilient parsing (`--version` is eager and exits first; a bare command turned
+  into `ui` does run it), printing each returned line on stderr. For the config and the data
+  folder: legacy absent, nothing; new absent, `os.rename(old, new)` (keeps mode 600 and the
+  Windows DACL); both, each top-level entry the new one lacks is renamed (`lexists()` first:
+  never overwrite), conflicts stay (silent; doctor's `folders` check reports them) and the
+  legacy folder is removed only once empty. Then every string in the new folder's
+  `migration.json` that is the legacy config path or under it is rebased (`write_atomic()`;
+  an unparsable marker is left alone). An `OSError` (a Windows lock) becomes one line, never
+  an exception; the next command retries. `tests/test_relocate.py`; the TUI snapshots pin
+  `config.APP_DIR` to the legacy name, so the folders they show change only with the rename.
 - `doctor.py` — `run()` returns a `Report` of the fixed `CHECK_IDS` (JSON `schema_version` 1:
   only add ids/keys). Read-only: `espanso path config`/`espanso status` and the launcher lookup
   via `run_command`; keys as set/not set; the clipboard only as a length (never read when
@@ -355,6 +375,9 @@ Rules for agents:
   `import_check()` (the interface's Diagnostics) imports `prompt_workflow.cli` in a fresh
   interpreter (`-P`, so a module planted in the working directory never runs; the smoke test's
   child uses `-P` too) and reports its time, module count and any `HEAVY_MODULES` it loaded.
+  The `folders` check (#169) WARNs while a legacy folder is still in use (doctor runs after
+  the move, so that means it failed) or holds conflicts left behind; data `config_dir`,
+  `data_dir`, `legacy`, `conflicts`.
 - `previous_install.py` — finds an earlier checkout install (#110) from the launcher in the
   deployed match files (`deploy.deployed_launchers()`) and manifest, the uv tool receipt and a
   path the user entered; never a disk scan, and a checkout's `.env` is only checked for

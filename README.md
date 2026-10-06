@@ -246,8 +246,8 @@ rewrite wherever the focus is when the answer arrives.
 
 `prompt-workflow espanso` owns the match files it writes into Espanso's `match/` folder (found
 with `espanso path config`, else Espanso's default folder) and keeps a manifest of them,
-`espanso-manifest.json`, in `~/.local/share/prompt-workflow/` (`$XDG_DATA_HOME`;
-`%LOCALAPPDATA%\prompt-workflow\` on Windows). Each deployed file starts with
+`espanso-manifest.json`, in `~/.local/share/promptmend/` (`$XDG_DATA_HOME`;
+`%LOCALAPPDATA%\promptmend\` on Windows). Each deployed file starts with
 `# prompt-workflow <version> (managed; edit at your own risk)`.
 
 | Command | What it does |
@@ -288,9 +288,20 @@ they are, so the old triggers keep working until the match files are deployed ag
 3. If `doctor` says `prompt-workflow` on `PATH` is the checkout's, run `deactivate` (its `.venv`
    is active) or take it off `PATH`.
 
-Or keep a `.env`: move it to the config folder (`~/.config/prompt-workflow/.env`,
-`%APPDATA%\prompt-workflow\.env` on Windows), where the wheel reads it too, or point
-`PROMPT_WORKFLOW_ENV` at it (set for GUI apps, since Espanso does not inherit your shell).
+Or keep a `.env`: move it to the config folder (`~/.config/promptmend/.env`,
+`%APPDATA%\promptmend\.env` on Windows), where the wheel reads it too, or point
+`PROMPTMEND_ENV` at it (set for GUI apps, since Espanso does not inherit your shell).
+
+**The folders' new name.** Releases up to 0.18.0 kept your settings in
+`~/.config/prompt-workflow/` and the usage history and deploy manifest in
+`~/.local/share/prompt-workflow/` (`%APPDATA%\prompt-workflow\` and
+`%LOCALAPPDATA%\prompt-workflow\` on Windows). The folders are now named `promptmend`. The
+first management command you run (any `prompt-workflow` command except the triggers' `improve`
+and `persona`, `--help` and `--version`), or the interface, renames them and prints one line
+per folder on stderr. It is a rename, so `secrets.toml` stays private to you; until then the
+triggers keep using the old folders. If both folders exist, only what the new one lacks is
+moved, nothing is overwritten, and `prompt-workflow doctor` lists what stayed behind. A move
+that fails (on Windows, a file another program holds open) is tried again by the next command.
 
 Update through the channel you installed with, then check the result with
 `prompt-workflow doctor`. With uv, install the new release over the old one with its own
@@ -563,16 +574,17 @@ environment variables take precedence over any file.
 
 The CLI reads its settings from the first of these that exists:
 
-1. the `.env` named by `PROMPT_WORKFLOW_ENV`, if set. That file alone is used, as before.
-2. `config.toml` in the config folder: `~/.config/prompt-workflow/`, or
-   `$XDG_CONFIG_HOME/prompt-workflow/` when `XDG_CONFIG_HOME` is set (macOS and Linux);
-   `%APPDATA%\prompt-workflow\` on Windows, which ignores `XDG_CONFIG_HOME`. Once it exists, it is the saved configuration and no `.env` is read, so an old
+1. the `.env` named by `PROMPTMEND_ENV` (or its old name `PROMPT_WORKFLOW_ENV`, which still
+   works; the new name wins when both are set), if set. That file alone is used, as before.
+2. `config.toml` in the config folder: `~/.config/promptmend/`, or
+   `$XDG_CONFIG_HOME/promptmend/` when `XDG_CONFIG_HOME` is set (macOS and Linux);
+   `%APPDATA%\promptmend\` on Windows, which ignores `XDG_CONFIG_HOME`. Once it exists, it is the saved configuration and no `.env` is read, so an old
    `.env` can never override a saved value.
 3. the `.env` in the repository the CLI was installed from, for an editable install only
    (the [Development](#development) scripts); a wheel install never reads a checkout;
 4. the `.env` in the config folder.
 
-Unless `PROMPT_WORKFLOW_ENV` is set, API keys are also read from `secrets.toml` in the config
+Unless `PROMPTMEND_ENV` is set, API keys are also read from `secrets.toml` in the config
 folder, which wins over a key in a `.env`. Order of precedence: built-in default <
 `config.toml` or `.env` < `secrets.toml` < real environment variable < a trigger's own options.
 
@@ -583,7 +595,7 @@ macOS/Linux, an access list for your account alone on Windows). An existing `.en
 migrated to both after a preview and your confirmation: values equal to their default are
 left out, the `.env` is moved into `backups/` in the config folder rather than deleted, and a
 rollback restores it exactly: `prompt-workflow config migrate` and `prompt-workflow config
-rollback` (both show a preview first). With `PROMPT_WORKFLOW_ENV` set (legacy mode), that `.env` stays
+rollback` (both show a preview first). With `PROMPTMEND_ENV` set (legacy mode), that `.env` stays
 the only settings file: nothing is migrated, and `config set` and `secrets` refuse to write, so
 edit the file itself. A keychain is
 not supported yet. [Your own profiles](#profiles-and-persona) live in `profiles/` in the same
@@ -649,7 +661,7 @@ short, does not look like a key and matches none of your `PROMPT_EXTRA_PATTERNS`
 | `PROMPT_HISTORY`             | `true`                         | Keep a local [usage history](#usage-history) (metadata only); `false` keeps none |
 | `PROMPT_HISTORY_RETENTION_DAYS` | `365`                       | Days a usage-history record is kept before pruning (1 to 36500) |
 | `PROMPT_UI_INTRO`            | `true`                         | `false` skips the [interface](#first-run)'s intro, which otherwise stays until Enter or any key, as `ui --no-intro` does once |
-| `PROMPT_WORKFLOW_ENV`        | *(unset)*                      | Path of the `.env` to load, alone: no `config.toml` or `secrets.toml` (real environment only) |
+| `PROMPTMEND_ENV`             | *(unset)*                      | Path of the `.env` to load, alone: no `config.toml` or `secrets.toml` (real environment only); `PROMPT_WORKFLOW_ENV` is its old name, still read when this one is not set |
 
 ## Profiles and persona
 
@@ -684,8 +696,8 @@ A profile is a system prompt in [`src/prompt_workflow/prompts/`](src/prompt_work
   fence anyway is pasted without it, for every profile.
 
 **Your own profiles** live outside the package, so an upgrade never replaces them:
-`~/.config/prompt-workflow/profiles/<name>.md` (`%APPDATA%\prompt-workflow\profiles\<name>.md`
-on Windows; `$XDG_CONFIG_HOME/prompt-workflow/profiles/` when that is set on macOS or Linux),
+`~/.config/promptmend/profiles/<name>.md` (`%APPDATA%\promptmend\profiles\<name>.md`
+on Windows; `$XDG_CONFIG_HOME/promptmend/profiles/` when that is set on macOS or Linux),
 in the config folder next to `config.toml` and the user `.env`. The file holds the system prompt as plain text, may use `{{PERSONA_RULE}}` like the
 built-ins, and is selected by its name: `--profile <name>`, `PROMPT_PROFILE` or
 `PROMPT_PRO_PROFILE`. A name is lower-case letters, digits, `-` and `_` (no dots or spaces, not a Windows device name such as `con`), and the file must be named exactly `<name>.md`.
@@ -891,8 +903,8 @@ request it made (a retried request counts twice, in the same run). It is on by d
   sentence, a path, an email, a `user:password@host` or a key cannot get in; a single
   harmless-looking word in a name column (say, a model called `hunter2`) can, which is why only
   your settings and the provider's reply fill those columns, never the draft.
-- **Where:** an SQLite file, `history.sqlite3`, in `~/.local/share/prompt-workflow/` (or
-  `$XDG_DATA_HOME/prompt-workflow/`) on macOS and Linux, `%LOCALAPPDATA%\prompt-workflow\` on
+- **Where:** an SQLite file, `history.sqlite3`, in `~/.local/share/promptmend/` (or
+  `$XDG_DATA_HOME/promptmend/`) on macOS and Linux, `%LOCALAPPDATA%\promptmend\` on
   Windows. It is never synced and never sent anywhere.
 - **Which trigger:** each managed match passes its own fixed `--trigger-id` (`i`, `iok`,
   `ip`, `if`, `il`, `ilm`, `ic`, `p`), stored as the trigger (`-i-`). A run from the terminal,
@@ -921,7 +933,7 @@ corrupt file) is dropped, and a small `history.lost` file next to it counts the 
 system itself stalls (a hung network drive) can hold it up longer. Costs are reported only as the provider reported them; an
 unknown cost is shown as unknown, never as 0. If you want an estimate for providers that report
 no cost (Anthropic), create `prices.toml` in the config directory
-(`~/.config/prompt-workflow/`, `%APPDATA%\prompt-workflow\` on Windows) with your prices per
+(`~/.config/promptmend/`, `%APPDATA%\promptmend\` on Windows) with your prices per
 million tokens:
 
 ```toml
@@ -964,7 +976,7 @@ run it are in [docs/benchmark.md](docs/benchmark.md).
 | `[Espanso]: An error occurred during rendering` | The CLI the matches call is gone or broken: the checkout of an editable install was moved or deleted, or the tool was uninstalled without `prompt-workflow espanso detach`. `prompt-workflow doctor` (once a CLI runs again) reports `launcher: the deployed matches call …, which is gone`. Install it again (see [Install](#install)), then run `prompt-workflow espanso deploy`, or `prompt-workflow espanso detach` to remove the triggers. |
 | `doctor` reports `launcher: the deployed matches call …, this install is …` | Launcher drift: the matches call another install of the CLI than the one you just ran (say, an old checkout after switching to a release wheel). Run `prompt-workflow espanso deploy` from the install you want the triggers to use. |
 | `doctor` reports `prompts-template.yml: stale` (or another match file) | The deployed match files are from an older version, so `-p-` and the `-if-` lists differ from the CLI. Run `prompt-workflow espanso deploy`. |
-| Not sure what is wrong | `prompt-workflow doctor` checks the install, settings, keys, Espanso, the match files and the history; `prompt-workflow config validate` checks the settings alone. |
+| Not sure what is wrong | `prompt-workflow doctor` checks the install, settings, keys, Espanso, the match files, the history and the folders; `prompt-workflow config validate` checks the settings alone. |
 | `[prompt-workflow: OPENROUTER_API_KEY is not configured]` | The key is missing from `.env` (or `secrets.toml`), or the file is not in one of the [places the CLI looks](#configuration). Once `config.toml` exists, a `.env` is no longer read. |
 | `[prompt-workflow: config.toml is not valid TOML (at line …)]` | Fix that line of `config.toml` in the config folder (`secrets.toml` likewise). |
 | `[prompt-workflow: OpenRouter returned HTTP 401: check the API key…]` | Wrong key. Replace it in `.env`. |

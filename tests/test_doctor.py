@@ -67,7 +67,7 @@ def _config(**changes: Any) -> doctor.Check:
 
 def test_config_modes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert _config().data["mode"] == "legacy"
-    monkeypatch.delenv("PROMPT_WORKFLOW_ENV")
+    monkeypatch.delenv("PROMPTMEND_ENV")
     assert _config().data["mode"] == "defaults"
     assert _config().status == "ok"
     env = config._user_config_dir() / ".env"
