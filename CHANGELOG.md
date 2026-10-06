@@ -36,6 +36,11 @@ All notable changes to this project are documented here. The format follows
   matches still call a `prompt-workflow` launcher, and its previous-install check, `setup` and
   `profiles migrate` still find a checkout from before the rename (its old project name,
   `src/prompt_workflow/prompts`, a `.venv/bin/prompt-workflow` launcher or uv receipt).
+- The repository moved to https://github.com/vlastimilbures/promptmend (#169). GitHub
+  redirects the old `espanso-prompt-rewriter` URLs, but update bookmarks and remotes
+  (`git remote set-url origin https://github.com/vlastimilbures/promptmend.git`). The PyPI
+  project is `promptmend`, and the Homebrew formula is `promptmend`
+  (`brew install vlastimilbures/tap/promptmend`).
 
 ### Added
 - `promptmend doctor` has a `folders` check (#169): it warns while an old
@@ -54,7 +59,7 @@ All notable changes to this project are documented here. The format follows
   GitHub Release is published, holds only the OIDC token, and uploads the files the release
   job attested, never a rebuild.
 - `scripts/brew_formula.py` writes the Homebrew formula for the project's own tap
-  (`vlastimilbures/homebrew-tap`, formula `prompt-workflow`) from `uv.lock`: the Release's
+  (`vlastimilbures/homebrew-tap`, formula `promptmend`) from `uv.lock`: the Release's
   sdist plus one resource per runtime dependency, each pinned by SHA-256 (#95).
 - README "Install", "Updating" and "Uninstall" cover each channel: uv from PyPI or from a
   GitHub Release, and Homebrew (the PyPI and Homebrew channels start with 0.19.0), with the

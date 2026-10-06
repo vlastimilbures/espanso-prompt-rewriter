@@ -13,7 +13,7 @@ from .. import __version__, config, config_store
 # here, so a rename (#169) changes this one line (and the snapshots).
 NAME = "PromptMend"
 TAGLINE = "A rough draft in, a precise prompt out: type -i- in any text field."
-REPO_URL = "https://github.com/vlastimilbures/espanso-prompt-rewriter"
+REPO_URL = "https://github.com/vlastimilbures/promptmend"
 LICENCE = "MIT"
 # A terminal this narrow (or narrower) gets the text alone: the mark would wrap.
 NARROW = 70

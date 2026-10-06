@@ -7,7 +7,7 @@ Only the latest release receives fixes.
 ## Reporting a vulnerability
 
 Please do **not** open a public issue. Report privately through
-[GitHub private vulnerability reporting](https://github.com/vlastimilbures/espanso-prompt-rewriter/security/advisories/new)
+[GitHub private vulnerability reporting](https://github.com/vlastimilbures/promptmend/security/advisories/new)
 (repository **Security** tab, then **Report a vulnerability**).
 
 Include what you found, how to reproduce it, and the impact you expect. You can expect an

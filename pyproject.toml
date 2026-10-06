@@ -17,8 +17,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/vlastimilbures/espanso-prompt-rewriter"
-Changelog = "https://github.com/vlastimilbures/espanso-prompt-rewriter/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/vlastimilbures/promptmend"
+Changelog = "https://github.com/vlastimilbures/promptmend/blob/main/CHANGELOG.md"
 
 [project.scripts]
 promptmend = "promptmend.cli:app"
