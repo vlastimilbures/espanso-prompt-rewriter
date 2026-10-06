@@ -296,12 +296,16 @@ Or keep a `.env`: move it to the config folder (`~/.config/promptmend/.env`,
 `~/.config/prompt-workflow/` and the usage history and deploy manifest in
 `~/.local/share/prompt-workflow/` (`%APPDATA%\prompt-workflow\` and
 `%LOCALAPPDATA%\prompt-workflow\` on Windows). The folders are now named `promptmend`. The
-first management command you run (any `prompt-workflow` command except the triggers' `improve`
-and `persona`, `--help` and `--version`), or the interface, renames them and prints one line
-per folder on stderr. It is a rename, so `secrets.toml` stays private to you; until then the
-triggers keep using the old folders. If both folders exist, only what the new one lacks is
-moved, nothing is overwritten, and `prompt-workflow doctor` lists what stayed behind. A move
-that fails (on Windows, a file another program holds open) is tried again by the next command.
+first management command you run, or the interface, renames them and prints one line per
+folder on stderr (not `improve`, `persona`, `--help`, `--version`, an unknown command or shell
+completion). It is a rename, so `secrets.toml` stays private to you; until then the triggers
+keep using the old folders. If both folders exist, only what the new one lacks is moved,
+nothing is overwritten, and `prompt-workflow doctor` lists what stayed behind. A move that
+fails (on Windows, a file another program holds open) is tried again by the next command. If
+`PROMPTMEND_ENV` or `PROMPT_WORKFLOW_ENV` (in your shell or in Espanso's environment) names a
+`.env` inside the old config folder, that folder is not moved: point the variable at the same
+file under the new folder, then run the command again. A symlinked old folder is never moved;
+move it by hand.
 
 Update through the channel you installed with, then check the result with
 `prompt-workflow doctor`. With uv, install the new release over the old one with its own

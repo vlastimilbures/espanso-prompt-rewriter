@@ -354,10 +354,15 @@ Rules for agents:
   before every subcommand except `improve`/`persona`, a `--help`/`-h` anywhere, an unknown
   command and resilient parsing (`--version` is eager and exits first; a bare command turned
   into `ui` does run it), printing each returned line on stderr. For the config and the data
-  folder: legacy absent, nothing; new absent, `os.rename(old, new)` (keeps mode 600 and the
-  Windows DACL); both, each top-level entry the new one lacks is renamed (`lexists()` first:
-  never overwrite), conflicts stay (silent; doctor's `folders` check reports them) and the
-  legacy folder is removed only once empty. Then every string in the new folder's
+  folder: legacy absent or a symlink, nothing; a legacy folder holding the `.env` that
+  `env_file_override()` names (`config.env_file_inside()`), one line asking to repoint the
+  variable, and it stays; new absent, `os.rename(old, new)` (keeps mode 600 and the Windows
+  DACL); both, each unit the new one lacks is renamed (a file plus its `-wal`/`-shm`/`-journal`,
+  `.lock`, `.<pid>.tmp` and `.lock.<hex>.stale` companions, `_unit()`: all or none; `lexists()`
+  first: never overwrite), conflicts stay (silent; doctor's `folders` check reports them) and
+  the legacy folder is removed only once empty. A merge is not atomic: until it ends the
+  triggers already use the new folder, so a setting or key still in the old one is briefly
+  missing. A `FileNotFoundError` (a concurrent run moved it) is silent. Then every string in the new folder's
   `migration.json` that is the legacy config path or under it is rebased (`write_atomic()`;
   an unparsable marker is left alone). An `OSError` (a Windows lock) becomes one line, never
   an exception; the next command retries. `tests/test_relocate.py`; the TUI snapshots pin
@@ -375,9 +380,10 @@ Rules for agents:
   `import_check()` (the interface's Diagnostics) imports `prompt_workflow.cli` in a fresh
   interpreter (`-P`, so a module planted in the working directory never runs; the smoke test's
   child uses `-P` too) and reports its time, module count and any `HEAVY_MODULES` it loaded.
-  The `folders` check (#169) WARNs while a legacy folder is still in use (doctor runs after
-  the move, so that means it failed) or holds conflicts left behind; data `config_dir`,
-  `data_dir`, `legacy`, `conflicts`.
+  The `folders` check (#169) WARNs while a legacy folder is still in use, naming why (a
+  symlink, the named `.env` inside it, a file holding the new name, else a failed move; doctor
+  runs after the move) or holds conflicts left behind; data `config_dir`, `data_dir`,
+  `legacy`, `conflicts`.
 - `previous_install.py` — finds an earlier checkout install (#110) from the launcher in the
   deployed match files (`deploy.deployed_launchers()`) and manifest, the uv tool receipt and a
   path the user entered; never a disk scan, and a checkout's `.env` is only checked for

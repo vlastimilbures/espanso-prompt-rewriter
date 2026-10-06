@@ -10,6 +10,7 @@ persona or clipboard text, since people paste it into bug reports. Its JSON shap
 from __future__ import annotations
 
 import json
+import os
 import platform
 import subprocess
 import sys
@@ -518,9 +519,23 @@ def _folders_check() -> Check:
     folder has its own, and nothing was overwritten."""
     legacy: list[str] = []
     conflicts: list[str] = []
+    notes: list[str] = []
     for new, old in (config.config_folders(), config.data_folders()):
-        if config.folder_in_use((new, old)) == old:
+        in_use = config.folder_in_use((new, old)) == old
+        if in_use:
             legacy.append(str(old))
+        variable = config.env_file_inside(old) if old.is_dir() else None
+        if old.is_symlink():
+            notes.append(f"{old} is a symlink, which is never moved: move it to {new} by hand")
+        elif variable:
+            notes.append(
+                f"{variable} names a file inside {old}, so it is not moved: point {variable} "
+                f"at the same file under {new}, then run any command"
+            )
+        elif in_use and os.path.lexists(new):
+            notes.append(f"{new} is not a folder, so {old} stays in use: move {new} away")
+        elif in_use:
+            notes.append(f"{old} is still in use under the old name (the move failed)")
         elif old.is_dir():
             conflicts.extend(str(entry) for entry in sorted(old.iterdir()))
     data = {
@@ -529,9 +544,6 @@ def _folders_check() -> Check:
         "legacy": legacy,
         "conflicts": conflicts,
     }
-    notes = []
-    if legacy:
-        notes.append(f"still in use under the old name: {', '.join(legacy)} (the move failed)")
     if conflicts:
         notes.append(
             f"left in the old folder, since the new one has its own: {', '.join(conflicts)}; "

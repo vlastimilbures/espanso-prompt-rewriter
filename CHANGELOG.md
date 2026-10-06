@@ -73,9 +73,11 @@ All notable changes to this project are documented here. The format follows
 - The user folders are named `promptmend` now (#169): settings in `~/.config/promptmend/`
   (`%APPDATA%\promptmend\`), the usage history and deploy manifest in
   `~/.local/share/promptmend/` (`%LOCALAPPDATA%\promptmend\`). The first management command
-  (anything but `improve`, `persona`, `--help` and `--version`) or the interface renames the
-  old `prompt-workflow` folders and prints one line per folder on stderr; until then the
-  triggers keep using the old ones. A rename keeps `secrets.toml` private; when both folders
+  or the interface (not `improve`, `persona`, help, `--version`, an unknown command or shell
+  completion) renames the old `prompt-workflow` folders and prints one line per folder on
+  stderr; until then the triggers keep using the old ones. A config folder holding the `.env`
+  that `PROMPTMEND_ENV`/`PROMPT_WORKFLOW_ENV` names, or a symlinked old folder, is not moved
+  (doctor says what to do). A rename keeps `secrets.toml` private; when both folders
   exist only what the new one lacks is moved and nothing is overwritten; `migration.json`'s
   paths follow, so `config rollback` still works; a move that fails is retried by the next
   command. README "Updating" describes it.

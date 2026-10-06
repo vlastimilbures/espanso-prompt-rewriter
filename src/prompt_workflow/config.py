@@ -94,6 +94,19 @@ def folder_in_use(folders: tuple[Path, Path]) -> Path:
     return old if not new.is_dir() and old.is_dir() else new
 
 
+def env_file_inside(folder: Path, environ: Mapping[str, str] = os.environ) -> str | None:
+    """The variable (PROMPTMEND_ENV or its alias) whose .env lies inside ``folder``, or None.
+    Moving that folder would leave the variable naming a file that is gone."""
+    named = env_file_override(environ)
+    if named is None:
+        return None
+    try:
+        inside = Path(named).expanduser().resolve().is_relative_to(folder.resolve())
+    except (OSError, RuntimeError):
+        return None
+    return env_file_var(environ) if inside else None
+
+
 def _user_config_dir(environ: Mapping[str, str] = os.environ) -> Path:
     return folder_in_use(config_folders(environ))
 

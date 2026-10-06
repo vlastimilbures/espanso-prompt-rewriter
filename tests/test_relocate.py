@@ -411,3 +411,125 @@ def test_the_new_variable_wins(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     assert config.env_file_override() == str(tmp_path / "new.env")
     result = runner.invoke(app, ["config", "set", "OLLAMA_MODEL", "x"])
     assert "PROMPTMEND_ENV is set" in result.stderr
+
+
+# --- review round: the edge cases ------------------------------------------------------------
+
+
+def test_an_env_file_inside_the_legacy_folder_keeps_it(
+    folders: Folders, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folders.legacy()
+    named = folders.old_config / ".env"
+    named.write_text("OLLAMA_MODEL=named\n", encoding="utf-8")
+    monkeypatch.setenv("PROMPT_WORKFLOW_ENV", str(named))
+    messages = relocate.migrate_folders()
+    assert messages == [
+        f"PROMPT_WORKFLOW_ENV names a file inside {folders.old_config}, so that folder was not "
+        f"moved: point PROMPT_WORKFLOW_ENV at the same file under {folders.config}, then run "
+        "the command again",
+        f"moved the data folder {folders.old_data} to {folders.data}",
+    ]
+    assert named.is_file()
+    assert Settings.load().ollama_model == "named"
+    check = doctor._folders_check()
+    assert check.status == doctor.WARN
+    assert "PROMPT_WORKFLOW_ENV names a file inside" in check.message
+    # Repointed (the file moved by hand), the next command moves the folder.
+    monkeypatch.setenv("PROMPT_WORKFLOW_ENV", str(folders.config / ".env"))
+    assert relocate.migrate_folders() == [
+        f"moved the settings folder {folders.old_config} to {folders.config}"
+    ]
+    assert Settings.load().ollama_model == "named"
+
+
+def test_an_env_file_elsewhere_does_not_hold_the_move(
+    folders: Folders, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folders.legacy()
+    monkeypatch.setenv("PROMPTMEND_ENV", str(tmp_path / "elsewhere.env"))
+    assert MOVED_SETTINGS in relocate.migrate_folders()[0]
+
+
+def _files(folder: Path, *names: str) -> None:
+    folder.mkdir(parents=True, exist_ok=True)
+    for name in names:
+        (folder / name).write_text(name, encoding="utf-8")
+
+
+def test_sqlite_and_lock_companions_move_with_their_file(folders: Folders) -> None:
+    unit = ("history.sqlite3", "history.sqlite3-wal", "history.sqlite3-shm")
+    lost = ("history.lost", "history.lost.lock", "history.lost.123.tmp")
+    _files(folders.old_data, *unit, *lost, "espanso-manifest.json")
+    # The new folder already has its own database and a stale lock of its lost counter.
+    _files(folders.data, "history.sqlite3", "history.lost.lock.ab12.stale")
+    relocate.migrate_folders()
+    assert sorted(p.name for p in folders.old_data.iterdir()) == sorted((*unit, *lost))
+    assert (folders.data / "history.sqlite3").read_text("utf-8") == "history.sqlite3"
+    assert not (folders.data / "history.sqlite3-wal").exists()
+    assert (folders.data / "espanso-manifest.json").is_file()
+
+
+def test_an_orphan_journal_never_joins_another_database(folders: Folders) -> None:
+    _files(folders.old_data, "history.sqlite3-wal", "history.sqlite3-journal")
+    _files(folders.data, "history.sqlite3")
+    assert relocate.migrate_folders() == []
+    assert not (folders.data / "history.sqlite3-wal").exists()
+
+
+def test_a_whole_unit_moves_when_the_new_folder_lacks_it(folders: Folders) -> None:
+    _files(folders.old_data, "history.sqlite3", "history.sqlite3-wal", "history.lost")
+    _files(folders.data, "other")
+    relocate.migrate_folders()
+    assert not folders.old_data.exists()
+    assert {p.name for p in folders.data.iterdir()} == {
+        "other",
+        "history.sqlite3",
+        "history.sqlite3-wal",
+        "history.lost",
+    }
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+def test_a_symlinked_legacy_folder_is_left_alone(folders: Folders, tmp_path: Path) -> None:
+    real = tmp_path / "elsewhere"
+    _files(real, "config.toml")
+    folders.old_config.parent.mkdir(parents=True)
+    folders.old_config.symlink_to(real, target_is_directory=True)
+    assert relocate.migrate_folders() == []
+    assert folders.old_config.is_symlink()
+    assert config._user_config_dir() == folders.old_config  # still the triggers' folder
+    check = doctor._folders_check()
+    assert check.status == doctor.WARN
+    assert f"{folders.old_config} is a symlink" in check.message
+    # Even next to a new folder: no merge through it, no removal.
+    _files(folders.config, "secrets.toml")
+    assert relocate.migrate_folders() == []
+    assert folders.old_config.is_symlink()
+    assert (real / "config.toml").is_file()
+    assert not (folders.config / "config.toml").exists()
+
+
+def test_a_concurrent_move_is_not_reported(
+    folders: Folders, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folders.legacy()
+
+    def gone(source: object, target: object) -> None:
+        raise FileNotFoundError(2, "No such file or directory")
+
+    monkeypatch.setattr(os, "rename", gone)
+    assert relocate.migrate_folders() == []
+    folders.config.mkdir(parents=True)
+    assert relocate.migrate_folders() == []
+
+
+def test_doctor_names_a_file_in_the_way(folders: Folders) -> None:
+    folders.legacy()
+    folders.config.write_text("in the way", encoding="utf-8")
+    check = doctor._folders_check()
+    assert check.status == doctor.WARN
+    assert f"{folders.config} is not a folder, so {folders.old_config} stays in use" in (
+        check.message
+    )
+    assert "the move failed" not in check.message.split(";")[0]

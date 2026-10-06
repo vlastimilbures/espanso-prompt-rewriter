@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,15 @@ def migrate_folders(environ: Mapping[str, str] = os.environ) -> list[str]:
         ("data", config.data_folders(environ)),
     ):
         new, old = folders
+        variable = config.env_file_inside(old, environ) if old.is_dir() else None
+        if variable:
+            # Legacy mode reads that .env alone: after a move the variable would name a file
+            # that is gone, and every trigger would run on the defaults.
+            messages.append(
+                f"{variable} names a file inside {old}, so that folder was not moved: point "
+                f"{variable} at the same file under {new}, then run the command again"
+            )
+            continue
         try:
             messages.extend(_move(what, new, old))
         except OSError as exc:
@@ -43,26 +53,55 @@ def migrate_folders(environ: Mapping[str, str] = os.environ) -> list[str]:
     return messages
 
 
+# Files that belong to another one and move with it, all or none: SQLite's journals next to
+# history.sqlite3, and history.py's lock, temporary and stale-lock files next to history.lost.
+# A -wal moved next to someone else's database would corrupt it.
+_COMPANION = re.compile(r"(-wal|-shm|-journal|\.lock(\.[0-9a-f]+\.stale)?|\.\d+\.tmp)$")
+
+
+def _unit(name: str) -> str:
+    """The name of the file ``name`` belongs to (itself, unless it is a companion)."""
+    return _COMPANION.sub("", name)
+
+
 def _move(what: str, new: Path, old: Path) -> list[str]:
-    if not old.is_dir():
+    # A symlinked legacy folder is left alone: merging through it, or removing it, would act
+    # on a folder elsewhere. It stays in use until moved by hand (doctor says so).
+    if old.is_symlink() or not old.is_dir():
         return []
     if not os.path.lexists(new):
-        os.rename(old, new)
+        try:
+            os.rename(old, new)
+        except FileNotFoundError:
+            return []  # a concurrent command moved it first
         return [f"moved the {what} folder {old} to {new}"]
     if not new.is_dir():
         return []  # something else has the new name: the legacy folder stays in use
     # Both exist (a command of this version created the new one first, or a move was cut
-    # short): move what the new folder lacks. lexists() is checked first because a POSIX
-    # rename would silently replace an existing file.
+    # short): move each unit the new folder lacks entirely. lexists() is checked first
+    # because a POSIX rename would silently replace an existing file.
+    try:
+        names = sorted(entry.name for entry in old.iterdir())
+    except FileNotFoundError:
+        return []
+    taken = {_unit(entry.name) for entry in new.iterdir()}
     moved = []
-    for entry in sorted(old.iterdir()):
-        target = new / entry.name
-        if not os.path.lexists(target):
-            os.rename(entry, target)
-            moved.append(entry.name)
-    left = sorted(entry.name for entry in old.iterdir())
-    if not left:
-        old.rmdir()
+    for name in names:  # sorted: a unit's own file comes before its companions
+        target = new / name
+        if _unit(name) in taken or os.path.lexists(target):
+            continue
+        try:
+            os.rename(old / name, target)
+        except FileNotFoundError:
+            continue  # a concurrent command moved it first
+        moved.append(name)
+    try:
+        left = sorted(entry.name for entry in old.iterdir())
+    except FileNotFoundError:
+        left = []
+    else:
+        if not left:
+            old.rmdir()
     if not moved:
         return []  # only conflicts, reported by doctor's `folders` check, not on every command
     lines = [f"moved {', '.join(moved)} from the {what} folder {old} to {new}"]

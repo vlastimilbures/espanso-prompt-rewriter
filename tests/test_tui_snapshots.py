@@ -189,6 +189,7 @@ def fixed_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("PROMPTMEND_ENV")
     # The folders shown (About, History, Profiles) keep their legacy name until the rename
     # (#169) regenerates the snapshots: no /home/me folder exists, so the new name would show.
+    # TODO(#169 PR B): regenerate with the promptmend paths.
     monkeypatch.setattr(config, "APP_DIR", config.LEGACY_APP_DIR)
     monkeypatch.setenv("XDG_CONFIG_HOME", f"{HOME}/.config")
     monkeypatch.setenv("XDG_DATA_HOME", f"{HOME}/.local/share")
