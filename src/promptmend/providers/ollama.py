@@ -18,6 +18,8 @@ class OllamaProvider:
     temperature: float | None = None
     # options.num_predict, sent only when set (--max-tokens): Ollama's own default otherwise.
     max_tokens: int | None = None
+    # options.num_ctx, sent only when set (OLLAMA_NUM_CTX): Ollama's own context otherwise.
+    num_ctx: int | None = None
     # Receives one AttemptUsage per HTTP attempt; see providers/usage.py. ``local`` says the
     # model runs on this machine (loopback, not a cloud model), so it has no cost to report.
     observer: UsageObserver | None = field(default=None, repr=False, compare=False)
@@ -38,6 +40,8 @@ class OllamaProvider:
             options["temperature"] = self.temperature
         if self.max_tokens:
             options["num_predict"] = self.max_tokens
+        if self.num_ctx:
+            options["num_ctx"] = self.num_ctx
         if options:
             payload["options"] = options
         meter = (

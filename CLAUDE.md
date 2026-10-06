@@ -89,6 +89,7 @@ Rules for agents:
   OpenRouter it adds the endpoint pin (`OPENROUTER_PROVIDER`), `provider.data_collection`
   when `OPENROUTER_DATA_COLLECTION` is set (both tiers; empty sends no field) and
   `reasoning: {effort, exclude: true}` (`OPENROUTER_REASONING_EFFORT`; empty omits it).
+  Ollama gets `OLLAMA_NUM_CTX` as `options.num_ctx` (#168; empty, the default, sends none).
   An optional `observer=` is passed to every provider, inside the gate (no request, no record).
 - `providers/usage.py` — `AttemptUsage` (frozen) and the `UsageObserver` protocol. With an
   observer, `post_json(..., meter=Meter(...))` reports one record per HTTP attempt (both

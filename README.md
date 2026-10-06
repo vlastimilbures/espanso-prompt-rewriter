@@ -740,6 +740,7 @@ short, does not look like a key and matches none of your `PROMPT_EXTRA_PATTERNS`
 | `OLLAMA_BASE_URL`            | `http://localhost:11434`       |                                                           |
 | `OLLAMA_MODEL`               | `qwen3:8b`                     |                                                           |
 | `OLLAMA_THINK`               | `false`                        | Keep reasoning off for thinking models                    |
+| `OLLAMA_NUM_CTX`             | *(empty)*                      | Context window in tokens, sent as `options.num_ctx`; empty sends nothing, so Ollama's own applies. See the note below |
 | `LMSTUDIO_BASE_URL`          | `http://localhost:1234/v1`     |                                                           |
 | `LMSTUDIO_MODEL`             | `local-model`                  |                                                           |
 | `ALLOW_CLOUD_OVERRIDE`       | `false`                        | `true` lets flagged drafts reach cloud providers          |
@@ -750,6 +751,17 @@ short, does not look like a key and matches none of your `PROMPT_EXTRA_PATTERNS`
 | `PROMPT_HISTORY_RETENTION_DAYS` | `365`                       | Days a usage-history record is kept before pruning (1 to 36500) |
 | `PROMPT_UI_INTRO`            | `true`                         | `false` skips the [interface](#first-run)'s intro, which otherwise stays until Enter or any key, as `ui --no-intro` does once |
 | `PROMPTMEND_ENV`             | *(unset)*                      | Path of the `.env` to load, alone: no `config.toml` or `secrets.toml` (real environment only); `PROMPT_WORKFLOW_ENV` is its old name, still read when this one is not set |
+
+> [!NOTE]
+> **Ollama's context window.** Ollama shortens a prompt longer than its context window
+> without an error, so part of the instructions or the draft never reaches the model. Its default window
+> depends on the Ollama version and the model, and can be smaller than the `default` profile
+> (about 17,000 characters, several thousand tokens) plus your draft. The local triggers use
+> the much shorter `general` profile; `--provider ollama` with `default` is the exposed case.
+> If a rewrite ignores the template, set `OLLAMA_NUM_CTX`, for example `8192` for short
+> drafts and more for long ones (a 50,000-character draft alone is roughly 12,000 tokens of
+> English), within what the model supports. A larger window uses more memory, and changing it
+> makes Ollama reload the model.
 
 ## Profiles and persona
 
@@ -931,7 +943,7 @@ carrying:
   unless `PROMPT_GATE_LOCAL=true`), and name what it matches, never the text;
 - the model name and request settings, such as the temperature and maximum tokens (for
   OpenRouter also the reasoning effort and the endpoint preference; for Ollama its `think`
-  setting; the Anthropic API version header);
+  setting and `num_ctx` when set; the Anthropic API version header);
 - the API key, only as the authentication header (`Authorization: Bearer …` for OpenRouter,
   `x-api-key` for Anthropic; none for Ollama or LM Studio).
 

@@ -823,6 +823,19 @@ def test_max_tokens_reaches_local_providers(fake_http: FakeHttp) -> None:
     assert "max_tokens" not in _local_body(fake_http, "lmstudio", "--max-tokens", "default")
 
 
+# OLLAMA_NUM_CTX reaches Ollama as options.num_ctx (#168), beside --max-tokens; LM Studio
+# gets nothing, and unset or empty sends no num_ctx.
+def test_num_ctx_reaches_ollama(monkeypatch: pytest.MonkeyPatch, fake_http: FakeHttp) -> None:
+    monkeypatch.setenv("OLLAMA_NUM_CTX", "8192")
+    body = _local_body(fake_http, "ollama", "--max-tokens", "300")
+    assert body["options"] == {"temperature": 0.2, "num_predict": 300, "num_ctx": 8192}
+    fake_http.requests.clear()
+    assert "num_ctx" not in _local_body(fake_http, "lmstudio")
+    fake_http.requests.clear()
+    monkeypatch.setenv("OLLAMA_NUM_CTX", "")
+    assert "num_ctx" not in _local_body(fake_http, "ollama")["options"]
+
+
 # A capped Ollama call that spent its budget before any text suggests --max-tokens.
 def test_ollama_capped_hint(fake_http: FakeHttp) -> None:
     fake_http.reply({"message": {"content": ""}, "done_reason": "length"})

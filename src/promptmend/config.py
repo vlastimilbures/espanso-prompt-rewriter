@@ -403,8 +403,9 @@ def _temperature(raw: str) -> float | None:
 
 
 def _optional_positive_int(raw: str) -> int | None:
-    """An optional cap such as OPENROUTER_PRO_MAX_TOKENS: empty (the default) means none of
-    its own, so the caller falls back to another setting."""
+    """An optional number such as OPENROUTER_PRO_MAX_TOKENS or OLLAMA_NUM_CTX: empty (the
+    default) means none of its own, so the caller falls back to another setting or sends
+    nothing."""
     if raw == "":
         return None
     try:
@@ -555,6 +556,9 @@ class Settings:
     ollama_base_url: str = _env("OLLAMA_BASE_URL", "http://localhost:11434")
     ollama_model: str = _env("OLLAMA_MODEL", "qwen3:8b")
     ollama_think: bool = _env("OLLAMA_THINK", "false", _bool)
+    # options.num_ctx, the context window in tokens (#168): Ollama truncates a prompt longer
+    # than it without an error. Empty (the default) sends nothing, so Ollama's own applies.
+    ollama_num_ctx: int | None = _env("OLLAMA_NUM_CTX", "", _optional_positive_int)
     openrouter_base_url: str = _env("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
     openrouter_model: str = _env("OPENROUTER_MODEL", "google/gemini-3.5-flash-lite")
     # Stripped: a space pasted along with a key is never part of it.
