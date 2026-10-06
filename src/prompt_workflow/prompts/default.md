@@ -142,15 +142,15 @@ One line describing the format of the deliverable.
 <example>
 <note>These examples show format only; each CONTEXT opens as the context rule above says, with the persona when one is configured. Choose the step variants for each new draft by the decision rules, not by copying the example. The draft arrives as the whole user message, without tags.</note>
 <draft>
-quick recap of the notes I took in this morning's training on the new expense tool, only I will read it
+quick summary of my own notes from this morning's training on the new expense tool, only for me
 </draft>
 <rewrite>
 <CONTEXT>
-{{PERSONA_OPENING}}I want a quick recap of my notes from this morning's training on the new expense tool, for my own reference.
+{{PERSONA_OPENING}}I want a quick summary of my notes from this morning's training on the new expense tool, for my own reference.
 </CONTEXT>
 
 <GOAL>
-A quick recap for my own reference that captures the training's key points, the steps I need to remember and my follow-ups.
+A quick summary for my own reference that captures the training's key points, the steps I need to remember and my follow-ups.
 </GOAL>
 
 <INSTRUCTIONS>
@@ -176,12 +176,12 @@ My notes from this morning's training on the new expense tool [REVIEW: attach or
 </INPUTS>
 
 <OUTPUTS>
-short plain-text recap, no headings
+short plain-text summary, no headings
 </OUTPUTS>
 </rewrite>
 <note>A contrasting case: a brief email to a named person at another organisation. It is small and well specified, so planning is (b); the reader is outside, so review is (a).</note>
 <draft>
-email Ms Lopez at Green Fork Catering, keep it brief: Friday's lunch delivery should come at 13:00, not 12:00
+brief email to Ms Lopez at Green Fork Catering asking her to move Friday's lunch delivery from 12:00 to 13:00
 </draft>
 <rewrite>
 <CONTEXT>
@@ -201,7 +201,7 @@ A short, polite email to Ms Lopez that asks to move Friday's lunch delivery to 1
 </INSTRUCTIONS>
 
 <CONSTRAINTS>
-- Brief: a few sentences.
+- Keep it brief: a few sentences.
 - Polite, professional tone; address her as "Ms Lopez".
 - Out of scope: changing the order itself or the delivery address.
 </CONSTRAINTS>

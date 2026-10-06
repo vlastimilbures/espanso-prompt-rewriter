@@ -188,7 +188,7 @@ def test_readme_has_no_package_placeholders() -> None:
 # digest: a change to prompts/default.md fails here until both are updated (set the version to
 # the release that ships the change) and docs/benchmark.md gets results for the new prompt.
 _PROMPT_CHANGED_IN = (0, 19, 0)
-_PROMPT_DIGEST = "2d97326527ff9f4e977e042471017b3b77fe643d0e60d91cde4afc4bf363028b"
+_PROMPT_DIGEST = "c336e4851edba9c8b284726613bd7b3953ab317b3aca453396f0acc718bfa6e2"
 
 
 def _result_headings() -> list[str]:

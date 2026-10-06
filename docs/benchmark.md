@@ -79,24 +79,31 @@ the contested `quick-ceo`, `memo` and `outliers` review labels accepting either 
 
 | Setup | Prompt | core | edge | holdout | persona in `CONTEXT` | `[REVIEW]` per rewrite | `rep` | p50 | p95 | $ per rewrite |
 |-------|--------|------|------|---------|----------------------|------------------------|-------|-----|-----|---------------|
-| `google/gemini-3.5-flash-lite` @ `google-ai-studio/flex`, effort `minimal` (standard) | decontaminated | 23/24 | 75/84 | 18/24 | 129/129 | 0.61 | 33 | 2.3 s | 3.3 s | 0.0012 |
+| `google/gemini-3.5-flash-lite` @ `google-ai-studio/flex`, effort `minimal` (standard) | decontaminated | 23/24 | 76/84 | 23/24 | 128/128 | 0.62 | 3 | 2.5 s | 3.5 s | 0.0012 |
+| | first decontaminated draft | 23/24 | 75/84 | 18/24 | 129/129 | 0.61 | 33 | 2.3 s | 3.3 s | 0.0012 |
 | | #163 | 24/24 | 73/84 | 18/24 | 129/129 | 0.66 | 3 | 2.3 s | 3.3 s | 0.0012 |
-| `openai/gpt-6-luna` @ `openai`, effort `low` (pro) | decontaminated | 24/24 | 83/84 | 23/24 | 129/129 | 0.80 | 0 | 6.8 s | 11.6 s | 0.0004 |
+| `openai/gpt-6-luna` @ `openai`, effort `low` (pro) | first decontaminated draft | 24/24 | 83/84 | 23/24 | 129/129 | 0.80 | 0 | 6.8 s | 11.6 s | 0.0004 |
 | | #163 | 24/24 | 81/84 | 24/24 | 129/129 | 0.85 | 0 | 5.9 s | 10.2 s | 0.0004 |
 
-By kind (132 runs per row), decontaminated against #163: flash-lite `struct` 131 and 132,
-`branch` 115 and 118 of 123, `draft` 125 and 119; gpt-6-luna `struct` 132 and 130, `branch`
-122 and 123 of 123, `draft` 131 and 131. Every interval overlaps. The new `draft:` checks
-catch flash-lite on pasted material: with the #163 prompt it summarised `pasted` instead of
-copying it in 3 of 3 runs (and `ho-signing`, the holdout's pasted email, in 3 of 3); with the
-decontaminated prompt it copied `pasted` in 3 of 3 but `ho-signing` in only 1 of 3, and gave
-`pasted` the self-review in 2 of 3. The one clear difference is `rep`: flash-lite closed
-`CONTEXT` with `</GOAL>` in 33 of 132 rewrites (every run of `quick-external`, `quick-ceo`,
-`memo`, `slack` and `supplier`), against 3 with the #163 prompt. The CLI repairs that slip
-before pasting, so the pasted text is unaffected, but it is a regression to fix before the
-release. The other failures are the known gaps (flash-lite gives `long-thread` the self-review
-and `cap-thread` the `.md` line, 3 of 3 each) and, on the holdout, flash-lite giving a regex
-the `.md` line (2 of 3 with either prompt).
+The first decontaminated draft made flash-lite close `CONTEXT` with `</GOAL>` in 33 of 132
+rewrites (every run of `quick-external`, `quick-ceo`, `memo`, `slack` and `supplier`), against
+3 with the #163 prompt. The CLI repairs that slip before pasting, but it was a regression. Its
+examples differed from the shipped ones only on the surface ("quick recap … only I will read
+it", "email Ms Lopez …, keep it brief: …", "Brief: a few sentences."); bringing their wording
+back to the #163 shape ("quick summary of my own notes …, only for me", "brief email to Ms
+Lopez … asking her to move …", "Keep it brief: a few sentences.") while still quoting no draft
+brought it back to 3, and that is the shipped prompt. gpt-6-luna was benched on the first
+draft only: the final change touches only the examples' wording, and it had no slips there.
+
+By kind (132 runs per row), the shipped prompt against #163 on flash-lite: `struct` 131 of 131
+and 132, `branch` 116 of 122 and 118 of 123, `draft` 128 of 131 and 119 of 132 (one run of the
+shipped prompt ended in an HTTP 400 from the provider and is counted as a failure, not scored
+by kind). On gpt-6-luna, the first draft against #163: `struct` 132 and 130, `branch` 122 and
+123 of 123, `draft` 131 and 131. Every interval overlaps. The new `draft:` checks catch
+flash-lite on pasted material: with the #163 prompt it summarised `pasted` instead of copying
+it in 3 of 3 runs, and `ho-signing` (the holdout's pasted email) in 3 of 3; with the shipped
+prompt it copied both in 3 of 3. The other failures are the known gaps: flash-lite gives
+`long-thread` the self-review (3 of 3) and `cap-thread` the `.md` line (3 of 3).
 
 The first v0.19.0 wording (#163) was run earlier on 2026-10-06 with `--suite all --runs 3
 --persona example --max-tokens 2400`, against the v0.14.0 prompt (shipped until v0.18.0) on

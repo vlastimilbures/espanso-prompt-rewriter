@@ -60,12 +60,12 @@ All notable changes to this project are documented here. The format follows
   would: …", so it also works in a plain chat; "validate them with me" is kept. The `-p-`
   snippet carries both wordings. docs/benchmark.md has the before/after results.
 - The `default` prompt no longer quotes the bench's own drafts (#48): its two examples are new
-  situations (a recap of training notes, a catering delivery time), and its decision rules
+  situations (a summary of training notes, a catering delivery time), and its decision rules
   name other readers and lengths ("a brief letter to a tax office" instead of "a quick email
   to a regulator"; no "Herr Maier", landlord, help-center, "two-line" or "one-paragraph").
-  The rules themselves are unchanged. On the bench (docs/benchmark.md) flash-lite passed 116
-  of 132 runs (before: 115) and gpt-6-luna 130 (before: 129), but flash-lite's
-  `<CONTEXT>…</GOAL>` slip, which the CLI repairs before pasting, rose from 3 to 33 rewrites.
+  The rules themselves are unchanged. On the bench (docs/benchmark.md) flash-lite passed 122
+  of 132 runs (before: 115), with 3 `<CONTEXT>…</GOAL>` slips as before, and copied pasted
+  material in every `pasted` run (before: none).
 - Bench (`scripts/bench_models.py`, #48): a frozen `holdout` suite of 8 new drafts no prompt
   was tuned on (`--suite holdout`, not part of `all`); a test that fails when a profile or the
   `-p-` template quotes any bench draft (a three-word phrase or a name) or any holdout

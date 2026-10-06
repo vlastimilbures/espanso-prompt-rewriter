@@ -71,7 +71,7 @@ def test_default_profile_without_persona() -> None:
 def test_default_examples_open_with_persona() -> None:
     with_persona = system_prompt("default", PERSONA)
     plain = system_prompt("default")
-    for opening in ("I want a quick recap of my notes", "I need to email Ms Lopez"):
+    for opening in ("I want a quick summary of my notes", "I need to email Ms Lopez"):
         assert f"<CONTEXT>\n{PERSONA} {opening}" in with_persona
         assert f"<CONTEXT>\n{opening}" in plain
     assert with_persona.count(f"<CONTEXT>\n{PERSONA} ") == 2

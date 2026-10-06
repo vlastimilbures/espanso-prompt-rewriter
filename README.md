@@ -40,31 +40,31 @@ configured, generated 2026-10-06):
 
 ```text
 <CONTEXT>
-I need a short board update explaining why customer churn increased last quarter, based on the attached churn dashboard export.
+I need to write a short board update explaining why customer churn went up last quarter, using the attached churn dashboard export.
 </CONTEXT>
 
 <GOAL>
-A concise board update that explains the reasons for the customer churn increase last quarter and outlines key metrics from the export.
+A concise, executive-level board update explaining the drivers of increased customer churn last quarter and the actions being taken.
 </GOAL>
 
 <INSTRUCTIONS>
-1/ Plan the task thoroughly, list any assumptions and open questions, and validate the plan with me before executing.
+1/ Execute, but state assumptions up front.
 2/ Load and validate all inputs. If anything is missing, ambiguous, or contradictory, ask me up to 5 targeted questions before drafting; if step 1 says execute, state your assumption instead and ask only about a gap that blocks the task.
-3/ Analyse the churn dashboard export to identify the trends, segments, or factors driving the customer churn increase last quarter.
-4/ Draft the board update covering the executive summary of last quarter's churn, the key drivers identified from the dashboard, and any recommended next steps or mitigation actions.
-5/ Use a separate agent with corporate governance and executive reporting domain knowledge if you can run one, otherwise review as an independent expert in that domain would: perform a critical review, check for errors, and ensure the output is complete and accurate, review formatting and clarity, and ensure the output is well structured and easy to read; summarize all issues and improvement points, validate them with me before implementing any changes.
+3/ Analyse the churn dashboard export to identify the trends, segments, and main drivers behind the churn increase last quarter.
+4/ Draft the board update containing: an executive summary of the churn metrics, the primary causes identified in the data, and the mitigation steps.
+5/ Use a separate agent with corporate governance and investor reporting domain knowledge if you can run one, otherwise review as an independent expert in that domain would: perform a critical review, check for errors, and ensure the output is complete and accurate, review formatting and clarity, and ensure the output is well structured and easy to read; summarize all issues and improvement points, validate them with me before implementing any changes.
 6/ Flag material judgment calls or trade-offs and let me decide.
 </INSTRUCTIONS>
 
 <CONSTRAINTS>
-- Short and suitable for a board audience.
-- Tone: professional, objective, and executive-ready.
-- Rely on general knowledge only where needed to frame the metrics, and label it as such.
-- Out of scope: detailed tactical fixes for churn beyond what the data supports.
+- Keep it short: a brief update suitable for a board of directors.
+- Tone: professional, objective, and analytical.
+- Use only the data provided in the churn dashboard export and general business knowledge labelled as such.
+- Out of scope: detailed tactical execution plans or historical data prior to last quarter.
 </CONSTRAINTS>
 
 <INPUTS>
-The churn dashboard export [REVIEW: attach or paste the churn dashboard export]
+Churn dashboard export [REVIEW: attach or paste the churn dashboard export data]
 </INPUTS>
 
 <OUTPUTS>
@@ -72,9 +72,10 @@ structured .md, well formatted with clear headings/subheadings
 </OUTPUTS>
 ```
 
-The two choices are made independently. Analysing an export and then writing it up is
-multi-step work, so step 1 is "plan first"; the board audience selected the independent-review
-step. A quick note to yourself would get "execute now" and a self-review checklist instead.
+The two choices are made independently. Here the model read "short" as a single small task,
+so step 1 is "execute now" (analysing an export first could also justify "plan first"); the
+board audience selected the independent-review step. A quick note to yourself would get a
+self-review checklist instead.
 
 </details>
 
@@ -930,12 +931,13 @@ for template fidelity, prompt injection and language edge cases, latency and rea
 prompt of v0.19.0:
 
 - `-i-` (standard tier): `google/gemini-3.5-flash-lite` on `google-ai-studio/flex`, effort
-  `minimal`: 23/24 core, 75/84 edge and 18/24 holdout runs passed, 2.3 s median and 3.3 s p95.
+  `minimal`: 23/24 core, 76/84 edge and 23/24 holdout runs passed, 2.5 s median and 3.5 s p95.
 - `-ip-` (pro tier): `openai/gpt-6-luna` on `openai`, effort `low`: 24/24 core, 83/84 edge
-  and 23/24 holdout runs passed, 6.8 s median and 11.6 s p95.
+  and 23/24 holdout runs passed, 6.8 s median and 11.6 s p95 (on a draft of this prompt whose
+  examples were worded slightly differently).
 
 The holdout drafts were frozen before this prompt was benched and no profile quotes them.
-Both opened `CONTEXT` with the configured persona in all 129 runs scored on it. Prices change
+Both opened `CONTEXT` with the configured persona in every run scored on it. Prices change
 quickly, so re-run it before relying on these numbers.
 The method, all result tables (with cost per rewrite), the older prompts' results and how to
 run it are in [docs/benchmark.md](docs/benchmark.md).
