@@ -50,6 +50,16 @@ All notable changes to this project are documented here. The format follows
   replies report token counts.
 - `OLLAMA_NUM_CTX` sets Ollama's context window (`options.num_ctx`); empty (the default)
   sends nothing (#168).
+- Windows: a one-command install (#186). Each GitHub Release now attaches `install.ps1`, with
+  its version filled in; `powershell -ExecutionPolicy ByPass -c "irm
+  https://github.com/vlastimilbures/promptmend/releases/latest/download/install.ps1 | iex"`
+  installs uv if it is missing (winget, else uv's official installer), then the attested
+  wheel and `constraints.txt` attached to that same Release, runs `uv tool update-shell`
+  and `promptmend doctor --no-clipboard`, and prints `promptmend setup` and
+  `promptmend espanso deploy` as the next steps without running them. It prints every
+  command it runs; running it again updates in place. `PROMPTMEND_VERSION` picks another
+  release (0.19.0 or later). CI runs it on Windows against the wheel it built, once with no uv
+  on PATH, and dry-runs a rendered copy.
 
 ### Changed
 - The interface's second tab is now labelled "2 Providers" (it was "Providers & keys"), so
