@@ -90,6 +90,8 @@ async def settle(pilot: Pilot[int]) -> None:
 
 
 def drive(scenario: Callable[[ManageApp, Pilot[int]], Awaitable[None]], **kwargs: Any) -> ManageApp:
+    # No intro unless a test asks for one (#112): it would sit over every screen for 0.8 s.
+    kwargs.setdefault("intro_seconds", None)
     app = ManageApp(**kwargs)
 
     async def main() -> None:
@@ -1164,6 +1166,7 @@ def terminal(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
     def run(self: ManageApp, *args: Any, **kwargs: Any) -> None:
         state["launched"] += 1
+        state["intro"] = self.intro_seconds
         self._return_code = state["code"]
 
     monkeypatch.setattr(ManageApp, "run", run)
@@ -1724,3 +1727,181 @@ def test_previous_install_entered_path_that_is_no_checkout(
         assert f"Previous install: {root.resolve()} (entered)" in _found(app)
 
     drive(scenario)
+
+
+# --- Intro and About (#112) ---------------------------------------------------------------
+
+
+def test_intro_shows_on_launch_and_closes_by_itself(espanso: FakeRunner) -> None:
+    from prompt_workflow.tui.intro import IntroScreen
+
+    app = ManageApp(intro_seconds=0.3)
+    seen = []
+
+    async def main() -> None:
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            seen.append(isinstance(app.screen, IntroScreen))
+            await asyncio.sleep(0.6)
+            await settle(pilot)
+            seen.append(isinstance(app.screen, IntroScreen))
+
+    asyncio.run(main())
+    assert seen == [True, False]
+
+
+def test_intro_any_key_closes_it_and_is_consumed(espanso: FakeRunner) -> None:
+    from textual.widgets import TabbedContent
+
+    from prompt_workflow.tui.intro import IntroScreen
+
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        intro = app.screen
+        assert isinstance(intro, IntroScreen)
+        assert "prompt-workflow" in str(intro.query_one("#intro").render())
+        await pilot.press("q")  # closes the intro, does not quit
+        await settle(pilot)
+        assert not isinstance(app.screen, IntroScreen)
+        intro.close()  # its timer firing late changes nothing
+        await settle(pilot)
+        assert app.screen is app.main
+        assert app.is_running
+        assert app.main.query_one(TabbedContent).active == "home"
+
+    drive(scenario, intro_seconds=60)
+
+
+def test_intro_click_closes_it(espanso: FakeRunner) -> None:
+    from prompt_workflow.tui.intro import IntroScreen
+
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        assert isinstance(app.screen, IntroScreen)
+        await pilot.click("#intro")
+        await settle(pilot)
+        assert not isinstance(app.screen, IntroScreen)
+
+    drive(scenario, intro_seconds=60)
+
+
+def test_intro_digit_does_not_switch_tabs(espanso: FakeRunner) -> None:
+    from textual.widgets import TabbedContent
+
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        await pilot.press("6")
+        await settle(pilot)
+        assert app.main.query_one(TabbedContent).active == "home"
+        await pilot.press("6")
+        assert app.main.query_one(TabbedContent).active == "diagnostics"
+
+    drive(scenario, intro_seconds=60)
+
+
+def test_previous_install_offer_waits_for_the_intro(previous: Path) -> None:
+    from prompt_workflow.tui.intro import IntroScreen
+    from prompt_workflow.tui.previous import PreviousInstallScreen
+
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        assert app.state is not None
+        assert app.state.previous.candidates
+        assert isinstance(app.screen, IntroScreen)
+        assert not any(isinstance(s, PreviousInstallScreen) for s in app.screen_stack)
+        await pilot.press("space")
+        await settle(pilot)
+        assert isinstance(app.screen, PreviousInstallScreen)
+
+    drive(scenario, intro_seconds=60)
+
+
+def test_about_lists_version_runtime_and_folders(
+    espanso: FakeRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from prompt_workflow import config_store
+    from prompt_workflow.tui import app as app_module
+    from prompt_workflow.tui.intro import AboutScreen
+
+    monkeypatch.setattr(app_module, "__version__", "9.8.7")
+
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        await pilot.press("a")
+        await settle(pilot)
+        assert isinstance(app.screen, AboutScreen)
+        facts = "\n".join(app.screen.facts)
+        assert "prompt-workflow 9.8.7" in facts
+        assert "Installed: uv" in facts
+        assert str(config_store.config_dir()) in facts
+        assert "Licence:   MIT" in facts
+        assert KEY not in facts
+        await pilot.press("escape")
+        await settle(pilot)
+        assert not isinstance(app.screen, AboutScreen)
+        await pilot.press("a")
+        await settle(pilot)
+        await pilot.press("a")
+        await settle(pilot)
+        assert not isinstance(app.screen, AboutScreen)
+        await pilot.press("a")
+        await settle(pilot)
+        await press(app, pilot, "#about-close")
+        assert not isinstance(app.screen, AboutScreen)
+
+    drive(scenario)
+
+
+def test_about_before_the_state_is_read(espanso: FakeRunner) -> None:
+    from prompt_workflow.tui.intro import AboutScreen
+
+    def broken(group_by: str) -> State:
+        raise RuntimeError("boom")
+
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        await pilot.press("a")
+        await settle(pilot)
+        assert isinstance(app.screen, AboutScreen)
+        assert "Installed: unknown" in app.screen.facts
+
+    drive(scenario, loader=broken)
+
+
+@pytest.mark.parametrize(
+    ("args", "environ", "intro"),
+    [
+        (("ui",), {}, 0.8),
+        ((), {}, 0.8),
+        (("ui", "--no-intro"), {}, None),
+        (("ui",), {"PROMPT_UI_INTRO": "false"}, None),
+        # A value the strict parser rejects falls back to the default in repair mode.
+        (("ui",), {"PROMPT_UI_INTRO": "maybe"}, 0.8),
+    ],
+)
+def test_intro_opt_out(
+    terminal: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    args: tuple[str, ...],
+    environ: dict[str, str],
+    intro: float | None,
+) -> None:
+    for name, value in environ.items():
+        monkeypatch.setenv(name, value)
+    result = _invoke(*args)
+    assert result.exit_code == 0
+    assert terminal["intro"] == intro
+
+
+def test_ui_intro_setting_is_strict(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PROMPT_UI_INTRO", "maybe")
+    with pytest.raises(ValueError, match="PROMPT_UI_INTRO"):
+        config.Settings.load()
+    monkeypatch.setenv("PROMPT_UI_INTRO", "false")
+    assert config.Settings.load().ui_intro is False
+
+
+def test_brand_is_ascii_and_narrow_terminals_get_text_only() -> None:
+    from prompt_workflow.tui import brand
+
+    wide, narrow = brand.splash(110, "1.2.3"), brand.splash(70, "1.2.3")
+    assert wide.isascii()
+    assert brand.TAGLINE.isascii()
+    assert brand.WORDMARK[0] in wide
+    assert brand.WORDMARK[0] not in narrow
+    assert narrow == f"prompt-workflow 1.2.3\n\n{brand.TAGLINE}"
+    assert max(map(len, brand.WORDMARK)) < brand.NARROW
