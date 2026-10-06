@@ -61,6 +61,7 @@ _MESSAGES = {
     "previous_install": (doctor.OK, "settings are in place; nothing to look for"),
 }
 _DATA: dict[str, dict[str, Any]] = {
+    "espanso": {"found": True, "running": True, "query_failed": False},
     "history": {"lost_writes": 0, "last_lost_utc": None, "tracking_incomplete": False},
     "sqlite": {"version": "3.51.3", "wal_reset_bug": False},
 }
@@ -207,7 +208,10 @@ def _check(name: str, svg: str, *also: Path) -> None:
 
 
 def _shoot(
-    key: str | None, theme: str | None = None, loader: Callable[[str], State] = fixed_state
+    key: str | None,
+    theme: str | None = None,
+    loader: Callable[[str], State] = fixed_state,
+    size: tuple[int, int] = SIZE,
 ) -> str:
     app = ManageApp(loader=loader)
     # The active tab's underline slides into place; a snapshot must not catch it midway.
@@ -215,7 +219,7 @@ def _shoot(
     shots: list[str] = []
 
     async def main() -> None:
-        async with app.run_test(size=SIZE) as pilot:
+        async with app.run_test(size=size) as pilot:
             for _ in range(3):
                 await pilot.pause()
                 await app.workers.wait_for_complete()
@@ -251,3 +255,8 @@ def test_snapshot_high_contrast() -> None:
 
 def test_snapshot_previous_install() -> None:
     _check("previous-install", _shoot(None, loader=previous_state))
+
+
+# Home on the smallest common terminal (#112): a row's text is cut, never wrapped.
+def test_snapshot_home_80_columns() -> None:
+    _check("home-80", _shoot("1", size=(80, 24)))

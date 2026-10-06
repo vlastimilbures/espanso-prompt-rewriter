@@ -15,6 +15,7 @@ from textual.theme import Theme
 from textual.widgets import Footer, Header, TabbedContent, TabPane
 
 from .. import __version__
+from .home import TAB_LABELS, pill
 from .panes import (
     DiagnosticsPane,
     HistoryPane,
@@ -44,13 +45,16 @@ HIGH_CONTRAST = Theme(
 )
 
 # Tab id -> (label, pane). The digit in each label is its key.
+_PANES: dict[str, type[Pane]] = {
+    "home": HomePane,
+    "providers": ProvidersPane,
+    "profiles": ProfilesPane,
+    "triggers": TriggersPane,
+    "history": HistoryPane,
+    "diagnostics": DiagnosticsPane,
+}
 TABS: dict[str, tuple[str, type[Pane]]] = {
-    "home": ("1 Home", HomePane),
-    "providers": ("2 Providers & keys", ProvidersPane),
-    "profiles": ("3 Profiles", ProfilesPane),
-    "triggers": ("4 Triggers", TriggersPane),
-    "history": ("5 History", HistoryPane),
-    "diagnostics": ("6 Diagnostics", DiagnosticsPane),
+    tab: (TAB_LABELS[tab], pane) for tab, pane in _PANES.items()
 }
 
 CSS = """
@@ -64,6 +68,8 @@ DataTable { height: auto; max-height: 14; margin-bottom: 1; }
 .buttons { height: auto; margin-top: 1; }
 .buttons Button { margin-right: 1; }
 .result { margin-top: 1; }
+#home-headline { margin: 1 0; }
+#home-rows { height: auto; }
 ModalScreen { align: center middle; }
 .dialog {
     width: 100; max-width: 95%; height: auto; max-height: 90%;
@@ -160,6 +166,7 @@ class ManageApp(App[int]):
         if generation != self.generation:
             return  # an older load that finished late
         self.state = state
+        self.sub_title = f"{self.SUB_TITLE} · {pill(state.report)}"
         for pane in self.main.query(Pane):
             if pane.ready:
                 pane.show(state)

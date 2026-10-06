@@ -313,6 +313,12 @@ Rules for agents:
   compares SVG exports with `tests/snapshots/` (Linux and macOS; `UPDATE_SNAPSHOTS=1`
   regenerates them, and the Home one is `docs/interface.svg`). The header shows
   `prompt-workflow <version>` (#112); the snapshots pin the version, so a release changes none.
+  Home (Mockup B, #112) is `tui/home.py`'s pure `home_rows(state)` (no reads of its own, no
+  Textual; `tests/test_tui_home.py`): rows for `-i-`, `-ip-`, the match files/Espanso, the
+  history, `Output` (`PROMPT_OUTPUT`, #134: paste or clipboard), and
+  the doctor counts; each a status word plus the tab that fixes it, and `headline()` names the
+  worst (first of equals). `pill()` is the header's sub-title status (`ok` / `1 problem, 2
+  warnings`), set in `ManageApp._show()`.
 - `doctor.py` — `run()` returns a `Report` of the fixed `CHECK_IDS` (JSON `schema_version` 1:
   only add ids/keys). Read-only: `espanso path config`/`espanso status` and the launcher lookup
   via `run_command`; keys as set/not set; the clipboard only as a length (never read when

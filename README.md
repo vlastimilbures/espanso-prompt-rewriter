@@ -204,8 +204,11 @@ Windows, use uv.
 ## First run
 
 Run `prompt-workflow` in a terminal (or `prompt-workflow ui`) for a full-screen interface with
-six tabs: Home (the `doctor` summary), Providers & keys, Profiles, Triggers, History and
-Diagnostics. It does what the [management commands](#management-commands) do, through the same
+six tabs: Home, Providers & keys, Profiles, Triggers, History and Diagnostics. Home says in one
+line whether you are ready (or names the most urgent problem and the tab that fixes it), then
+shows what `-i-` and `-ip-` run, the match files and Espanso, the usage history, the output mode and the
+`doctor` checks, each with a status word (ok, warn, FAIL); the header shows the same status
+(`ok`, or `1 problem, 2 warnings`). It does what the [management commands](#management-commands) do, through the same
 code. Keys are shown only as set or not set, removing a key, deploying, detaching, migrating or
 deleting history asks first, and no provider is called except by the Test call button, which
 runs `improve` against a stub on `127.0.0.1` with a placeholder key.

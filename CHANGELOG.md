@@ -73,6 +73,14 @@ All notable changes to this project are documented here. The format follows
   in. `prompts-core.yml` now holds only `-risk-`. Your deployed copy shows as `stale` until you
   run `prompt-workflow espanso deploy`, which updates it like any unedited file (no conflict
   question, no backup).
+- The interface's Home tab is redesigned (#112). A headline names the most urgent problem
+  and the tab that fixes it ("Almost ready: one match file was edited since the last deploy.
+  -> 4 Triggers"), or says "Ready: type -i- in any text field." Below it, one row each for
+  what `-i-` and `-ip-` run (provider, model, whether the key is set), the match files and
+  Espanso, the usage history, where the rewrite goes (`PROMPT_OUTPUT`) and every doctor check counted, each with a status word (ok,
+  warn, FAIL), never colour alone. The header shows a status pill after the version: `ok`,
+  or how many checks fail and warn (`1 problem, 2 warnings`). The full list of checks moved
+  to the Diagnostics tab, where it already was.
 
 ## 0.18.0 - 2026-10-06
 
