@@ -34,38 +34,37 @@ Draft on the clipboard:
 write a short board update on why customer churn went up last quarter, use the attached churn dashboard export
 ```
 
-Pasted in its place (real output of v0.7.0 on its default model, `google/gemini-3.5-flash-lite`,
-no persona configured; today's prompt differs in detail, for example it asks the step that
-writes the update, step 4 here, to name the update's sections, and words steps 2 and 5
-differently):
+Pasted in its place (real output of the v0.19.0 prompt on its default model,
+`google/gemini-3.5-flash-lite` on `google-ai-studio/flex`, effort `minimal`, no persona
+configured, generated 2026-10-06):
 
 ```text
 <CONTEXT>
-I need to write a short board update explaining the increase in customer churn during the previous quarter, based on the provided churn dashboard export.
+I need a short board update explaining why customer churn increased last quarter, based on the attached churn dashboard export.
 </CONTEXT>
 
 <GOAL>
-A clear, concise board update explaining the root causes of the rise in customer churn last quarter.
+A concise board update that explains the reasons for the customer churn increase last quarter and outlines key metrics from the export.
 </GOAL>
 
 <INSTRUCTIONS>
 1/ Plan the task thoroughly, list any assumptions and open questions, and validate the plan with me before executing.
-2/ Load and validate all inputs. If anything is missing, ambiguous, or contradictory, ask me up to 5 targeted questions before drafting.
-3/ Analyze the churn dashboard export to identify key metrics, trends, and primary drivers behind the churn increase.
-4/ Synthesize the findings into a concise narrative structure suitable for a board audience, highlighting key data points and context.
-5/ Spin up an independent agent with SaaS churn and retention domain knowledge and perform a critical review, check for errors, and ensure the output is complete and accurate, review formatting and clarity, and ensure the output is well structured and easy to read; summarize all issues and improvement points, validate them with me before implementing any changes.
+2/ Load and validate all inputs. If anything is missing, ambiguous, or contradictory, ask me up to 5 targeted questions before drafting; if step 1 says execute, state your assumption instead and ask only about a gap that blocks the task.
+3/ Analyse the churn dashboard export to identify the trends, segments, or factors driving the customer churn increase last quarter.
+4/ Draft the board update covering the executive summary of last quarter's churn, the key drivers identified from the dashboard, and any recommended next steps or mitigation actions.
+5/ Use a separate agent with corporate governance and executive reporting domain knowledge if you can run one, otherwise review as an independent expert in that domain would: perform a critical review, check for errors, and ensure the output is complete and accurate, review formatting and clarity, and ensure the output is well structured and easy to read; summarize all issues and improvement points, validate them with me before implementing any changes.
 6/ Flag material judgment calls or trade-offs and let me decide.
 </INSTRUCTIONS>
 
 <CONSTRAINTS>
-- Keep the update short and scannable for board members.
-- Maintain an objective, professional tone.
-- Base all claims strictly on the provided churn dashboard export.
-- Out of scope: strategic recommendations or mitigation plans unless directly evidenced in the data.
+- Short and suitable for a board audience.
+- Tone: professional, objective, and executive-ready.
+- Rely on general knowledge only where needed to frame the metrics, and label it as such.
+- Out of scope: detailed tactical fixes for churn beyond what the data supports.
 </CONSTRAINTS>
 
 <INPUTS>
-Churn dashboard export [REVIEW: attach or paste the dashboard export data]
+The churn dashboard export [REVIEW: attach or paste the churn dashboard export]
 </INPUTS>
 
 <OUTPUTS>
@@ -931,12 +930,13 @@ for template fidelity, prompt injection and language edge cases, latency and rea
 prompt of v0.19.0:
 
 - `-i-` (standard tier): `google/gemini-3.5-flash-lite` on `google-ai-studio/flex`, effort
-  `minimal`: 24/24 core and 75/84 edge runs passed, 2.0 s median and 2.9 s p95.
-- `-ip-` (pro tier): `openai/gpt-6-luna` on `openai`, effort `low`: 23/24 core and 81/84 edge
-  runs passed, 5.8 s median and 10.8 s p95.
+  `minimal`: 23/24 core, 75/84 edge and 18/24 holdout runs passed, 2.3 s median and 3.3 s p95.
+- `-ip-` (pro tier): `openai/gpt-6-luna` on `openai`, effort `low`: 24/24 core, 83/84 edge
+  and 23/24 holdout runs passed, 6.8 s median and 11.6 s p95.
 
-Both opened `CONTEXT` with the configured persona in all 105 runs scored on it (the v0.14.0
-prompt: 100 and 96). Prices change quickly, so re-run it before relying on these numbers.
+The holdout drafts were frozen before this prompt was benched and no profile quotes them.
+Both opened `CONTEXT` with the configured persona in all 129 runs scored on it. Prices change
+quickly, so re-run it before relying on these numbers.
 The method, all result tables (with cost per rewrite), the older prompts' results and how to
 run it are in [docs/benchmark.md](docs/benchmark.md).
 
