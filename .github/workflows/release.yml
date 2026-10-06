@@ -1,5 +1,6 @@
 name: release
-# Builds the sdist, the wheel and constraints.txt (the runtime pins from uv.lock), installs the
+# Builds the sdist, the wheel, constraints.txt (the runtime pins from uv.lock) and the Windows
+# installer install.ps1 (rendered with the version, #186), installs the
 # wheel with those pins into a clean venv on every OS, then attests the files and creates the
 # annotated tag v<version> and a GitHub Release with that version's CHANGELOG notes. While the
 # repository variable PYPI_PUBLISH is "true", the same sdist and wheel then go to PyPI through
@@ -98,6 +99,13 @@ jobs:
         run: |
           uv build --out-dir dist
           uv export --frozen --no-dev --no-emit-project --no-hashes --output-file dist/constraints.txt
+      # The Windows installer (#186), with this release's version in place of its placeholder,
+      # so `releases/latest/download/install.ps1` installs exactly the release it came from.
+      - name: Render install.ps1
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          python3 scripts/render_installer.py "$VERSION" dist/install.ps1
       - name: Upload the artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:

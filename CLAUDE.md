@@ -20,7 +20,10 @@ promptmend espanso status  # missing / in sync / stale / modified / foreign per 
 ```
 
 Users install the release wheel instead (`uv tool install <wheel> -c constraints.txt`, README
-"Install"), which reads no checkout `.env`; README "Updating"/"Uninstall" document `--force`
+"Install"; on Windows `scripts/install.ps1`, the Release asset #186: uv via winget, then
+`promptmend==<version>` + that release's constraints, `doctor`; never setup/deploy; CI's
+`install-script` job runs it via `PROMPTMEND_WHEEL`/`PROMPTMEND_CONSTRAINTS`, never PyPI;
+never run it here), which reads no checkout `.env`; README "Updating"/"Uninstall" document `--force`
 and detach-before-uninstall. `tests/test_docs.py` checks every `promptmend …` invocation
 in README and in the CHANGELOG's Unreleased and newest release notes, and every standalone
 `--flag` span in README, against the Click tree.
@@ -565,5 +568,6 @@ runtime pin in uv.lock, markers evaluated for macOS/Linux; `tests/test_brew_form
 `scripts/release_notes.py` gives the workflow the
 version and its notes and refuses a CHANGELOG whose newest `## X.Y.Z - YYYY-MM-DD` heading is not
 the `pyproject.toml` version (`## Unreleased` may come first); `tests/test_release.py` runs the
-same check. Each Release carries `constraints.txt` (uv.lock's runtime pins), and the artifact
-test installs the wheel with it and runs `scripts/check_wheel.py --constraints`.
+same check. Each Release carries `constraints.txt` (uv.lock's runtime pins) and `install.ps1`
+(`scripts/render_installer.py` fills its one `__PROMPTMEND_VERSION__` in the build job;
+`tests/test_install_scripts.py`), and the artifact test installs the wheel with it and runs `scripts/check_wheel.py --constraints`.

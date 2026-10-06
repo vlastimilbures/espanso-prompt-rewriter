@@ -91,3 +91,46 @@ jobs:
           uv pip install --python $venv $wheel
           $python = if ($IsWindows) { "$venv/Scripts/python.exe" } else { "$venv/bin/python" }
           & $python "$env:GITHUB_WORKSPACE/scripts/check_wheel.py" --repo $env:GITHUB_WORKSPACE --wheel $wheel
+
+  # The Windows user installer (#186), run as the one-liner runs it (Windows PowerShell 5.1,
+  # `irm | iex`), against the wheel and constraints.txt built here through its local override:
+  # never PyPI from a PR. Twice, since a rerun must reinstall in place. It never deploys.
+  install-script:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Build the wheel and constraints.txt
+        run: |
+          uv build --wheel --out-dir dist
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          uv export --frozen --no-dev --no-emit-project --no-hashes --output-file dist/constraints.txt
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Run install.ps1 twice and check the installed CLI
+        working-directory: ${{ runner.temp }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $wheel = Get-ChildItem "$env:GITHUB_WORKSPACE\dist\*.whl" | Select-Object -First 1
+          $env:PROMPTMEND_WHEEL = $wheel.FullName
+          $env:PROMPTMEND_CONSTRAINTS = "$env:GITHUB_WORKSPACE\dist\constraints.txt"
+          $script = "$env:GITHUB_WORKSPACE\scripts\install.ps1"
+          foreach ($run in 1, 2) {
+            powershell -NoProfile -ExecutionPolicy ByPass -Command "Get-Content -Raw '$script' | Invoke-Expression"
+            if ($LASTEXITCODE -ne 0) { throw "install.ps1 run $run exited $LASTEXITCODE" }
+          }
+          $bin = (uv tool dir --bin).Trim()
+          $installed = (& "$bin\promptmend.exe" --version).Trim()
+          $expected = $wheel.Name.Split('-')[1]
+          if ($installed -ne $expected) { throw "installed $installed, expected $expected" }
+          Write-Host "promptmend $installed from $bin"
