@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## 0.20.0 - 2026-10-07
+
 ### Added
 - The interface's Home tab has a command line (#111): press `c` from any tab and type a
   `promptmend` command. It completes commands, options, setting names (after `config set`,
