@@ -1910,3 +1910,74 @@ def test_brand_is_ascii_and_narrow_terminals_get_text_only() -> None:
     assert brand.WORDMARK[0] not in narrow
     assert narrow == f"{brand.NAME} 1.2.3\n\n{brand.TAGLINE}"
     assert max(map(len, brand.WORDMARK)) < brand.NARROW
+
+
+# --- Every action shows its command (#111, stage 1) ---------------------------------------
+
+
+def test_every_button_has_its_command_as_tooltip(previous: Path) -> None:
+    from prompt_workflow.tui import teach
+    from prompt_workflow.tui.previous import PreviousInstallScreen
+
+    seen: dict[str, object] = {}
+
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        assert isinstance(app.screen, PreviousInstallScreen)
+        for screen in (app.main, app.screen):
+            for button in screen.query(Button):
+                seen[button.id or ""] = button.tooltip
+
+    drive(scenario)
+    known = set(teach.BUTTONS) | set(teach.NO_COMMAND)
+    assert set(seen) - known == set(), "give the new button a command in tui/teach.py"
+    assert {i: teach.tooltip(i) for i in seen} == seen
+    assert seen["deploy"] == "In a terminal:\n$ prompt-workflow espanso deploy"
+
+
+def test_results_show_their_command_and_home_keeps_the_session(
+    saved: Path, espanso: FakeRunner
+) -> None:
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        home = pane(app, "home")
+        before = _rendered(home, "#home-session")
+        assert "In a terminal, try:" in before
+        assert "$ prompt-workflow config show" in before
+        await pilot.press("2")
+        await press(app, pilot, "#set-setting")
+        await fill(app, pilot, setting_name="PROMPT_TIMEOUT_SECONDS", setting_value="45")
+        result = _rendered(pane(app, "providers"), ".result")
+        assert result.startswith("$ prompt-workflow config set PROMPT_TIMEOUT_SECONDS 45\n")
+        # A value that looks like a key is never shown, even refused.
+        await press(app, pilot, "#set-setting")
+        await fill(app, pilot, setting_name="PROMPT_PROFILE", setting_value=KEY)
+        await pilot.press("5")
+        await press(app, pilot, "#reset")
+        await press(app, pilot, "#confirm")
+        await pilot.press("1")
+        session = _rendered(home, "#home-session")
+        assert "This session, as commands:" in session
+        assert "$ prompt-workflow config set PROMPT_TIMEOUT_SECONDS 45" in session
+        assert "$ prompt-workflow config set PROMPT_PROFILE '<value withheld>'" not in session
+        assert "$ prompt-workflow config set PROMPT_PROFILE <value withheld>" in session
+        assert "    error: " in session
+        assert "$ prompt-workflow history reset" in session
+        assert KEY not in session
+        assert [e.command.split()[1:3] for e in app.session] == [
+            ["config", "set"],
+            ["config", "set"],
+            ["history", "reset"],
+        ]
+
+    drive(scenario)
+
+
+def test_session_log_keeps_the_latest(espanso: FakeRunner) -> None:
+    from prompt_workflow.tui import panes as panes_module
+    from prompt_workflow.tui import teach
+
+    entries = [teach.Entry(f"prompt-workflow doctor {n}", f"done {n}") for n in range(9)]
+    text = panes_module.session_text(entries).plain
+    assert "doctor 2\n" not in text
+    assert text.count("$ prompt-workflow doctor") == panes_module.SESSION_LINES
+    failed = panes_module.session_text([teach.Entry("c", "boom", error=True)]).plain
+    assert "    error: boom" in failed

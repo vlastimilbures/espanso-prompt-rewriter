@@ -15,7 +15,7 @@ from textual.theme import Theme
 from textual.widgets import Footer, Header, TabbedContent, TabPane
 
 from .. import __version__
-from . import brand
+from . import brand, teach
 from .home import TAB_LABELS, pill
 from .intro import INTRO_SECONDS, AboutScreen, IntroScreen
 from .panes import (
@@ -72,6 +72,7 @@ DataTable { height: auto; max-height: 14; margin-bottom: 1; }
 .result { margin-top: 1; }
 #home-headline { margin: 1 0; }
 #home-rows { height: auto; }
+#home-session { margin-top: 1; text-wrap: nowrap; text-overflow: ellipsis; }
 ModalScreen { align: center middle; }
 .dialog {
     width: 100; max-width: 95%; height: auto; max-height: 90%;
@@ -139,6 +140,8 @@ class ManageApp(App[int]):
         # after a newer one: only the newest is shown.
         self.generation = 0
         self.main = MainScreen()
+        # This session's actions as commands (#111), shown on Home.
+        self.session: list[teach.Entry] = []
         # The previous install screen opens by itself once per session (#110).
         self.offered = False
         self.register_theme(HIGH_CONTRAST)
@@ -160,6 +163,13 @@ class ManageApp(App[int]):
             next((c.data for c in report.checks if c.id == "install"), None) if report else None
         )
         self.push_screen(AboutScreen(brand.about_facts(install, __version__)))
+
+    def log_action(self, entry: teach.Entry) -> None:
+        """Keep an action in the session log and show it on Home."""
+        self.session.append(entry)
+        home = self.main.query_one("#home-pane", HomePane)
+        if home.ready:
+            home.show_session(self.session)
 
     def reload(self) -> None:
         """Read everything again (settings, doctor, plan, stats) and refill every tab."""

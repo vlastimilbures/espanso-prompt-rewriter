@@ -19,8 +19,16 @@ from textual.widgets import Button, Footer, Header, Static
 from .. import config_store, deploy, previous_install
 from ..commands import common
 from ..profiles import PROMPTS_PATH
+from . import teach
 from .modals import ConfirmModal, Field, FormModal
-from .panes import EXPECTED, TriggersPane, _error, copy_profiles, previous_root
+from .panes import (
+    EXPECTED,
+    TriggersPane,
+    _error,
+    copy_profiles,
+    previous_root,
+    result_text,
+)
 from .state import State
 
 if TYPE_CHECKING:
@@ -80,7 +88,7 @@ class PreviousInstallScreen(Screen[None]):
             with Vertical(id="previous-steps"):
                 for n, (id_, label) in enumerate(STEPS.items(), 1):
                     with Horizontal(classes="step"):
-                        yield Button(f"{n} {label}", id=id_)
+                        yield Button(f"{n} {label}", id=id_, tooltip=teach.tooltip(id_))
                         yield Static("", markup=False, id=f"{id_}-state", classes="step-state")
             yield Horizontal(
                 Button("Enter a path…", id="previous-enter"),
@@ -193,19 +201,24 @@ class PreviousInstallScreen(Screen[None]):
             self.query_one(f"#{id_}-state", Static).update(text)
         self.query_one("#previous-skip", Button).disabled = best is None and pending is None
 
-    def report(self, message: str, *, error: bool = False) -> None:
+    def report(self, message: str, *, error: bool = False, command: str | None = None) -> None:
+        """As Pane.report(): with ``command``, shown above and kept in Home's session log."""
         self.last_message = message
-        self.query_one(".result", Static).update(message)
+        self.query_one(".result", Static).update(result_text(message, command))
         self.app.notify(message, severity="error" if error else "information", markup=False)
+        if command is not None:
+            self.manage.log_action(teach.Entry(command, message, error))
 
-    def attempt(self, action: Callable[[], str], *, reload: bool = True) -> None:
+    def attempt(
+        self, action: Callable[[], str], *, reload: bool = True, command: str | None = None
+    ) -> None:
         """Run a change; show its message, or the error a headless command would print."""
         try:
             message = action()
         except Exception as exc:
-            self.report(_error(exc), error=True)
+            self.report(_error(exc), error=True, command=command)
             return
-        self.report(message)
+        self.report(message, command=command)
         if reload:
             self.manage.reload()
 
@@ -228,10 +241,12 @@ class PreviousInstallScreen(Screen[None]):
             return True
         return False
 
-    def _ask(self, title: str, preview: str, confirm: str, action: Callable[[], str]) -> None:
+    def _ask(
+        self, title: str, preview: str, confirm: str, action: Callable[[], str], command: str
+    ) -> None:
         def done(yes: bool | None) -> None:
             if yes:
-                self.attempt(action)
+                self.attempt(action, command=command)
 
         self.app.push_screen(ConfirmModal(title, preview, confirm=confirm), done)
 
@@ -260,7 +275,8 @@ class PreviousInstallScreen(Screen[None]):
                 "so the triggers use these settings."
             )
 
-        self._ask(f"Copy the settings of {root}?", preview, "Copy", apply)
+        command = teach.equivalent("config", "migrate", "--from", str(root))
+        self._ask(f"Copy the settings of {root}?", preview, "Copy", apply, command)
 
     @on(Button.Pressed, "#previous-profiles")
     def _profiles(self) -> None:
@@ -325,7 +341,10 @@ class PreviousInstallScreen(Screen[None]):
             place = config_store.apply_retire(root, espanso_dir=folder, consent=plan.token)
             return f"Retired: {plan.env_file} -> {place}"
 
-        self._ask(f"Retire the old .env of {root}?", "\n".join(plan.describe()), "Retire", apply)
+        command = teach.equivalent("config", "retire", "--from", str(root))
+        self._ask(
+            f"Retire the old .env of {root}?", "\n".join(plan.describe()), "Retire", apply, command
+        )
 
     @on(Button.Pressed, "#previous-enter")
     def _enter(self) -> None:

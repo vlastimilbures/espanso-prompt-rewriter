@@ -1,0 +1,110 @@
+"""What each action of the interface is in a terminal (#111, stage 1): every button's tooltip
+names its headless command, every result shows the command it was (`$ prompt-workflow …`),
+and Home keeps this session's commands, or a few recipes before there are any. No Textual
+here: `tests/test_tui_teach.py` parses every command below against the CLI, so a renamed
+command or option cannot leave them behind."""
+
+from __future__ import annotations
+
+import re
+import shlex
+from dataclasses import dataclass
+
+PROGRAM = "prompt-workflow"
+# A placeholder for what the person picks in the dialog (<NAME>, <FILE>): shown as is.
+PLACEHOLDER = re.compile(r"<[A-Z][A-Z_]*>")
+WITHHELD = "<value withheld>"
+
+CHECKOUT = "<CHECKOUT>"
+
+# Button id -> the commands it runs, in order (Home's "Previous install…" is four steps).
+BUTTONS: dict[str, tuple[tuple[str, ...], ...]] = {
+    "home-reload": (("doctor",),),
+    "home-previous": (
+        ("config", "migrate", "--from", CHECKOUT),
+        ("profiles", "migrate", "--checkout", CHECKOUT),
+        ("espanso", "deploy"),
+        ("config", "retire", "--from", CHECKOUT),
+    ),
+    "set-key": (("secrets", "set", "<NAME>"),),
+    "remove-key": (("secrets", "remove", "<NAME>"),),
+    "set-setting": (("config", "set", "<NAME>", "<VALUE>"),),
+    "migrate-env": (("config", "migrate"),),
+    "smoke": (("setup",),),
+    "set-profile": (("config", "set", "PROMPT_PROFILE", "<NAME>"),),
+    "edit-profile": (("profiles", "list"),),
+    "migrate-profiles": (("profiles", "migrate", "--checkout", CHECKOUT),),
+    "show-diff": (("espanso", "status", "--diff"),),
+    "deploy": (("espanso", "deploy"),),
+    "detach": (("espanso", "detach"),),
+    "export": (("history", "export", "--format", "json", "-o", "<FILE>"),),
+    "prune": (("history", "prune", "--older-than", "<DAYS>"),),
+    "reset": (("history", "reset"),),
+    "previous-copy": (("config", "migrate", "--from", CHECKOUT),),
+    "previous-profiles": (("profiles", "migrate", "--checkout", CHECKOUT),),
+    "previous-deploy": (("espanso", "deploy"),),
+    "previous-retire": (("config", "retire", "--from", CHECKOUT),),
+}
+# What a button's command does not cover, said in its tooltip.
+NOTES = {
+    "smoke": "Its last step, the smoke test against a stub on 127.0.0.1.",
+    "edit-profile": "Shows where each profile is; open the file in your editor.",
+    "export": "Or --format csv.",
+}
+# Buttons with no command of their own: they move around the interface or measure it.
+NO_COMMAND = {
+    "import-check": "Imports the CLI in a fresh interpreter and times it; no command.",
+    "previous-enter": "",
+    "previous-skip": "",
+    "previous-close": "",
+    "about-close": "",
+}
+
+
+@dataclass(frozen=True)
+class Recipe:
+    argv: tuple[str, ...]
+    what: str
+
+
+# Home's empty session log: commands worth knowing, each one the interface also runs.
+RECIPES = (
+    Recipe(("doctor",), "every check, as on Diagnostics"),
+    Recipe(("config", "show"), "each setting and where it comes from"),
+    Recipe(("config", "set", "PROMPT_HISTORY", "false"), "switch the usage history off"),
+    Recipe(("secrets", "set", "OPENROUTER_API_KEY"), "save a key (typed hidden)"),
+    Recipe(("espanso", "status", "--diff"), "what a deploy would change"),
+    Recipe(("stats", "--by", "model"), "usage by model"),
+)
+
+
+def equivalent(*argv: str) -> str:
+    """The command line for ``argv``, quoted for a POSIX shell; placeholders as they are."""
+    words = [a if PLACEHOLDER.fullmatch(a) or a == WITHHELD else shlex.quote(a) for a in argv]
+    return " ".join([PROGRAM, *words])
+
+
+def tooltip(button_id: str) -> str | None:
+    """A button's tooltip: the commands it runs in a terminal, and what they leave out."""
+    if button_id in NO_COMMAND:
+        return NO_COMMAND[button_id] or None
+    commands = BUTTONS.get(button_id)
+    if not commands:
+        return None
+    lines = ["In a terminal:", *(f"$ {equivalent(*argv)}" for argv in commands)]
+    if button_id in NOTES:
+        lines.append(NOTES[button_id])
+    return "\n".join(lines)
+
+
+@dataclass(frozen=True)
+class Entry:
+    """One action of this session: the command it was and the first line of its result."""
+
+    command: str
+    message: str
+    error: bool = False
+
+    @property
+    def summary(self) -> str:
+        return (self.message.splitlines() or [""])[0]

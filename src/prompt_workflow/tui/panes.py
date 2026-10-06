@@ -31,6 +31,7 @@ from ..config import env_names, secret_names
 from ..config_files import SecretStoreError
 from ..factory import PROVIDER_NAMES, routes
 from ..prompt_builder import ADDED, ALIASES, PROFILES, user_profiles_dir
+from . import teach
 from .home import TAB_LABELS, HomeRow, headline, home_rows
 from .modals import ConfirmModal, Field, FormModal, TextModal
 from .state import State, current_plan
@@ -72,7 +73,26 @@ def _add_row(table: DataTable[Any], *cells: str, key: str | None = None) -> None
 
 
 def _buttons(*buttons: tuple[str, str]) -> Horizontal:
-    return Horizontal(*(Button(label, id=id_) for id_, label in buttons), classes="buttons")
+    """A row of buttons, each with its headless command as the tooltip (#111)."""
+    return Horizontal(
+        *(Button(label, id=id_, tooltip=teach.tooltip(id_)) for id_, label in buttons),
+        classes="buttons",
+    )
+
+
+def result_text(message: str, command: str | None) -> Text:
+    """An action's result, under the command it was (muted) when it has one."""
+    if command is None:
+        return Text(message)
+    shown = Text()
+    shown.append(f"$ {command}\n", style="dim")
+    shown.append(message)
+    return shown
+
+
+def shown_arg(value: str) -> str:
+    """A value as a command line may show it: never one that looks like a credential."""
+    return teach.WITHHELD if common.looks_like_a_key(value) else value
 
 
 class Pane(VerticalScroll):
@@ -108,19 +128,25 @@ class Pane(VerticalScroll):
     def result(self) -> Static:
         return Static("", classes="result", markup=False)
 
-    def report(self, message: str, *, error: bool = False) -> None:
+    def report(self, message: str, *, error: bool = False, command: str | None = None) -> None:
+        """Show ``message`` here and as a notification; with ``command`` (the same action in
+        a terminal, teach.equivalent()), show it above and add both to Home's session log."""
         self.last_message = message
-        self.query_one(".result", Static).update(message)
+        self.query_one(".result", Static).update(result_text(message, command))
         self.app.notify(message, severity="error" if error else "information", markup=False)
+        if command is not None:
+            self.manage.log_action(teach.Entry(command, message, error))
 
-    def attempt(self, action: Callable[[], str], *, reload: bool = True) -> None:
+    def attempt(
+        self, action: Callable[[], str], *, reload: bool = True, command: str | None = None
+    ) -> None:
         """Run a change; show its message, or the error a headless command would print."""
         try:
             message = action()
         except Exception as exc:
-            self.report(_error(exc), error=True)
+            self.report(_error(exc), error=True, command=command)
             return
-        self.report(message)
+        self.report(message, command=command)
         if reload:
             self.manage.reload()
 
@@ -185,6 +211,31 @@ def home_headline(rows: Sequence[HomeRow]) -> Table:
     return grid
 
 
+# The session log shows this many of the latest actions.
+SESSION_LINES = 6
+
+
+def session_text(entries: Sequence[teach.Entry]) -> Text:
+    """Home's read-only session log (#111): what each action of this session was in a
+    terminal, newest last, with the first line of its result. Before any, a few recipes."""
+    if not entries:
+        text = Text(no_wrap=True, overflow="ellipsis")
+        text.append("In a terminal, try:\n", style="bold")
+        width = max(len(teach.equivalent(*r.argv)) for r in teach.RECIPES)
+        for recipe in teach.RECIPES:
+            text.append(f"  $ {teach.equivalent(*recipe.argv):<{width}}", style="dim")
+            text.append(f"  {recipe.what}\n")
+        text.append("Each button's tooltip shows its command too.", style="dim")
+        return text
+    text = Text(no_wrap=True, overflow="ellipsis")
+    text.append("This session, as commands:\n", style="bold")
+    for entry in entries[-SESSION_LINES:]:
+        text.append(f"  $ {entry.command}\n", style="dim")
+        mark = "error: " if entry.error and not entry.summary.startswith("error") else ""
+        text.append(f"    {mark}{entry.summary}\n")
+    return text
+
+
 class HomePane(Pane):
     """This install at a glance: a headline naming the worst problem, then one row per part
     (Mockup B, #112). The Diagnostics tab has every check; nothing here calls a provider."""
@@ -196,11 +247,15 @@ class HomePane(Pane):
         yield Static("", id="home-rows")
         yield _buttons(("home-reload", "Check again"), ("home-previous", "Previous install…"))
         yield self.result()
+        yield Static(session_text(()), id="home-session")
 
     def show(self, state: State) -> None:
         self.rows = tuple(home_rows(state))
         self.query_one("#home-headline", Static).update(home_headline(self.rows))
         self.query_one("#home-rows", Static).update(home_table(self.rows))
+
+    def show_session(self, entries: Sequence[teach.Entry]) -> None:
+        self.query_one("#home-session", Static).update(session_text(entries))
 
     @on(Button.Pressed, "#home-reload")
     def _reload(self) -> None:
@@ -306,7 +361,7 @@ class ProvidersPane(Pane):
             saved = f"{name} saved in the secret store ({config_store.config_dir()})"
             return f"{saved}; {note}" if note else saved
 
-        self.attempt(save)
+        self.attempt(save, command=teach.equivalent("secrets", "set", name))
 
     @on(Button.Pressed, "#remove-key")
     def _remove_key(self) -> None:
@@ -331,7 +386,10 @@ class ProvidersPane(Pane):
 
         def done(yes: bool | None) -> None:
             if yes:
-                self.attempt(lambda: self._delete(name))
+                self.attempt(
+                    lambda: self._delete(name),
+                    command=teach.equivalent("secrets", "remove", name),
+                )
 
         self.app.push_screen(
             ConfirmModal(f"Delete {name} from the secret store?", confirm="Delete"), done
@@ -366,7 +424,7 @@ class ProvidersPane(Pane):
             notes = settings_cmd.after_save(name)
             return "; ".join([f"{name} saved in {saved.path}", *notes])
 
-        self.attempt(save)
+        self.attempt(save, command=teach.equivalent("config", "set", name, shown_arg(value)))
 
     @on(Button.Pressed, "#migrate-env")
     def _migrate(self) -> None:
@@ -384,7 +442,10 @@ class ProvidersPane(Pane):
 
         def done(yes: bool | None) -> None:
             if yes:
-                self.attempt(lambda: self._apply_migration(plan.token))
+                self.attempt(
+                    lambda: self._apply_migration(plan.token),
+                    command=teach.equivalent("config", "migrate"),
+                )
 
         self.app.push_screen(ConfirmModal("Migrate the .env?", preview, confirm="Migrate"), done)
 
@@ -498,7 +559,7 @@ class ProfilesPane(Pane):
                 notes = settings_cmd.after_save("PROMPT_PROFILE")
                 return "; ".join([f"PROMPT_PROFILE saved in {saved.path}", *notes])
 
-            self.attempt(save)
+            self.attempt(save, command=teach.equivalent("config", "set", "PROMPT_PROFILE", name))
 
     def selected(self) -> Path | None:
         table = self.query_one("#profiles", DataTable)
@@ -549,9 +610,11 @@ def previous_root(found: previous_install.Detection) -> Path | None:
 
 
 class Reporter(Protocol):
-    def report(self, message: str, *, error: bool = False) -> None: ...
+    def report(self, message: str, *, error: bool = False, command: str | None = None) -> None: ...
 
-    def attempt(self, action: Callable[[], str], *, reload: bool = True) -> None: ...
+    def attempt(
+        self, action: Callable[[], str], *, reload: bool = True, command: str | None = None
+    ) -> None: ...
 
 
 def copy_profiles(owner: Reporter, root: Path | None) -> None:
@@ -574,9 +637,11 @@ def copy_profiles(owner: Reporter, root: Path | None) -> None:
         + [f"{name}.md ({change}) -> {dest / f'{name}.md'}" for name, change in changed.items()]
     )
 
+    command = teach.equivalent("profiles", "migrate", "--checkout", str(root))
+
     def done(yes: bool | None) -> None:
         if yes:
-            owner.attempt(lambda: _copy(source, pristine, dest, list(changed)))
+            owner.attempt(lambda: _copy(source, pristine, dest, list(changed)), command=command)
 
     cast("Widget", owner).app.push_screen(
         ConfirmModal("Copy these profiles? (copies only, never overwrites)", preview), done
@@ -738,11 +803,13 @@ class TriggersPane(Pane):
             lines.append(f"WARNING: kept as you have them and NOT updated: {names}.")
         else:
             lines.append("The match files are up to date.")
-        self.app.call_from_thread(self._done, "\n".join(lines), bool(outcome.kept))
+        self.app.call_from_thread(
+            self._done, "\n".join(lines), bool(outcome.kept), teach.equivalent("espanso", "deploy")
+        )
 
-    def _done(self, message: str, error: bool) -> None:
+    def _done(self, message: str, error: bool, command: str | None = None) -> None:
         self.busy = False
-        self.report(message, error=error)
+        self.report(message, error=error, command=command)
         self.manage.reload()
 
     @on(Button.Pressed, "#detach")
@@ -789,7 +856,8 @@ class TriggersPane(Pane):
         lines = list(outcome.lines)
         if outcome.changed and not deploy.restart_espanso():
             lines.append("Could not restart Espanso; run `espanso restart` yourself.")
-        self.app.call_from_thread(self._done, "\n".join(lines), False)
+        argv = ("espanso", "detach", *(["--remove-all"] if remove_all else []))
+        self.app.call_from_thread(self._done, "\n".join(lines), False, teach.equivalent(*argv))
 
 
 def _manifest_digest(manifest: deploy.Manifest) -> list[tuple[str, dict[str, Any]]]:
@@ -921,7 +989,9 @@ class HistoryPane(Pane):
                 count = self._store().export(out, fmt)
             return f"Exported {count} call(s) to {path}"
 
-        self.attempt(export, reload=False)
+        fmt, raw = values["format"], values["path"].strip()
+        argv = ("history", "export", "--format", fmt, "-o", shown_arg(raw) if raw else "<FILE>")
+        self.attempt(export, reload=False, command=teach.equivalent(*argv))
 
     @on(Button.Pressed, "#prune")
     def _prune(self) -> None:
@@ -947,7 +1017,9 @@ class HistoryPane(Pane):
 
         def done(yes: bool | None) -> None:
             if yes:
-                self.attempt(prune)
+                self.attempt(
+                    prune, command=teach.equivalent("history", "prune", "--older-than", str(days))
+                )
 
         self.app.push_screen(
             ConfirmModal(
@@ -969,7 +1041,7 @@ class HistoryPane(Pane):
 
         def done(yes: bool | None) -> None:
             if yes:
-                self.attempt(reset)
+                self.attempt(reset, command=teach.equivalent("history", "reset"))
 
         self.app.push_screen(
             ConfirmModal(
