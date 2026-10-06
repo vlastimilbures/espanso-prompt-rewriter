@@ -19,6 +19,13 @@ All notable changes to this project are documented here. The format follows
 - README "CLI" documents the `[prompt-workflow: …]` marker as the stable way for a script to
   tell a failed `improve` run from a rewrite, since the exit code is always 0 (#32).
 
+### Removed
+- The static `-prompt-` form ("Act as {{role}}", objective, context, constraints, output) in
+  `prompts-core.yml` (#38). `-p-` already gives the golden CONTEXT…OUTPUTS template to fill
+  in. `prompts-core.yml` now holds only `-risk-`. Your deployed copy shows as `stale` until you
+  run `prompt-workflow espanso deploy`, which updates it like any unedited file (no conflict
+  question, no backup).
+
 ## 0.18.0 - 2026-10-06
 
 ### Security

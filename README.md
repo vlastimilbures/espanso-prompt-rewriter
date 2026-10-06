@@ -211,7 +211,7 @@ with `espanso path config`, else Espanso's default folder) and keeps a manifest 
 |---------|--------------|
 | `prompt-workflow espanso status [--diff]` | Each file: `missing`, `in sync`, `stale` (an older deploy of ours, such as after an upgrade), `modified` (you edited it) or `foreign` (not ours) |
 | `prompt-workflow espanso deploy` | Shows the plan and a diff, asks, then writes and restarts Espanso. `--yes` skips the question, `--dry-run` stops after the diff; a second run with nothing to change does nothing |
-| `prompt-workflow espanso detach` | Removes the matches that call the CLI and keeps `-prompt-`/`-risk-` as static snippets (`--keep-static`, the default); `--remove-all` removes every file we deployed |
+| `prompt-workflow espanso detach` | Removes the matches that call the CLI and keeps `-risk-` as a static snippet (`--keep-static`, the default); `--remove-all` removes every file we deployed |
 
 A file you edited is never overwritten silently: `deploy` asks whether to keep yours, take ours
 (yours is saved as `<file>.bak-<timestamp>`; only the last 2 of these backups are kept) or write
@@ -270,8 +270,8 @@ Detach before you uninstall: once the CLI is gone, every trigger that calls it f
 Espanso's rendering error.
 
 1. `prompt-workflow espanso detach` removes the matches that call the CLI
-   (`prompts-llm.yml`, `prompts-template.yml`) and keeps `-prompt-` and `-risk-` as static
-   snippets (`--keep-static`, the default); `--remove-all` removes every file it deployed. The
+   (`prompts-llm.yml`, `prompts-template.yml`) and keeps `-risk-` as a static
+   snippet (`--keep-static`, the default); `--remove-all` removes every file it deployed. The
    `.bak-…` backups are never deleted.
 2. Check with `prompt-workflow espanso status` that neither `prompts-llm.yml` nor
    `prompts-template.yml` is left (both should be `missing`). Detach removes only files on
@@ -308,7 +308,6 @@ if you want your earlier version back, and restart Espanso.
 | `-ilm-`           | General prompt improvement, fully local                      | LM Studio  | `general` |
 | `-ic-`            | General improvement via Claude (commented out by default)    | Anthropic  | `general` |
 | `-p-`             | Empty golden template to fill in, opening with your persona  | —          | —         |
-| `-prompt-`        | Form: role, objective, context, constraints, output          | —          | —         |
 | `-risk-`          | Enterprise-risk analysis prompt scaffold                     | —          | —         |
 
 The Profile column shows the defaults. `-i-` uses `PROMPT_PROFILE`. `-ip-` and `-if-` use

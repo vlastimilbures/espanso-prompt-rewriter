@@ -12,6 +12,7 @@ KNOWN_SOURCES: dict[str, frozenset[str]] = {
     "prompts-core.yml": frozenset(
         {
             "0c0e2c0bf68a4e2573c713470c5cd4d43451e76691c8e671ae066944f807bbc4",
+            "1c354d11cb89460ad12a0539d025eeecaf94fd4c6b3a92393455d1670551cde4",
             "1cf316c0745bbdc9827643530caacf3b782a59cb72312ccfebcfccd4ea73c656",
             "7d04c4988a4bacf0b8e43bba5182886020b9bddd3d7fe41846390b46caec3170",
         }

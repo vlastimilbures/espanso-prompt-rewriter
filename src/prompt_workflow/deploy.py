@@ -700,7 +700,7 @@ def apply(the_plan: Plan, choices: Mapping[str, str] | None = None) -> Outcome:
 
 def detach(manifest: Manifest, espanso: Path, *, remove_all: bool = False) -> Outcome:
     """Remove the files we own. --keep-static (the default, D-UNI-1) removes only the files
-    that call the CLI, so -prompt-/-risk- stay as plain static snippets; --remove-all removes
+    that call the CLI, so -risk- stays as a plain static snippet; --remove-all removes
     every owned file. A file the user edited since our last deploy is kept and reported, and
     our backups (the user's earlier versions) are never deleted here. Only entries for one of
     our match files in ``espanso``'s match/ folder are acted on; any other is reported."""
