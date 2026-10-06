@@ -10,9 +10,10 @@ import sys
 from collections.abc import Awaitable, Callable, Iterator, Sequence
 from typing import Any
 
+import pyperclip
 import pytest
 from textual.pilot import Pilot
-from textual.widgets import RichLog, Static, TabbedContent
+from textual.widgets import Button, OptionList, RichLog, Static, TabbedContent
 from typer._click.exceptions import UsageError
 from typer._types import TyperChoice
 from typer.core import TyperArgument, TyperGroup, TyperOption
@@ -20,6 +21,7 @@ from typer.core import TyperArgument, TyperGroup, TyperOption
 from promptmend import config, prompt_builder, smoke
 from promptmend.tui import console, panes, teach
 from promptmend.tui.app import ManageApp
+from promptmend.tui.modals import FormModal, PickModal
 
 # Built at runtime, so no key-shaped literal lands in the repo (gitleaks).
 KEY = "sk-or-v1-" + "ab12" * 16
@@ -825,3 +827,164 @@ def test_secrets_set_with_a_value_is_cleared_and_not_kept(rest: str) -> None:
         assert line.value == ""
 
     drive(scenario)
+
+
+# --- Recipes and Copy command (#111) ------------------------------------------------------------
+
+
+def _picker(app: ManageApp) -> PickModal:
+    screen = app.screen
+    assert isinstance(screen, PickModal)
+    return screen
+
+
+async def _open_recipes(app: ManageApp, pilot: Pilot[int]) -> PickModal:
+    app.main.query_one("#home-recipes", Button).press()
+    await settle(pilot)
+    picker = _picker(app)
+    assert picker.query_one("#pick", OptionList).has_focus
+    return picker
+
+
+async def _pick(app: ManageApp, pilot: Pilot[int], argv: tuple[str, ...]) -> None:
+    picker = await _open_recipes(app, pilot)
+    options = picker.query_one("#pick", OptionList)
+    options.highlighted = [r.argv for r in teach.RECIPES].index(argv)
+    await pilot.press("enter")
+    await settle(pilot)
+
+
+def test_recipes_list_every_recipe_with_what_it_does() -> None:
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        picker = await _open_recipes(app, pilot)
+        options = picker.query_one("#pick", OptionList)
+        shown = [str(options.get_option_at_index(i).prompt) for i in range(options.option_count)]
+        assert len(shown) == len(teach.RECIPES)
+        for line, recipe in zip(shown, teach.RECIPES, strict=True):
+            assert line.startswith(f"$ {teach.equivalent(*recipe.argv)} ")
+            assert line.endswith(recipe.what)
+
+    drive(scenario)
+
+
+def test_a_recipe_prefills_the_line_and_runs_nothing(nothing_runs: Callable[[], None]) -> None:
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        nothing_runs()
+        fake = FakeRun()
+        line = _line(app)
+        line.runner = fake
+        await _pick(app, pilot, ("stats", "--by", "model"))
+        assert not isinstance(app.screen, PickModal)
+        assert line.value == "stats --by model"
+        assert line.has_focus
+        assert line.cursor_position == len(line.value)
+        assert _help(app).startswith("Usage: promptmend stats")
+        assert fake.calls == []
+        assert app.session == []
+        assert line.history == []
+        # Enter then runs it, as typed.
+        await pilot.press("enter")
+        await settle(pilot)
+        assert fake.calls == [("stats", "--by", "model")]
+
+    drive(scenario)
+
+
+def test_the_key_recipe_prefills_only_the_name(nothing_runs: Callable[[], None]) -> None:
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        nothing_runs()
+        line = _line(app)
+        await _pick(app, pilot, ("secrets", "set", "OPENROUTER_API_KEY"))
+        assert line.value == "secrets set OPENROUTER_API_KEY"
+        assert app.session == []
+        # Enter opens the hidden key dialog, as for a typed line.
+        await pilot.press("enter")
+        await settle(pilot)
+        assert _tab(app) == "providers"
+        assert isinstance(app.screen, FormModal)
+        assert app.screen.values() == {"key-name": "OPENROUTER_API_KEY", "key-value": ""}
+
+    drive(scenario)
+
+
+@pytest.mark.parametrize("how", ["esc", "btn"])
+def test_cancel_keeps_the_typed_line(how: str) -> None:
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        line = _line(app)
+        await pilot.press("c", *"doctor --js")
+        await settle(pilot)
+        help_before = _help(app)
+        await _open_recipes(app, pilot)
+        if how == "esc":
+            await pilot.press("escape")
+        else:
+            _picker(app).query_one("#cancel", Button).press()
+        await settle(pilot)
+        assert not isinstance(app.screen, PickModal)
+        assert line.value == "doctor --js"
+        assert _help(app) == help_before
+
+    drive(scenario)
+
+
+@pytest.fixture
+def no_pyperclip(monkeypatch: pytest.MonkeyPatch) -> None:
+    def touched(*_: Any) -> Any:
+        raise AssertionError("pyperclip was used")
+
+    monkeypatch.setattr(pyperclip, "paste", touched)
+    monkeypatch.setattr(pyperclip, "copy", touched)
+
+
+def test_copy_command_copies_the_latest_command(
+    no_pyperclip: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    copied: list[str] = []
+
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        monkeypatch.setattr(app, "copy_to_clipboard", copied.append)
+        button = app.main.query_one("#home-copy", Button)
+        assert button.disabled
+        _line(app).runner = FakeRun()
+        await pilot.press("c", *"stats", "enter")
+        await settle(pilot)
+        await pilot.press(*"doctor --json", "enter")
+        await settle(pilot)
+        assert not button.disabled
+        button.press()
+        await settle(pilot)
+        assert copied == ["promptmend doctor --json --no-clipboard"]
+        assert _home(app).last_message == (
+            "Sent to the terminal clipboard (OSC 52): promptmend doctor --json --no-clipboard"
+        )
+        # Copying is not an action of its own in the session log.
+        assert len(app.session) == 2
+
+    drive(scenario)
+
+
+def test_copy_command_with_an_empty_session_copies_nothing(
+    no_pyperclip: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    copied: list[str] = []
+
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        monkeypatch.setattr(app, "copy_to_clipboard", copied.append)
+        _home(app)._copy()
+        await settle(pilot)
+        assert copied == []
+
+    drive(scenario)
+
+
+@pytest.mark.parametrize("recipe", teach.RECIPES, ids=lambda r: r.argv[0][:6] + str(len(r.argv)))
+def test_a_recipe_line_splits_back_and_parses(recipe: teach.Recipe) -> None:
+    line = teach.line(*recipe.argv)
+    assert console.split(line) == list(recipe.argv)
+    console.resolve(console.split(line))
+
+
+def test_line_quotes_a_value_that_needs_it() -> None:
+    line = teach.line("config", "set", "X", "a b'c")
+    assert line.startswith("config set X ")
+    assert console.split(line) == ["config", "set", "X", "a b'c"]

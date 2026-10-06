@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from textual.widgets import Button
 
 from promptmend import assets, deploy, doctor, previous_install
 from promptmend.config import ConfigLayers
@@ -218,6 +219,7 @@ def _shoot(
     intro: bool = False,
     typed: str = "",
     ran: Ran | None = None,
+    button: str | None = None,
 ) -> str:
     app = ManageApp(loader=loader, intro=intro)
     # The active tab's underline slides into place; a snapshot must not catch it midway.
@@ -240,6 +242,11 @@ def _shoot(
                 if ran is not None:  # Enter runs the line through a fake: no child
                     line.runner = lambda argv: ran
                 await pilot.press(*typed, *(["enter"] if ran is not None else []))
+                for _ in range(3):
+                    await pilot.pause()
+                    await app.workers.wait_for_complete()
+            if button:
+                app.main.query_one(button, Button).press()
                 for _ in range(3):
                     await pilot.pause()
                     await app.workers.wait_for_complete()
@@ -297,6 +304,11 @@ SECRETS_STATUS = (
 
 def test_snapshot_home_output() -> None:
     _check("home-output", _shoot("c", typed="secrets status", ran=Ran(0, SECRETS_STATUS)))
+
+
+# Home's recipes (#111): picking one puts it on the command line; Cancel has the focus.
+def test_snapshot_home_recipes() -> None:
+    _check("home-recipes", _shoot("1", button="#home-recipes"))
 
 
 # The intro (#112), wide enough for the wordmark and on a narrow terminal (text only), with

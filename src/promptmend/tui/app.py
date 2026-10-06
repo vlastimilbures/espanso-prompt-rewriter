@@ -71,6 +71,8 @@ DataTable { height: auto; max-height: 14; margin-bottom: 1; }
 #group-by { width: 30; margin-bottom: 1; }
 .buttons { height: auto; margin-top: 1; }
 .buttons Button { margin-right: 1; }
+/* Home's four buttons as wide as their labels, so the row fits 70 columns (#111). */
+#home-pane .buttons Button { min-width: 0; }
 .result { margin-top: 1; }
 #home-headline { margin: 1 0; }
 #home-rows { height: auto; }

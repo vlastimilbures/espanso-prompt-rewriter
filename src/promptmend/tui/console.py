@@ -687,6 +687,15 @@ class CommandLine(Input):
         else:
             self._clear(Text(decision.message))
 
+    def prefill(self, line: str) -> None:
+        """Put ``line`` on the command line (a recipe), cursor at its end, focused, with its
+        help as if typed. Runs nothing: Enter still decides."""
+        self._hold = False
+        self.value = line
+        self.cursor_position = len(line)
+        self.help_line.update(describe(line, typing=True))
+        self.focus()
+
     def action_history(self, step: int) -> None:
         if not self.history:
             return

@@ -1990,6 +1990,37 @@ def test_every_button_has_its_command_as_tooltip(previous: Path) -> None:
     assert seen["deploy"] == "In a terminal:\n$ promptmend espanso deploy"
 
 
+# Copy last (#111) takes what another tab logged, withheld as the log shows it: never the key.
+def test_copy_last_takes_another_tabs_entry_withheld(
+    saved: Path, espanso: FakeRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import pyperclip
+
+    def touched(*_: Any) -> Any:
+        raise AssertionError("pyperclip was used")
+
+    monkeypatch.setattr(pyperclip, "paste", touched)
+    monkeypatch.setattr(pyperclip, "copy", touched)
+    copied: list[str] = []
+
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        monkeypatch.setattr(app, "copy_to_clipboard", copied.append)
+        copy = app.main.query_one("#home-copy", Button)
+        assert copy.disabled
+        await pilot.press("2")
+        await press(app, pilot, "#set-setting")
+        await fill(app, pilot, setting_name="PROMPT_PROFILE", setting_value=KEY)
+        assert app.session[-1].error
+        await pilot.press("1")
+        assert not copy.disabled
+        await press(app, pilot, "#home-copy")
+        assert copied == ["promptmend config set PROMPT_PROFILE <value withheld>"]
+        assert KEY not in pane(app, "home").last_message
+
+    drive(scenario)
+    assert all(KEY not in text for text in copied)
+
+
 def test_results_show_their_command_and_home_keeps_the_session(
     saved: Path, espanso: FakeRunner
 ) -> None:
