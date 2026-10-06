@@ -14,8 +14,8 @@ redaction patterns and documentation fixes are all welcome.
 ## Set up
 
 ```bash
-git clone https://github.com/vlastimilbures/espanso-prompt-rewriter.git
-cd espanso-prompt-rewriter
+git clone https://github.com/vlastimilbures/promptmend.git
+cd promptmend
 uv sync                  # the project plus its dev tools
 uv run pre-commit install
 ```
@@ -104,13 +104,13 @@ Releases are cut by `.github/workflows/release.yml`, never by hand-made tags.
    other commit, or a lightweight one, stops it. The Release is marked *Latest* only when no
    published Release has a higher version.
 3. Check the result: `gh release download vX.Y.Z` and `gh attestation verify <file> -R
-   vlastimilbures/espanso-prompt-rewriter` for each file. The first real release is also the
+   vlastimilbures/promptmend` for each file. The first real release is also the
    first check that attestation works end to end.
 4. PyPI: while the repository variable `PYPI_PUBLISH` is `true`, the workflow's `pypi` job
-   uploads the same sdist and wheel to [PyPI](https://pypi.org/project/espanso-prompt-rewriter/)
+   uploads the same sdist and wheel to [PyPI](https://pypi.org/project/promptmend/)
    right after the Release is published (trusted publishing from the GitHub environment `pypi`,
    no API token; `pypa/gh-action-pypi-publish` also uploads PEP 740 attestations). Check that
-   `https://pypi.org/project/espanso-prompt-rewriter/X.Y.Z/` lists both files. If the job
+   `https://pypi.org/project/promptmend/X.Y.Z/` lists both files. If the job
    failed, use *Re-run failed jobs* on that run: it uploads the same artifact again and skips
    any file PyPI already has. A new run for a version whose Release is published stops at
    `plan`, so it cannot upload; and PyPI never accepts a changed file under a version it has.
@@ -120,20 +120,20 @@ Releases are cut by `.github/workflows/release.yml`, never by hand-made tags.
 
    ```bash
    git switch --detach vX.Y.Z
-   gh release download vX.Y.Z -R vlastimilbures/espanso-prompt-rewriter \
+   gh release download vX.Y.Z -R vlastimilbures/promptmend \
      -p 'promptmend-X.Y.Z.tar.gz' -D /tmp/epr-X.Y.Z
    gh attestation verify /tmp/epr-X.Y.Z/promptmend-X.Y.Z.tar.gz \
-     -R vlastimilbures/espanso-prompt-rewriter
+     -R vlastimilbures/promptmend
    python3 scripts/brew_formula.py --sdist /tmp/epr-X.Y.Z/promptmend-X.Y.Z.tar.gz \
-     -o ../homebrew-tap/Formula/prompt-workflow.rb
+     -o ../homebrew-tap/Formula/promptmend.rb
    ```
 
    The formula installs the Release's sdist into a `Language::Python::Virtualenv` on
    `python@3.14` (`--python` changes it), with one `resource` per runtime dependency, each the
    exact sdist URL and SHA-256 `uv.lock` records (Windows-only ones such as colorama are left
    out; a marker the script cannot evaluate stops it). In the tap, check it with
-   `brew install --build-from-source ./Formula/prompt-workflow.rb`, `brew test prompt-workflow`
-   and `brew audit --strict prompt-workflow`, then commit and push. Automating this (a
+   `brew install --build-from-source ./Formula/promptmend.rb`, `brew test promptmend`
+   and `brew audit --strict promptmend`, then commit and push. Automating this (a
    workflow job opening a pull request in the tap) would need a token with write access to the
    tap; it is left for later.
 
@@ -204,7 +204,7 @@ path. Raise the ceiling only with new measurements here.
 ## Project layout
 
 ```text
-espanso-prompt-rewriter/
+promptmend/
 ├── espanso/                      deployed into Espanso by `promptmend espanso deploy`
 │   ├── match/                    also shipped in the wheel, see assets.py
 │   │   ├── prompts-llm.yml       -i- -ip- -if- -iok- -il- -ilm- (-ic-): call the CLI

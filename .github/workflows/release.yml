@@ -260,7 +260,7 @@ jobs:
       cancel-in-progress: false
     environment:
       name: pypi
-      url: https://pypi.org/project/espanso-prompt-rewriter/${{ needs.plan.outputs.version }}/
+      url: https://pypi.org/project/promptmend/${{ needs.plan.outputs.version }}/
     permissions:
       id-token: write
     steps:

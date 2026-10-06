@@ -4,9 +4,9 @@
 anywhere, and [Espanso](https://espanso.org/) replaces it with a precise, sectioned prompt
 rewritten by a local or cloud model.
 
-[![tests](https://github.com/vlastimilbures/espanso-prompt-rewriter/actions/workflows/test.yml/badge.svg)](https://github.com/vlastimilbures/espanso-prompt-rewriter/actions/workflows/test.yml)
-[![secret-scan](https://github.com/vlastimilbures/espanso-prompt-rewriter/actions/workflows/secret-scan.yml/badge.svg)](https://github.com/vlastimilbures/espanso-prompt-rewriter/actions/workflows/secret-scan.yml)
-[![release](https://img.shields.io/github/v/release/vlastimilbures/espanso-prompt-rewriter)](https://github.com/vlastimilbures/espanso-prompt-rewriter/releases)
+[![tests](https://github.com/vlastimilbures/promptmend/actions/workflows/test.yml/badge.svg)](https://github.com/vlastimilbures/promptmend/actions/workflows/test.yml)
+[![secret-scan](https://github.com/vlastimilbures/promptmend/actions/workflows/secret-scan.yml/badge.svg)](https://github.com/vlastimilbures/promptmend/actions/workflows/secret-scan.yml)
+[![release](https://img.shields.io/github/v/release/vlastimilbures/promptmend)](https://github.com/vlastimilbures/promptmend/releases)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 <br>
 [![python](https://img.shields.io/badge/python-3.12%20%7C%203.13%20%7C%203.14-blue?logo=python&logoColor=white)](pyproject.toml)
@@ -161,29 +161,29 @@ wheel built and tested by the release workflow, with the exact dependency versio
 `uv.lock`. To run from a checkout instead, see [Development](#development).
 
 **From PyPI with uv (from 0.19.0).** The package is
-[`promptmend`](https://pypi.org/project/espanso-prompt-rewriter/), uploaded by the
+[`promptmend`](https://pypi.org/project/promptmend/), uploaded by the
 release workflow through PyPI's trusted publishing (no stored token). Pass the release's
 `constraints.txt`, the exact dependency versions from `uv.lock`; a plain `uv tool install`
 would resolve the version ranges afresh:
 
 ```bash
 uv tool install promptmend==<version> \
-  -c https://github.com/vlastimilbures/espanso-prompt-rewriter/releases/download/v<version>/constraints.txt
+  -c https://github.com/vlastimilbures/promptmend/releases/download/v<version>/constraints.txt
 ```
 
 **From a GitHub Release with uv.** Each
-[GitHub Release](https://github.com/vlastimilbures/espanso-prompt-rewriter/releases) from 0.16
+[GitHub Release](https://github.com/vlastimilbures/promptmend/releases) from 0.16
 on carries the wheel and `constraints.txt`:
 
 ```bash
 uv tool install \
-  https://github.com/vlastimilbures/espanso-prompt-rewriter/releases/download/v<version>/promptmend-<version>-py3-none-any.whl \
-  -c https://github.com/vlastimilbures/espanso-prompt-rewriter/releases/download/v<version>/constraints.txt
+  https://github.com/vlastimilbures/promptmend/releases/download/v<version>/promptmend-<version>-py3-none-any.whl \
+  -c https://github.com/vlastimilbures/promptmend/releases/download/v<version>/constraints.txt
 ```
 
 To check the files first, download them (`gh release download v<version> -R
-vlastimilbures/espanso-prompt-rewriter`), run `gh attestation verify <file> -R
-vlastimilbures/espanso-prompt-rewriter` on each, and install the local wheel with
+vlastimilbures/promptmend`), run `gh attestation verify <file> -R
+vlastimilbures/promptmend` on each, and install the local wheel with
 `-c constraints.txt`.
 
 **With Homebrew (macOS and Linux, from 0.19.0).** The formula lives in the project's own tap,
@@ -298,7 +298,7 @@ command `prompt-workflow`; both are now `promptmend`. Switch over once:
 ```bash
 uv tool uninstall espanso-prompt-rewriter   # first; the triggers stop working until the deploy
 uv tool install promptmend==<version> \
-  -c https://github.com/vlastimilbures/espanso-prompt-rewriter/releases/download/v<version>/constraints.txt
+  -c https://github.com/vlastimilbures/promptmend/releases/download/v<version>/constraints.txt
 promptmend espanso deploy                   # the matches now call promptmend
 promptmend doctor
 ```
@@ -342,7 +342,7 @@ it too). From PyPI (from 0.19.0):
 
 ```bash
 uv tool install --force promptmend==<version> \
-  -c https://github.com/vlastimilbures/espanso-prompt-rewriter/releases/download/v<version>/constraints.txt
+  -c https://github.com/vlastimilbures/promptmend/releases/download/v<version>/constraints.txt
 promptmend doctor
 ```
 
@@ -350,8 +350,8 @@ From a GitHub Release:
 
 ```bash
 uv tool install --force \
-  https://github.com/vlastimilbures/espanso-prompt-rewriter/releases/download/v<version>/promptmend-<version>-py3-none-any.whl \
-  -c https://github.com/vlastimilbures/espanso-prompt-rewriter/releases/download/v<version>/constraints.txt
+  https://github.com/vlastimilbures/promptmend/releases/download/v<version>/promptmend-<version>-py3-none-any.whl \
+  -c https://github.com/vlastimilbures/promptmend/releases/download/v<version>/constraints.txt
 promptmend doctor
 ```
 
