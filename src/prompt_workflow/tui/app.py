@@ -17,7 +17,7 @@ from textual.widgets import Footer, Header, TabbedContent, TabPane
 from .. import __version__
 from . import brand, teach
 from .home import TAB_LABELS, pill
-from .intro import INTRO_SECONDS, AboutScreen, IntroScreen
+from .intro import AboutScreen, IntroScreen
 from .panes import (
     DiagnosticsPane,
     HistoryPane,
@@ -125,12 +125,12 @@ class ManageApp(App[int]):
         self,
         *,
         loader: Callable[[str], State] = gather,
-        intro_seconds: float | None = INTRO_SECONDS,
+        intro: bool = True,
     ) -> None:
         super().__init__()
-        # How long the intro stays (#112); None shows none (`ui --no-intro`,
-        # PROMPT_UI_INTRO=false, and the tests).
-        self.intro_seconds = intro_seconds
+        # Whether the intro opens (#112); it then stays until a key or click (#173). Off for
+        # `ui --no-intro`, PROMPT_UI_INTRO=false and the tests.
+        self.intro = intro
         # Read here, not at import, so the snapshot tests can pin it and a release changes none.
         self.title = f"{self.TITLE} {__version__}"
         self.loader = loader
@@ -150,12 +150,10 @@ class ManageApp(App[int]):
     def on_mount(self) -> None:
         self.push_screen(self.main)
         self.reload()
-        if self.intro_seconds is not None:
+        if self.intro:
             # Over the main screen while the state loads; the previous install offer waits
             # until it closes.
-            self.push_screen(
-                IntroScreen(self.intro_seconds, __version__), lambda _: self._maybe_offer()
-            )
+            self.push_screen(IntroScreen(__version__), lambda _: self._maybe_offer())
 
     def action_about(self) -> None:
         report = self.state.report if self.state else None
@@ -200,7 +198,7 @@ class ManageApp(App[int]):
         if generation != self.generation:
             return  # an older load that finished late
         self.state = state
-        self.sub_title = f"{self.SUB_TITLE} · {pill(state.report)}"
+        self.sub_title = f"{pill(state.report)} · {self.SUB_TITLE}"
         for pane in self.main.query(Pane):
             if pane.ready:
                 pane.show(state)

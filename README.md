@@ -219,8 +219,10 @@ Every button's tooltip shows the command that does the same in a terminal, every
 starts with that command (`$ prompt-workflow config set …`), and Home lists this session's
 commands, or a few useful ones before you have done anything.
 
-It opens with a short intro (under a second; any key closes it). `prompt-workflow ui
---no-intro`, or `PROMPT_UI_INTRO=false`, skips it.
+It opens with a short intro that stays until you press Enter (or any other key, or click);
+that key does nothing else. Its last line says how to turn it off for good:
+`prompt-workflow config set PROMPT_UI_INTRO false`. `prompt-workflow ui --no-intro` skips it
+once.
 
 `1`-`6` switch tabs, `a` shows the version, install channel, folders and licence, `r` reloads,
 `t` switches to a high-contrast theme and `q` quits; `NO_COLOR` turns colour off. Scripts and screen readers can use the headless commands instead.
@@ -646,7 +648,7 @@ short, does not look like a key and matches none of your `PROMPT_EXTRA_PATTERNS`
 | `PROMPT_EXTRA_PATTERNS`      | *(empty)*                      | Your own `;`-separated regexes for the gate               |
 | `PROMPT_HISTORY`             | `true`                         | Keep a local [usage history](#usage-history) (metadata only); `false` keeps none |
 | `PROMPT_HISTORY_RETENTION_DAYS` | `365`                       | Days a usage-history record is kept before pruning (1 to 36500) |
-| `PROMPT_UI_INTRO`            | `true`                         | `false` skips the [interface](#first-run)'s intro, as `ui --no-intro` does |
+| `PROMPT_UI_INTRO`            | `true`                         | `false` skips the [interface](#first-run)'s intro, which otherwise stays until Enter or any key, as `ui --no-intro` does once |
 | `PROMPT_WORKFLOW_ENV`        | *(unset)*                      | Path of the `.env` to load, alone: no `config.toml` or `secrets.toml` (real environment only) |
 
 ## Profiles and persona

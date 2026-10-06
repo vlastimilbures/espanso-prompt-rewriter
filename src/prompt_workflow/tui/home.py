@@ -173,7 +173,8 @@ def headline(rows: list[HomeRow]) -> tuple[str, str | None]:
         return READY, None
     row = next(r for r in rows if r.status == status)
     lead = "Not ready" if status == FAIL else "Almost ready"
-    problem = (row.problem or f"{row.label}: {row.text}").rstrip(".")
+    # A doctor message marks a command with Markdown backticks, shown literally here (#174).
+    problem = (row.problem or f"{row.label}: {row.text}").replace("`", "").rstrip(".")
     return f"{lead}: {problem}.", row.jump
 
 

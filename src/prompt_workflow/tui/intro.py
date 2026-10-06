@@ -1,11 +1,13 @@
 """The intro shown as the interface opens and the About screen on `a` (#112). Both are
-static text (no animation) in a Textual border; the intro closes by itself after a moment, or
-on any key or click, and the key that closes it does nothing else."""
+static text (no animation) in a Textual border. The intro stays until any key or click
+(#173), with a hint naming Enter and the command that turns it off; the key that closes it
+does nothing else."""
 
 from __future__ import annotations
 
 from typing import ClassVar
 
+from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
@@ -13,14 +15,15 @@ from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Static
 
-from . import brand
+from . import brand, teach
 
-INTRO_SECONDS = 0.8
+# Under the splash (#173): the setting, not a hidden toggle, so `config show` lists it.
+INTRO_HINT = f"Enter to continue · turn off: {teach.equivalent(*teach.INTRO_OFF)}"
 
 
 class IntroScreen(ModalScreen[None]):
-    """The wordmark, name, version and tagline over the main screen while the state loads.
-    ``seconds`` None keeps it open until a key or click (tests)."""
+    """The wordmark, name, version and tagline over the main screen while the state loads,
+    and the hint (muted). No timer: a person reads it, then presses a key."""
 
     DEFAULT_CSS = """
     IntroScreen { align: center middle; }
@@ -28,20 +31,17 @@ class IntroScreen(ModalScreen[None]):
              padding: 1 3; background: $surface; }
     """
 
-    def __init__(self, seconds: float | None = INTRO_SECONDS, version: str | None = None) -> None:
+    def __init__(self, version: str | None = None) -> None:
         super().__init__()
-        self.seconds = seconds
         self.version = version
 
     def compose(self) -> ComposeResult:
-        yield Static(brand.splash(self.app.size.width, self.version), id="intro", markup=False)
-
-    def on_mount(self) -> None:
-        if self.seconds is not None:
-            self.set_timer(self.seconds, self.close)
+        text = Text(brand.splash(self.app.size.width, self.version))
+        text.append(f"\n\n{INTRO_HINT}", style="dim")
+        yield Static(text, id="intro")
 
     def close(self) -> None:
-        # The timer may fire after a key already closed it.
+        # A second key or click may arrive before the first dismiss has taken effect.
         if self.is_current:
             self.dismiss(None)
 

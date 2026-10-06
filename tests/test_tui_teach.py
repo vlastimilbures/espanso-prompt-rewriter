@@ -38,6 +38,7 @@ def parse(argv: tuple[str, ...]) -> None:
 ALL = sorted(
     {argv for commands in teach.BUTTONS.values() for argv in commands}
     | {recipe.argv for recipe in teach.RECIPES}
+    | {teach.INTRO_OFF}
 )
 
 
