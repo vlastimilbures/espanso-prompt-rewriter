@@ -31,6 +31,9 @@ ALIASES = {"default-pro": "default"}
 
 # Replaced in a profile by the rule for how CONTEXT opens (see PROMPT_PERSONA).
 PERSONA_TOKEN = "{{PERSONA_RULE}}"  # noqa: S105 - a template placeholder, not a secret
+# Replaced by the persona and a space, or by nothing without one: the few-shot examples open
+# CONTEXT with it, so they show the persona opening the rule asks for (#49).
+PERSONA_OPENING_TOKEN = "{{PERSONA_OPENING}}"  # noqa: S105 - a template placeholder
 
 # A user profile's name is its file name without `.md`: no dots, separators or spaces, so a
 # --profile value cannot reach outside the profile directory. Lower case only, so `Default`
@@ -80,9 +83,15 @@ def persona_rule(persona: str) -> str:
     )
 
 
+def persona_opening(persona: str) -> str:
+    return f"{persona} " if persona else ""
+
+
 def render(template: str, persona: str = "") -> str:
-    """Fill a profile's tokens. Plain replace, not str.format: templates contain braces."""
-    return template.replace(PERSONA_TOKEN, persona_rule(persona))
+    """Fill a profile's tokens in one pass, so a persona that holds a token's text is never
+    filled again. Not str.format: templates contain braces."""
+    values = {PERSONA_TOKEN: persona_rule(persona), PERSONA_OPENING_TOKEN: persona_opening(persona)}
+    return re.sub("|".join(map(re.escape, values)), lambda m: values[m.group()], template)
 
 
 def system_prompt(profile: str, persona: str = "", overrides: Collection[str] = ()) -> str:

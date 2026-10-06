@@ -35,6 +35,17 @@ All notable changes to this project are documented here. The format follows
 ### Changed
 - README "CLI" documents the `[prompt-workflow: …]` marker as the stable way for a script to
   tell a failed `improve` run from a rewrite, since the exit code is always 0 (#32).
+- The `default` prompt's two examples now open `CONTEXT` with your `PROMPT_PERSONA` (a new
+  `{{PERSONA_OPENING}}` token, filled like `{{PERSONA_RULE}}`; without a persona they read as
+  before), so a rewrite no longer drops the persona the rule asks for (#49). On the bench with
+  a fictitious persona it opened `CONTEXT` in 105 of 105 scored runs on both default models
+  (before: 100 on flash-lite, 96 on gpt-6-luna).
+- The inputs step no longer contradicts "Execute, but state assumptions up front": it adds
+  "if step 1 says execute, state your assumption instead and ask only about a gap that blocks
+  the task" (#46). The independent review now reads "Use a separate agent with [domain] domain
+  knowledge if you can run one, otherwise review as an independent expert in that domain
+  would: …", so it also works in a plain chat; "validate them with me" is kept. The `-p-`
+  snippet carries both wordings. docs/benchmark.md has the before/after results.
 
 ### Removed
 - The static `-prompt-` form ("Act as {{role}}", objective, context, constraints, output) in

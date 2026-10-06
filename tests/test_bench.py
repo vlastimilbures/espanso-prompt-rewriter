@@ -34,7 +34,7 @@ def test_good_output_passes():
         ),
         (lambda t: t.replace("I want", "The user wants"), "struct: third-person CONTEXT"),
         (
-            lambda t: t.replace("Spin up an independent agent", "Get someone"),
+            lambda t: t.replace(bench.INDEPENDENT, "Get someone"),
             "struct: review branch absent or both emitted",
         ),
     ],

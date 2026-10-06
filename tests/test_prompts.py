@@ -32,7 +32,7 @@ def test_default_profile_offers_both_branches():
     text = system_prompt("default")
     assert "Plan the task thoroughly" in text
     assert "Execute, but state assumptions up front." in text
-    assert "Spin up an independent agent" in text
+    assert "Use a separate agent with [domain] domain knowledge if you can run one" in text
     assert "Review your own output against these checks" in text
 
 
@@ -64,6 +64,25 @@ def test_default_profile_without_persona():
     assert "<context>\nif the draft explicitly states the user's role" in text
     assert "do not state or guess any role" in text
     assert 'open with "' not in text.split("<context>\n", 1)[1].split("\n", 1)[0]
+
+
+# Both few-shot examples open CONTEXT with the configured persona (#49), and without one
+# exactly as before: the token leaves nothing behind.
+def test_default_examples_open_with_persona():
+    with_persona = system_prompt("default", PERSONA)
+    plain = system_prompt("default")
+    for opening in ("I want a quick summary of my notes", "I need to email Ms Lopez"):
+        assert f"<CONTEXT>\n{PERSONA} {opening}" in with_persona
+        assert f"<CONTEXT>\n{opening}" in plain
+    assert with_persona.count(f"<CONTEXT>\n{PERSONA} ") == 2
+
+
+# The tokens are filled in one pass: a persona holding a token's text is pasted as written.
+def test_persona_holding_a_token_is_not_filled_again():
+    persona = "I am {{PERSONA_RULE}} and {{PERSONA_OPENING}}."
+    text = system_prompt("default", persona)
+    assert f"<CONTEXT>\n{persona} I want" in text
+    assert text.count("{{") == 2 * 3  # the persona's two tokens, in the rule and both examples
 
 
 # No profile ships an unreplaced template token, with or without a persona.

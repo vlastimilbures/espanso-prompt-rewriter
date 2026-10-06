@@ -28,7 +28,8 @@ with me before executing.
 2/ Load and validate all inputs. If anything is missing, ambiguous, or contradictory, ask me \
 up to 5 targeted questions before drafting.
 3/ Analyse the NPL spike.
-4/ Spin up an independent agent with credit risk domain knowledge and perform a critical review.
+4/ Use a separate agent with credit risk domain knowledge if you can run one, otherwise review \
+as an independent expert in that domain would: perform a critical review.
 5/ Flag material judgment calls or trade-offs and let me decide.
 </INSTRUCTIONS>
 

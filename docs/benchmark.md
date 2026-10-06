@@ -51,19 +51,55 @@ problem rather than a model one. By default a run renders the same fictitious pe
 its outputs in `bench-out/<UTC timestamp>/`. `--persona env` renders your own persona instead;
 keep those outputs to yourself.
 
-Every result below was scored before the persona and "None"/`[REVIEW` checks and the
-`INPUTS`-free `kept` were added (#48, after 0.17.0), so it is not directly comparable with a
-later run: the new checks can only lower a pass count, and `kept` can only drop. Re-run both
-prompts with the same bench before comparing them.
+Every result below the first table was scored before the persona and "None"/`[REVIEW` checks
+and the `INPUTS`-free `kept` were added (#48, after 0.17.0), so it is not directly comparable
+with a later run: the new checks can only lower a pass count, and `kept` can only drop. Re-run
+both prompts with the same bench before comparing them, as the first table does.
 
 ## Results
 
 Each heading names the release whose `default` prompt was scored. The prompt is unchanged
 between releases a heading spans; a release that changes it gets new results.
 
-### Current: prompt of v0.14.0 (unchanged since)
+### Current: prompt of v0.19.0
 
-Run on 2026-10-04 with `--persona example` and `--max-tokens 2400`:
+Run on 2026-10-06 with `--suite all --runs 3 --persona example --max-tokens 2400`, the new
+prompt and the v0.14.0 prompt (shipped until v0.18.0) side by side on the same bench. The
+prompt now opens both examples' `CONTEXT` with the configured persona (#49), tells the inputs
+step to state an assumption instead of asking when step 1 says execute (#46), and words the
+independent review so it can run without a separate agent (#46):
+
+| Setup | Tier | Prompt | core | edge | persona in `CONTEXT` | `rep` | kept | p50 | p95 | $ per rewrite |
+|-------|------|--------|------|------|----------------------|-------|------|-----|-----|---------------|
+| `google/gemini-3.5-flash-lite` @ `google-ai-studio/flex`, effort `minimal` | standard (default) | v0.19.0 | 24/24 | 75/84 | 105/105 | 2 | 0.99 | 2.0 s | 2.9 s | 0.0012 |
+| | | v0.14.0 | 23/24 | 69/84 | 100/105 | 7 | 1.00 | 2.0 s | 3.1 s | 0.0012 |
+| `openai/gpt-6-luna` @ `openai`, effort `low` | pro (default) | v0.19.0 | 23/24 | 81/84 | 105/105 | 0 | 1.00 | 5.8 s | 10.8 s | 0.0004 |
+| | | v0.14.0 | 22/24 | 74/84 | 96/105 | 0 | 1.00 | 6.5 s | 10.7 s | 0.0003 |
+
+By kind (all 108 runs per row; Wilson 95% intervals in the report), the new prompt against
+the old: flash-lite `struct` 108 and 108, `branch` 101 and 97 of 102, `draft` 100 and 97;
+gpt-6-luna `struct` 107 and 108, `branch` 101 and 100 of 102, `draft` 106 and 98. Every
+kind's intervals overlap; the clear difference is the persona rate. The old prompt ran on the
+bench of v0.18.0, which differs only in the review phrase it looks for. The persona is scored on the 35 drafts that state no
+role of their own. The new inputs-step sentence was copied word for word in 215 of 216
+rewrites. gpt-6-luna's one `struct` failure is a paraphrase of the new review wording ("Use a
+separate supplier communications domain expert if you can run one"), and one more rewrite put
+the domain in place of "that domain"; the old wording was copied exactly in all 53 of its
+independent reviews. The remaining failures are the known gaps: flash-lite summarises `pasted`
+and `outage` instead of copying them, and both models give `cap-thread` the `.md` line.
+
+A blind pairwise comparison by Opus judges (run 1 of each draft and model, 72 pairs, A/B order
+randomised, the changed fixed wordings masked in both) preferred the new prompt in 24 pairs and
+the old in 30, with 18 ties (flash-lite 12, 14 and 10; gpt-6-luna 12, 16 and 8). Five of the
+new prompt's wins were the persona; without the six pairs judged on it, the old prompt led 29
+to 19, a difference a sign test does not separate from chance (p = 0.19, one run per pair).
+The judges named run-to-run differences (an invented detail, a sharper work step) rather than
+anything the change touches.
+
+### Prompt of v0.14.0 (to v0.18.0)
+
+Run on 2026-10-04 with `--persona example` and `--max-tokens 2400`, before the persona and
+"None"/`[REVIEW` checks:
 
 | Setup | Tier | core | edge | kept | p50 | p95 | $ per rewrite |
 |-------|------|------|------|------|-----|-----|---------------|
