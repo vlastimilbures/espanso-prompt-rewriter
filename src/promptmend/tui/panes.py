@@ -44,7 +44,7 @@ from .console import (
     transcript,
 )
 from .home import TAB_LABELS, HomeRow, headline, home_rows
-from .modals import ConfirmModal, Field, FormModal, TextModal
+from .modals import ConfirmModal, Field, FormModal, PickModal, TextModal
 from .state import State, current_plan
 
 if TYPE_CHECKING:
@@ -253,7 +253,12 @@ class HomePane(Pane):
     def compose(self) -> ComposeResult:
         yield Static("Checking…", markup=False, id="home-headline")
         yield Static("", id="home-rows")
-        yield _buttons(("home-reload", "Check again"), ("home-previous", "Previous install…"))
+        yield _buttons(
+            ("home-reload", "Check again"),
+            ("home-previous", "Previous install…"),
+            ("home-recipes", "Recipes…"),
+            ("home-copy", "Copy command"),
+        )
         # The command line (#111): completes, explains and runs a command (console.POLICY).
         help_line = Static(describe(""), id="home-command-help", markup=False)
         yield CommandLine(help_line, host=self)
@@ -270,8 +275,12 @@ class HomePane(Pane):
         self.query_one("#home-headline", Static).update(home_headline(self.rows))
         self.query_one("#home-rows", Static).update(home_table(self.rows))
 
+    def setup(self) -> None:
+        self.query_one("#home-copy", Button).disabled = not self.manage.session
+
     def show_session(self, entries: Sequence[teach.Entry]) -> None:
         self.query_one("#home-session", Static).update(session_text(entries))
+        self.query_one("#home-copy", Button).disabled = not entries
 
     def run_line(self, argv: tuple[str, ...], runner: Runner) -> None:
         """Run ``argv`` in a thread; its output goes below the command line when it ends.
@@ -348,6 +357,34 @@ class HomePane(Pane):
     @on(Button.Pressed, "#home-previous")
     def _previous(self) -> None:
         self.manage.open_previous()
+
+    @on(Button.Pressed, "#home-recipes")
+    def _recipes(self) -> None:
+        """Pick a recipe to put on the command line (#111); nothing runs until Enter, and
+        Cancel leaves the line as it was."""
+        width = max(len(teach.equivalent(*r.argv)) for r in teach.RECIPES)
+        choices = [
+            (f"$ {teach.equivalent(*r.argv):<{width}}  {r.what}", teach.line(*r.argv))
+            for r in teach.RECIPES
+        ]
+
+        def picked(line: str | None) -> None:
+            if line is not None:
+                self.query_one(CommandLine).prefill(line)
+
+        self.app.push_screen(
+            PickModal("Put a recipe on the command line (Enter there runs it)", choices), picked
+        )
+
+    @on(Button.Pressed, "#home-copy")
+    def _copy(self) -> None:
+        """Copy this session's latest command, in full (it pastes into a script), through the
+        terminal (Textual's OSC 52): written only, the clipboard is never read."""
+        if not self.manage.session:
+            return
+        command = self.manage.session[-1].command
+        self.app.copy_to_clipboard(command)
+        self.report(f"Copied: {command}")
 
 
 # --- Providers ----------------------------------------------------------------------------

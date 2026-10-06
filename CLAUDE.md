@@ -357,7 +357,10 @@ Rules for agents:
   command=teach.equivalent(...))` (and `attempt(command=)`, `PreviousInstallScreen.report`)
   shows a muted `$ promptmend …` above the result and appends to `ManageApp.session`,
   which Home shows as a read-only log (`session_text()`, latest `SESSION_LINES`), or
-  `teach.RECIPES` while it is empty. A value that looks like a key is shown as
+  `teach.RECIPES` while it is empty. Home's "Recipes…" (`modals.PickModal`, Cancel focused)
+  only prefills the command line (`CommandLine.prefill(teach.line(*argv))`), never runs;
+  "Copy command" (disabled while the session is empty) copies the latest `Entry.command`
+  in full through `App.copy_to_clipboard()` (OSC 52, write only; never pyperclip). A value that looks like a key is shown as
   `<value withheld>` (`console.shown_arg()`). `tui/console.py` (#111 stage 2) is Home's command line
   (`CommandLine`, `#home-command`; `c` on `MainScreen` switches to Home and focuses it, and
   nothing is focused at launch): `resolve()` walks the Click tree (no callback runs; the

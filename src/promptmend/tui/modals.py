@@ -1,4 +1,5 @@
-"""The interface's dialogs: a confirmation, a read-only text view (a diff) and a small form.
+"""The interface's dialogs: a confirmation, a read-only text view (a diff), a small form and
+a list to pick from (Home's recipes).
 
 A destructive action always goes through one of them: nothing is deleted, overwritten or
 deployed until its button is pressed, and Cancel (or Escape, or n) is the focused default.
@@ -10,12 +11,14 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import ClassVar
 
+from rich.text import Text
 from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Label, Select, Static
+from textual.widgets import Button, Input, Label, OptionList, Select, Static
+from textual.widgets.option_list import Option
 
 
 @dataclass(frozen=True)
@@ -102,6 +105,38 @@ class TextModal(_Dialog[None]):
 
     @on(Button.Pressed, "#close")
     def _close(self) -> None:
+        self.dismiss(None)
+
+
+class PickModal(_Dialog[str | None]):
+    """A list to pick one line from (Home's recipes); returns the picked value, or None when
+    cancelled. Picking changes nothing by itself. Cancel has the focus when it opens, as in
+    every dialog; Tab (or shift+Tab) reaches the list, Enter or a click picks."""
+
+    def __init__(self, title: str, choices: Sequence[tuple[str, str]], preview: str = "") -> None:
+        super().__init__(title, preview, None)
+        # (label, value) pairs; a label is plain text, never markup.
+        self.choices = choices
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield from self.heading()
+            yield OptionList(
+                *(Option(Text(label), id=str(n)) for n, (label, _) in enumerate(self.choices)),
+                id="pick",
+            )
+            with Horizontal(classes="buttons"):
+                yield Button("Cancel", id="cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#cancel", Button).focus()
+
+    @on(OptionList.OptionSelected, "#pick")
+    def _picked(self, event: OptionList.OptionSelected) -> None:
+        self.dismiss(self.choices[event.option_index][1])
+
+    @on(Button.Pressed, "#cancel")
+    def _cancel(self) -> None:
         self.dismiss(None)
 
 

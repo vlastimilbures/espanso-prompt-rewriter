@@ -70,6 +70,8 @@ NOTES = {
 # Buttons with no command of their own: they move around the interface or measure it.
 NO_COMMAND = {
     "import-check": "Imports the CLI in a fresh interpreter and times it; no command.",
+    "home-recipes": "Puts a recipe on the command line below; runs nothing until Enter.",
+    "home-copy": "Copies the session's latest command to the clipboard (terminal: OSC 52).",
     "previous-enter": "",
     "previous-skip": "",
     "previous-close": "",
@@ -99,8 +101,16 @@ INTRO_OFF = ("config", "set", "PROMPT_UI_INTRO", "false")
 
 def equivalent(*argv: str) -> str:
     """The command line for ``argv``, quoted for a POSIX shell; placeholders as they are."""
-    words = [a if PLACEHOLDER.fullmatch(a) or a == WITHHELD else shlex.quote(a) for a in argv]
-    return " ".join([PROGRAM, *words])
+    return " ".join([PROGRAM, *_quoted(argv)])
+
+
+def line(*argv: str) -> str:
+    """``argv`` as Home's command line takes it: equivalent() without the program name."""
+    return " ".join(_quoted(argv))
+
+
+def _quoted(argv: tuple[str, ...]) -> list[str]:
+    return [a if PLACEHOLDER.fullmatch(a) or a == WITHHELD else shlex.quote(a) for a in argv]
 
 
 def tooltip(button_id: str) -> str | None:
