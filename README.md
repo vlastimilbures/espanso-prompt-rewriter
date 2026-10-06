@@ -296,12 +296,19 @@ Or keep a `.env`: move it to the config folder (`~/.config/promptmend/.env`,
 command `prompt-workflow`; both are now `promptmend`. Switch over once:
 
 ```bash
-uv tool uninstall espanso-prompt-rewriter   # the triggers stop working until the deploy
+uv tool uninstall espanso-prompt-rewriter   # first; the triggers stop working until the deploy
 uv tool install promptmend==<version> \
   -c https://github.com/vlastimilbures/espanso-prompt-rewriter/releases/download/v<version>/constraints.txt
 promptmend espanso deploy                   # the matches now call promptmend
 promptmend doctor
 ```
+
+Uninstall the old tool first: both install a `prompt-workflow` launcher in the same folder,
+so uv refuses to install `promptmend` next to it, and if `--force` made it, uninstalling the
+old tool afterwards deletes the `prompt-workflow` alias that now belongs to `promptmend`. If
+you already installed with `--force`, run `uv tool uninstall espanso-prompt-rewriter`, then
+the `uv tool install --force promptmend==<version> …` line again. The install scripts
+uninstall the old tool themselves.
 
 The deploy counts the match files an earlier release wrote (stamped `# prompt-workflow …`) as
 its own and `stale`, so it replaces them without asking. Until 1.0.0, `prompt-workflow` stays

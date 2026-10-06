@@ -25,9 +25,14 @@ All notable changes to this project are documented here. The format follows
   placeholder in the packaged match files is unchanged.
 - OpenRouter calls carry `X-Title: promptmend` (was `espanso-prompt-rewriter`; the benchmark
   sends `promptmend-bench`), so the dashboard lists them under the new name.
-- Upgrade: `uv tool uninstall espanso-prompt-rewriter` (the triggers stop until the deploy),
-  `uv tool install promptmend==<version> -c <the release's constraints.txt>`, then
-  `promptmend espanso deploy` and `promptmend doctor`. `doctor` warns while the deployed
+- Upgrade: first `uv tool uninstall espanso-prompt-rewriter` (the triggers stop until the
+  deploy), then `uv tool install promptmend==<version> -c <the release's constraints.txt>`,
+  `promptmend espanso deploy` and `promptmend doctor`. The old tool must go first: both
+  install a `prompt-workflow` launcher, so uv refuses `promptmend` next to it, and after a
+  `--force` install, uninstalling the old tool later deletes the alias. If you already used
+  `--force`, run `uv tool uninstall espanso-prompt-rewriter`, then install `promptmend` again
+  with `--force`. `scripts/install_macos.sh` and `install_windows.ps1` uninstall
+  `espanso-prompt-rewriter` themselves (one line says so) before installing. `doctor` warns while the deployed
   matches still call a `prompt-workflow` launcher, and its previous-install check, `setup` and
   `profiles migrate` still find a checkout from before the rename (its old project name,
   `src/prompt_workflow/prompts`, a `.venv/bin/prompt-workflow` launcher or uv receipt).

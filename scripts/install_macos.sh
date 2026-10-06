@@ -23,6 +23,15 @@ done
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_dir"
 
+# The tool's name before the rename (#169). Its `prompt-workflow` launcher sits where this
+# install puts the alias of the same name: uv refuses to install over it, and after a --force
+# install, uninstalling the old tool later would delete the alias. Remove the old tool first.
+tools="$(uv tool list 2>/dev/null || true)"
+if grep -q '^espanso-prompt-rewriter ' <<<"$tools"; then
+  echo "Uninstalling espanso-prompt-rewriter, the tool's old name (now promptmend)."
+  uv tool uninstall espanso-prompt-rewriter
+fi
+
 # `uv tool install` ignores uv.lock, so pass the locked versions as constraints (#34). The
 # tool gets its own isolated environment; dev dependencies are not needed to deploy.
 constraints="$(mktemp)"
