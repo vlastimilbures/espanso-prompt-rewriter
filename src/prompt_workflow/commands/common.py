@@ -16,6 +16,7 @@ from typing import Any, NoReturn
 
 import typer
 
+from .. import config
 from ..config import DEFAULT_SOURCE, ENV_SOURCE, ConfigLayers, Entry, Settings, secret_names
 from ..redaction import safe_repr
 
@@ -172,18 +173,19 @@ def show_findings(layers: ConfigLayers) -> None:
 
 
 def legacy_env() -> str | None:
-    """The .env PROMPT_WORKFLOW_ENV names: then it alone is read, never config.toml or the
-    secret store, so a command that would write them refuses."""
-    return os.environ.get("PROMPT_WORKFLOW_ENV") or None
+    """The .env PROMPTMEND_ENV (or its alias) names: then it alone is read, never config.toml
+    or the secret store, so a command that would write them refuses."""
+    return config.env_file_override()
 
 
 def refuse_in_legacy_mode(what: str) -> None:
-    """Raise CommandError when PROMPT_WORKFLOW_ENV means ``what`` would not be read."""
+    """Raise CommandError when PROMPTMEND_ENV means ``what`` would not be read."""
     path = legacy_env()
     if path:
+        name = config.env_file_var()
         raise CommandError(
-            f"PROMPT_WORKFLOW_ENV is set ({path}), so {what} would not be read; edit that file, "
-            "or unset PROMPT_WORKFLOW_ENV and run `prompt-workflow config migrate`"
+            f"{name} is set ({path}), so {what} would not be read; edit that file, "
+            f"or unset {name} and run `prompt-workflow config migrate`"
         )
 
 

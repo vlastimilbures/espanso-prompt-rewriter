@@ -1,7 +1,7 @@
 """Saved settings: config.toml, the secret store, and the .env migration (#84).
 
 Every file lives under tmp_path: conftest points HOME, XDG_CONFIG_HOME, APPDATA and the
-editable-install root there, and these tests unset PROMPT_WORKFLOW_ENV only through
+editable-install root there, and these tests unset PROMPTMEND_ENV only through
 ``saved_mode``.
 """
 
@@ -45,8 +45,8 @@ ANTHROPIC_VALUE = "-".join(["sk", "ant", "api03", "c0ffee" * 10])
 
 @pytest.fixture
 def saved_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Leave legacy mode (PROMPT_WORKFLOW_ENV unset); returns the per-test user config dir."""
-    monkeypatch.delenv("PROMPT_WORKFLOW_ENV")
+    """Leave legacy mode (PROMPTMEND_ENV unset); returns the per-test user config dir."""
+    monkeypatch.delenv("PROMPTMEND_ENV")
     directory = config._user_config_dir(os.environ)
     assert tmp_path in directory.parents
     directory.mkdir(parents=True)
@@ -137,7 +137,7 @@ def test_without_toml_env_still_applies_and_store_beats_it(saved_mode: Path, pro
     assert Settings.load().openrouter_api_key == OPENROUTER_VALUE
 
 
-# Legacy mode: the PROMPT_WORKFLOW_ENV file alone, exactly as before.
+# Legacy mode: the PROMPTMEND_ENV file alone, exactly as before.
 def test_legacy_mode_ignores_saved_files(tmp_path: Path) -> None:
     directory = config._user_config_dir(os.environ)
     _write(directory / "config.toml", 'OLLAMA_MODEL = "saved"\n')
@@ -281,7 +281,7 @@ def test_trigger_path_does_not_import_writer(saved_mode: Path, tmp_path: Path) -
         "import sys, prompt_workflow.cli as cli; cli.Settings.load(); "
         "print(sorted({'tomli_w', 'tomlkit', 'keyring'} & sys.modules.keys()))"
     )
-    env = {k: v for k, v in os.environ.items() if k != "PROMPT_WORKFLOW_ENV"}
+    env = {k: v for k, v in os.environ.items() if k != "PROMPTMEND_ENV"}
     proc = subprocess.run(
         [sys.executable, "-c", code], capture_output=True, text=True, env=env, timeout=60
     )
@@ -735,8 +735,8 @@ def test_migration_statuses(
     assert plan.status == "saved"
     with pytest.raises(MigrationError, match="already saved"):
         config_store.apply_migration(consent=plan.token)
-    monkeypatch.setenv("PROMPT_WORKFLOW_ENV", str(tmp_path / ".env"))
-    with pytest.raises(MigrationError, match="PROMPT_WORKFLOW_ENV is set"):
+    monkeypatch.setenv("PROMPTMEND_ENV", str(tmp_path / ".env"))
+    with pytest.raises(MigrationError, match="PROMPTMEND_ENV is set"):
         config_store.plan_migration()
 
 

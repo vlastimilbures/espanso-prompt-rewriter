@@ -97,8 +97,8 @@ def espanso(tmp_path: Path) -> Path:
 @pytest.fixture
 def env(monkeypatch: pytest.MonkeyPatch) -> MutableMapping[str, str]:
     """The process environment the tests run under (conftest's temp dirs), without a legacy
-    PROMPT_WORKFLOW_ENV and with a PATH that holds no prompt-workflow."""
-    monkeypatch.delenv("PROMPT_WORKFLOW_ENV", raising=False)
+    PROMPTMEND_ENV and with a PATH that holds no prompt-workflow."""
+    monkeypatch.delenv("PROMPTMEND_ENV", raising=False)
     monkeypatch.delenv("VIRTUAL_ENV", raising=False)
     monkeypatch.setattr(shutil, "which", lambda *a, **k: None)
     return os.environ
@@ -333,7 +333,7 @@ def test_legacy_mode_detects_nothing(
     tmp_path: Path, espanso: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     root = checkout(tmp_path)
-    monkeypatch.setenv("PROMPT_WORKFLOW_ENV", str(tmp_path / "legacy.env"))
+    monkeypatch.setenv("PROMPTMEND_ENV", str(tmp_path / "legacy.env"))
     found = previous_install.detect(runner=FakeRunner(), espanso_dir=espanso, entered=root)
     assert (found.candidates, found.gated) == ((), previous_install.LEGACY)
 
@@ -758,7 +758,7 @@ def test_copy_refuses_the_running_checkout(
 
 
 def test_copy_in_legacy_mode_is_refused(tmp_path: Path) -> None:
-    with pytest.raises(MigrationError, match="PROMPT_WORKFLOW_ENV is set"):
+    with pytest.raises(MigrationError, match="PROMPTMEND_ENV is set"):
         config_store.plan_migration(source=old_checkout(tmp_path))
 
 
@@ -894,8 +894,8 @@ def test_retire_in_legacy_mode_is_refused(
 ) -> None:
     root = old_checkout(tmp_path)
     _copy(root)
-    monkeypatch.setenv("PROMPT_WORKFLOW_ENV", str(root / ".env"))
-    with pytest.raises(MigrationError, match="PROMPT_WORKFLOW_ENV is set"):
+    monkeypatch.setenv("PROMPTMEND_ENV", str(root / ".env"))
+    with pytest.raises(MigrationError, match="PROMPTMEND_ENV is set"):
         config_store.plan_retire(root, espanso_dir=espanso)
 
 

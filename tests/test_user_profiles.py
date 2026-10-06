@@ -46,7 +46,7 @@ def _improve(*args: str) -> Result:
 
 # The directory sits next to the user's .env, in the config dir conftest points at tmp_path.
 def test_user_profiles_dir_is_in_the_config_dir(tmp_path: Path) -> None:
-    assert user_profiles_dir() == tmp_path / "config" / "prompt-workflow" / "profiles"
+    assert user_profiles_dir() == tmp_path / "config" / "promptmend" / "profiles"
 
 
 # A new name is usable with --profile and gets the persona rule like a built-in.
@@ -104,8 +104,8 @@ def test_override_without_a_file_keeps_the_builtin() -> None:
 # --profile cannot climb out of the directory, and a dotted name is not a profile.
 @pytest.mark.parametrize("name", ["../secret", "..", "a/b", "a.b", ".hidden", "a b", ""])
 def test_profile_name_cannot_leave_the_directory(tmp_path: Path, name: str) -> None:
-    (tmp_path / "config" / "prompt-workflow" / "secret.md").parent.mkdir(parents=True)
-    (tmp_path / "config" / "prompt-workflow" / "secret.md").write_text("leak", "utf-8")
+    (tmp_path / "config" / "promptmend" / "secret.md").parent.mkdir(parents=True)
+    (tmp_path / "config" / "promptmend" / "secret.md").write_text("leak", "utf-8")
     with pytest.raises(ValueError, match="Unknown profile"):
         system_prompt(name)
 

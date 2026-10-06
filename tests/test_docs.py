@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 import pytest
 from bench_module import bench
 
-from prompt_workflow.config import env_names
+from prompt_workflow.config import ENV_FILE_VARS, env_names
 
 if TYPE_CHECKING:
     from typer._click import Command, Context
@@ -33,10 +33,10 @@ def test_setting_is_documented(name: str) -> None:
     assert re.search(rf"^#? ?{name}=", example, re.MULTILINE), f"{name} missing from .env.example"
 
 
-# The README table documents nothing Settings does not read (PROMPT_WORKFLOW_ENV is read
-# by the .env loader itself).
+# The README table documents nothing Settings does not read (PROMPTMEND_ENV and its alias
+# PROMPT_WORKFLOW_ENV are read by the .env loader itself).
 def test_readme_documents_no_stale_settings() -> None:
-    assert _readme_config_rows() - {*env_names(), "PROMPT_WORKFLOW_ENV"} == set()
+    assert _readme_config_rows() - {*env_names(), *ENV_FILE_VARS} == set()
 
 
 # Every bench output directory the docs mention, and the bench's own default, is gitignored, so

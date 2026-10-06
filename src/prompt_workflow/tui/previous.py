@@ -41,7 +41,7 @@ INTRO = (
     "(the match files stay deployed)."
 )
 GATED = {
-    previous_install.LEGACY: "PROMPT_WORKFLOW_ENV is set, so that file holds the settings",
+    previous_install.LEGACY: "PROMPTMEND_ENV is set, so that file holds the settings",
     previous_install.SAVED: "settings are already saved in config.toml",
     previous_install.SECRETS: "a key is already saved in the secret store",
 }

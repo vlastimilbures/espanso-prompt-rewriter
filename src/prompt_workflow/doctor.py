@@ -41,6 +41,7 @@ CHECK_IDS = (
     "clipboard",
     "profiles",
     "previous_install",
+    "folders",
 )
 # Every key of each check's data, in every report: a check that could not run has them all
 # as None, so a consumer never meets a missing key.
@@ -79,6 +80,7 @@ DATA_KEYS = {
     "clipboard": ("read", "length", "concealed", "error"),
     "profiles": ("profile", "pro_profile", "user"),
     "previous_install": ("gated", "roots", "signals", "env_file", "retire_pending", "shadow"),
+    "folders": ("config_dir", "data_dir", "legacy", "conflicts"),
 }
 # The keys each check needs, by provider; -i-, -ip-, -if- and -iok- always use OpenRouter.
 _PROVIDER_KEYS = {"openrouter": "OPENROUTER_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
@@ -150,7 +152,7 @@ def _install_check(launcher: deploy.Launcher | None, error: str | None) -> Check
 
 
 def _config_check(layers: ConfigLayers, strict_error: str | None) -> Check:
-    legacy = os.environ.get("PROMPT_WORKFLOW_ENV")
+    legacy = config.env_file_override()
     files = [
         layer.source.removeprefix("file:")
         for layer in layers.layers
@@ -511,6 +513,49 @@ def _previous_install_check(
     return Check("previous_install", OK, "no previous install found", data)
 
 
+def _folders_check() -> Check:
+    """The user folders in use (#169). Doctor runs after the move (cli._LazyGroup), so a legacy
+    folder still in use means the move failed, and entries left in one are conflicts: the new
+    folder has its own, and nothing was overwritten."""
+    legacy: list[str] = []
+    conflicts: list[str] = []
+    notes: list[str] = []
+    for new, old in (config.config_folders(), config.data_folders()):
+        in_use = config.folder_in_use((new, old)) == old
+        if in_use:
+            legacy.append(str(old))
+        variable = config.env_file_inside(old) if old.is_dir() else None
+        if old.is_symlink():
+            notes.append(f"{old} is a symlink, which is never moved: move it to {new} by hand")
+        elif variable:
+            notes.append(
+                f"{variable} names a file inside {old}, so it is not moved: point {variable} "
+                f"at the same file under {new}, then run any command"
+            )
+        elif in_use and os.path.lexists(new):
+            notes.append(f"{new} is not a folder, so {old} stays in use: move {new} away")
+        elif in_use:
+            notes.append(f"{old} is still in use under the old name (the move failed)")
+        elif old.is_dir():
+            conflicts.extend(str(entry) for entry in sorted(old.iterdir()))
+    data = {
+        "config_dir": str(config._user_config_dir()),
+        "data_dir": str(config.user_data_dir()),
+        "legacy": legacy,
+        "conflicts": conflicts,
+    }
+    if conflicts:
+        notes.append(
+            f"left in the old folder, since the new one has its own: {', '.join(conflicts)}; "
+            "merge or remove them by hand"
+        )
+    if notes:
+        return Check("folders", WARN, "; ".join(notes), data)
+    return Check(
+        "folders", OK, f"settings in {data['config_dir']}, data in {data['data_dir']}", data
+    )
+
+
 def _safely(check_id: str, build: Callable[[], Check]) -> Check:
     """One check that fails on its own never stops the report."""
     try:
@@ -580,6 +625,7 @@ def run(
     checks.append(
         _safely("previous_install", lambda: _previous_install_check(run_command, target, current))
     )
+    checks.append(_safely("folders", _folders_check))
     return Report(tuple(checks))
 
 
@@ -594,6 +640,7 @@ HEAVY_MODULES = (
     "prompt_workflow.doctor",
     "prompt_workflow.config_store",
     "prompt_workflow.previous_install",
+    "prompt_workflow.relocate",
 )
 IMPORT_TIMEOUT = 30
 _IMPORT_PROBE = """

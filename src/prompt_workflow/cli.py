@@ -67,6 +67,7 @@ class _LazyGroup(TyperGroup):
             return super().make_context(*args, **kwargs)
 
     def invoke(self, ctx: Context) -> Any:
+        _relocate_folders(self, ctx)
         with _redacted_usage_errors():
             return super().invoke(ctx)
 
@@ -91,6 +92,30 @@ class _LazyGroup(TyperGroup):
         module_name, attr = _LAZY_COMMANDS[cmd_name]
         module = importlib.import_module(f".commands.{module_name}", __package__)
         return typer.main.get_command(getattr(module, attr))
+
+
+# The commands Espanso runs: they never move a folder (config.folder_in_use() keeps them on the
+# legacy one until a management command has moved it).
+_TRIGGER_COMMANDS = frozenset({"improve", "persona"})
+
+
+def _relocate_folders(group: _LazyGroup, ctx: Context) -> None:
+    """Move the legacy user folders (relocate.py, #169) before any management command or the
+    interface runs, one stderr line per step. Not for the triggers, completion or a --help
+    (--version is eager and exits before this)."""
+    args = [*ctx._protected_args, *ctx.args]
+    if (
+        ctx.resilient_parsing
+        or not args
+        or args[0] in _TRIGGER_COMMANDS
+        or args[0] not in group.list_commands(ctx)
+        or {"--help", "-h"} & set(args)
+    ):
+        return
+    from .relocate import migrate_folders
+
+    for line in migrate_folders():
+        typer.echo(line, err=True)
 
 
 @contextlib.contextmanager

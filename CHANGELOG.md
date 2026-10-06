@@ -7,6 +7,9 @@ All notable changes to this project are documented here. The format follows
 ## Unreleased
 
 ### Added
+- `prompt-workflow doctor` has a `folders` check (#169): it warns while an old
+  `prompt-workflow` folder is still in use, or holds entries left behind because the new
+  folder has its own.
 - `OPENROUTER_DATA_COLLECTION` (`allow` or `deny`, empty by default) sets OpenRouter's
   `provider.data_collection` routing field on every OpenRouter call, both tiers (#29). `deny`
   routes only to endpoints that do not store or train on requests; empty, the default, leaves
@@ -67,6 +70,19 @@ All notable changes to this project are documented here. The format follows
   (#174).
 
 ### Changed
+- The user folders are named `promptmend` now (#169): settings in `~/.config/promptmend/`
+  (`%APPDATA%\promptmend\`), the usage history and deploy manifest in
+  `~/.local/share/promptmend/` (`%LOCALAPPDATA%\promptmend\`). The first management command
+  or the interface (not `improve`, `persona`, help, `--version`, an unknown command or shell
+  completion) renames the old `prompt-workflow` folders and prints one line per folder on
+  stderr; until then the triggers keep using the old ones. A config folder holding the `.env`
+  that `PROMPTMEND_ENV`/`PROMPT_WORKFLOW_ENV` names, or a symlinked old folder, is not moved
+  (doctor says what to do). A rename keeps `secrets.toml` private; when both folders
+  exist only what the new one lacks is moved and nothing is overwritten; `migration.json`'s
+  paths follow, so `config rollback` still works; a move that fails is retried by the next
+  command. README "Updating" describes it.
+- `PROMPTMEND_ENV` names the legacy-mode `.env` (#169). `PROMPT_WORKFLOW_ENV` still works as
+  its old name; when both are set, `PROMPTMEND_ENV` wins.
 - Interface: the intro no longer closes by itself after 0.8 s; it stays until you press
   Enter, Escape or any other key, or click, and that key does nothing else (#173). A muted
   line under it says so and names the command that turns it off:

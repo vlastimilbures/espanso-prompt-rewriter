@@ -223,6 +223,7 @@ espanso-prompt-rewriter/
 │   ├── config.py                 Settings from the environment, config.toml or .env
 │   ├── config_files.py           reads config.toml/secrets.toml; atomic, private writes
 │   ├── config_store.py           saves settings and secrets; .env migration and rollback
+│   ├── relocate.py               moves the user folders from prompt-workflow to promptmend
 │   ├── factory.py                make_provider(): builds providers, decides which are gated
 │   ├── gate.py                   GatedProvider: scans every draft that can leave the machine
 │   ├── clipboard_guard.py        refuses password-manager (concealed) clipboard items
@@ -270,8 +271,8 @@ espanso-prompt-rewriter/
 ### Add a profile
 
 A profile for your own use does not belong in the repo: put it in the user profile directory,
-`~/.config/prompt-workflow/profiles/<name>.md` (`$XDG_CONFIG_HOME/prompt-workflow/profiles/`
-when `XDG_CONFIG_HOME` is set on macOS or Linux; `%APPDATA%\prompt-workflow\profiles\` on
+`~/.config/promptmend/profiles/<name>.md` (`$XDG_CONFIG_HOME/promptmend/profiles/`
+when `XDG_CONFIG_HOME` is set on macOS or Linux; `%APPDATA%\promptmend\profiles\` on
 Windows), where an upgrade cannot replace it. See
 [README](README.md#profiles-and-persona); a same-named file overrides a built-in only when
 `PROMPT_PROFILE_OVERRIDES` lists it. `profiles.migrate_profiles()` copies profiles a checkout

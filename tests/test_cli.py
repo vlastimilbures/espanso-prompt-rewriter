@@ -533,7 +533,7 @@ def test_output_is_utf8_under_legacy_code_page(tmp_path: Path) -> None:
         **os.environ,
         "PYTHONIOENCODING": "cp1252",
         "PROMPT_PERSONA": persona,
-        "PROMPT_WORKFLOW_ENV": str(tmp_path / ".env"),
+        "PROMPTMEND_ENV": str(tmp_path / ".env"),
     }
     proc = subprocess.run(
         [sys.executable, "-m", "prompt_workflow.cli", "persona"],
@@ -707,8 +707,8 @@ def test_persona_survives_an_unrelated_setting_error(tmp_path: Path) -> None:
 def test_persona_survives_a_broken_secret_store(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.delenv("PROMPT_WORKFLOW_ENV")
-    directory = tmp_path / "config" / "prompt-workflow"
+    monkeypatch.delenv("PROMPTMEND_ENV")
+    directory = tmp_path / "config" / "promptmend"
     directory.mkdir(parents=True)
     (directory / "config.toml").write_text('PROMPT_PERSONA = "I am a tester."\n')
     (directory / "secrets.toml").write_text("not = = toml\n")
@@ -722,8 +722,8 @@ def test_persona_placeholder_when_the_persona_cannot_be_read(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, broken: str
 ) -> None:
     if broken == "config.toml":
-        monkeypatch.delenv("PROMPT_WORKFLOW_ENV")
-        directory = tmp_path / "config" / "prompt-workflow"
+        monkeypatch.delenv("PROMPTMEND_ENV")
+        directory = tmp_path / "config" / "promptmend"
         directory.mkdir(parents=True)
         (directory / "config.toml").write_text('PROMPT_PERSONA = "I am a tester."\nx = = 1\n')
     else:
@@ -737,8 +737,7 @@ def test_undecodable_env_is_a_marker(tmp_path: Path, fake_http: FakeHttp) -> Non
     result = improve("--provider", "ollama", "--source", "argument", "--text", "CUST-123456")
     assert result.exit_code == 0
     assert result.stdout == (
-        "[prompt-workflow: the .env named by PROMPT_WORKFLOW_ENV is not UTF-8 text; "
-        "save it as UTF-8]"
+        "[prompt-workflow: the .env named by PROMPTMEND_ENV is not UTF-8 text; save it as UTF-8]"
     )
     assert fake_http.calls == []
 

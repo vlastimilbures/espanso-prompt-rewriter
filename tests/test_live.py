@@ -19,7 +19,7 @@ from bench_module import GOOD, bench
 from typer.testing import CliRunner
 
 from prompt_workflow.cli import app
-from prompt_workflow.config import read_env_file
+from prompt_workflow.config import ENV_FILE_VARS, read_env_file
 
 if TYPE_CHECKING:
     from conftest import FakeHttp
@@ -41,9 +41,9 @@ def _has_key() -> bool:
 
 def _improve(draft: str) -> subprocess.CompletedProcess[str]:
     # Run the CLI in a fresh process, the way Espanso does. The autouse fixture stripped
-    # provider env vars and pointed PROMPT_WORKFLOW_ENV at a temp file; drop that so the
-    # CLI finds the repo .env, which is what configures this call.
-    env = {k: v for k, v in os.environ.items() if k != "PROMPT_WORKFLOW_ENV"}
+    # provider env vars and pointed PROMPTMEND_ENV at a temp file; drop that (and its alias)
+    # so the CLI finds the repo .env, which is what configures this call.
+    env = {k: v for k, v in os.environ.items() if k not in ENV_FILE_VARS}
     return subprocess.run(
         [sys.executable, "-m", "prompt_workflow.cli", *IMPROVE],
         input=draft,

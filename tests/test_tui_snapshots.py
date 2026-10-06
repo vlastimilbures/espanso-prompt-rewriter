@@ -22,7 +22,7 @@ from typing import Any
 
 import pytest
 
-from prompt_workflow import assets, deploy, doctor, previous_install
+from prompt_workflow import assets, config, deploy, doctor, previous_install
 from prompt_workflow.config import ConfigLayers
 from prompt_workflow.history import StatsRow
 from prompt_workflow.prompt_builder import UserProfile
@@ -186,7 +186,11 @@ def fixed_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(app_module, "__version__", VERSION)
     # About's runtime line (#112) differs by CI runner.
     monkeypatch.setattr(brand, "runtime", lambda: {"python": "3.14.0", "textual": "8.2.8"})
-    monkeypatch.delenv("PROMPT_WORKFLOW_ENV")
+    monkeypatch.delenv("PROMPTMEND_ENV")
+    # The folders shown (About, History, Profiles) keep their legacy name until the rename
+    # (#169) regenerates the snapshots: no /home/me folder exists, so the new name would show.
+    # TODO(#169 PR B): regenerate with the promptmend paths.
+    monkeypatch.setattr(config, "APP_DIR", config.LEGACY_APP_DIR)
     monkeypatch.setenv("XDG_CONFIG_HOME", f"{HOME}/.config")
     monkeypatch.setenv("XDG_DATA_HOME", f"{HOME}/.local/share")
 
