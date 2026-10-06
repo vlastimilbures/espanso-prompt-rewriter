@@ -25,16 +25,10 @@ from promptmend.tui.app import ManageApp
 KEY = "sk-or-v1-" + "ab12" * 16
 SETTINGS = set(config.env_names()) - set(config.secret_names())
 SECRETS = set(config.secret_names())
-# The real runner, for the one test that starts a child; every other test gets a refusal.
+# The real runner, kept before conftest's isolated_env replaces console.run with a refusal
+# in every test: only the runner tests (subprocess.run faked) and the one --version smoke
+# test call it, on purpose.
 REAL_RUN = console.run
-
-
-@pytest.fixture(autouse=True)
-def no_real_child(monkeypatch: pytest.MonkeyPatch) -> None:
-    def refuse(argv: Sequence[str]) -> console.Ran:
-        raise AssertionError(f"a test started a real promptmend {list(argv)}")
-
-    monkeypatch.setattr(console, "run", refuse)
 
 
 # --- Candidates -----------------------------------------------------------------------------
@@ -515,6 +509,54 @@ def test_policy_decisions(line: str, kind: str, argv: tuple[str, ...] | None) ->
         assert decision.message.startswith("Not from here:")
 
 
+# --help or --dry-run taken as another option's value: the parser did not read them as
+# flags, so they decide nothing (review of #111 PR 5).
+BYPASSES = {
+    "improve --profile --help": console.REFUSE,
+    "persona --trigger-id --help": console.REFUSE,
+    "setup --migrate-from --help": console.TERMINAL,
+    "espanso deploy --launcher --help --yes": console.TERMINAL,
+    "espanso detach --espanso-dir --help --yes": console.TERMINAL,
+    "history prune --older-than --help --yes": console.DIALOG,
+    "espanso deploy --espanso-dir --dry-run --yes": console.TERMINAL,
+    "espanso deploy --launcher --dry-run --yes": console.TERMINAL,
+    "config migrate --from --dry-run --yes": console.TERMINAL,
+}
+
+
+@pytest.mark.parametrize("line", BYPASSES)
+def test_a_swallowed_help_or_dry_run_never_runs(line: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert _decide(line).kind == BYPASSES[line]
+    words = console.split(line)
+    assert not console.runnable(words)
+
+    def spawn(*_: Any, **__: Any) -> Any:
+        raise AssertionError("spawned")
+
+    monkeypatch.setattr(subprocess, "run", spawn)
+    with pytest.raises(ValueError, match="refused to run"):
+        REAL_RUN(words)
+
+
+def test_runnable_is_a_fresh_decision_on_the_exact_argv() -> None:
+    assert console.runnable(["doctor", "--no-clipboard"])
+    assert not console.runnable(["doctor"])  # decide() would add --no-clipboard
+    assert console.runnable(["--version"])
+    assert console.runnable(["config", "set", "--help"])
+    assert console.runnable(["espanso", "deploy", "--dry-run"])
+    for argv in (
+        ["improve"],
+        ["espanso", "deploy"],
+        ["espanso", "deploy", "--espanso-dir", "/e", "--dry-run"],
+        ["secrets", "set", "OPENROUTER_API_KEY"],
+        ["history", "reset", "--yes"],
+        ["ui"],
+        ["doctor", "extra"],
+        ["config"],
+    ):
+        assert not console.runnable(argv), argv
+
+
 def test_dialog_decisions_carry_values_and_ignored_options() -> None:
     prune = _decide("history prune --older-than 9 -y")
     assert prune.values["older_than"] == "9"
@@ -542,6 +584,8 @@ def test_secrets_set_takes_only_a_key_name() -> None:
         ["OPENROUTER_API_KEY", "--stdin"],
         ["not-a-key-name"],
         [KEY],
+        ["OPENROUTER_API_KEY", "--help", "Hunter2xyz"],
+        ["--help", "Hunter2xyz"],
     ):
         assert console.refused_secret(["secrets", "set", *rest]), rest
 
@@ -726,8 +770,43 @@ def test_refused_lines_run_nothing(line: str, expected: str) -> None:
     drive(scenario)
 
 
+@pytest.mark.parametrize("line", BYPASSES)
+def test_bypass_lines_start_nothing_from_the_interface(line: str) -> None:
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        fake = FakeRun()
+        _line(app).runner = fake
+        await pilot.press("c")
+        _line(app).value = line
+        await pilot.pause()
+        await pilot.press("enter")
+        await settle(pilot)
+        assert fake.calls == []
+        assert not _home(app).running
+
+    drive(scenario)
+
+
+def test_run_line_refuses_what_a_fresh_parse_would_not_run() -> None:
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        fake = FakeRun()
+        _home(app).run_line(("improve", "--profile", "--help"), fake)
+        await settle(pilot)
+        assert fake.calls == []
+        assert not _home(app).running
+        assert _home(app).last_message.startswith("error: refused to run")
+
+    drive(scenario)
+
+
 @pytest.mark.parametrize(
-    "rest", ["OPENROUTER_API_KEY my-value", "OPENROUTER_API_KEY --stdin", "hunter2", KEY]
+    "rest",
+    [
+        "OPENROUTER_API_KEY my-value",
+        "OPENROUTER_API_KEY --stdin",
+        "hunter2",
+        KEY,
+        "OPENROUTER_API_KEY --help Hunter2xyz",
+    ],
 )
 def test_secrets_set_with_a_value_is_cleared_and_not_kept(rest: str) -> None:
     async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:

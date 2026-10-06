@@ -335,27 +335,45 @@ def _option(word: str) -> str:
     return word.split("=", 1)[0]
 
 
+def _terminal_only(found: Resolved, argv: Sequence[str]) -> bool:
+    """A TERMINAL_ONLY option given: parsed with a value, or typed at all (as another
+    option's value too: never less strict than the parser)."""
+    names = {
+        param.name
+        for param in found.command.params
+        if isinstance(param, TyperOption) and set(param.opts) & set(TERMINAL_ONLY)
+    }
+    parsed = any(found.values.get(name or "") is not None for name in names)
+    return parsed or any(_option(w) in TERMINAL_ONLY for w in argv)
+
+
 def decide(found: Resolved, words: Sequence[str]) -> Decision:
     """What Enter does with ``words``, which ``found`` resolved: --help (and a bare
-    --version) always runs; else the command's POLICY rule."""
+    --version) always runs; else the command's POLICY rule. A leaf's --help and --dry-run
+    count only as the parser read them, never a word another option took as its value
+    (`improve --profile --help`)."""
     argv = tuple(words)
-    helps = set(found.command.get_help_option_names(found.context))
-    if helps & set(argv) or argv == (VERSION,):
-        return Decision(RUN, argv, found.path)
     if isinstance(found.command, TyperGroup):
+        # A group's words are its own flags only (resolve() refuses any other): no option
+        # there takes a value, so a word is what it says.
+        helps = set(found.command.get_help_option_names(found.context))
+        if helps & set(argv) or argv == (VERSION,):
+            return Decision(RUN, argv, found.path)
         name = " ".join(found.path) or teach.PROGRAM
         return Decision(REFUSE, argv, found.path, message=f"{name} needs a command.")
+    if found.values.get("help") is True:
+        return Decision(RUN, argv, found.path)
     rule = POLICY[found.path]
-    if rule.dry_run and DRY_RUN in argv:
+    terminal = f"Quit and run it in a terminal: $ {shown(argv)}"
+    if rule.kind != RUN and _terminal_only(found, argv):
+        return Decision(TERMINAL, argv, found.path, message=terminal)
+    if rule.dry_run and found.values.get("dry_run") is True:
         return Decision(RUN, argv, found.path)
     if rule.kind == RUN:
         if found.path == ("doctor",) and not set(CLIPBOARD) & set(argv):
             argv = (*argv, "--no-clipboard")
         return Decision(RUN, argv, found.path)
-    terminal = f"Quit and run it in a terminal: $ {shown(argv)}"
     if rule.kind == DIALOG:
-        if any(_option(w) in TERMINAL_ONLY for w in argv):
-            return Decision(TERMINAL, argv, found.path, message=terminal)
         ignored = tuple(w for w in argv if _option(w) in DIALOG_DECIDES)
         return Decision(DIALOG, argv, found.path, found.values, ignored=ignored)
     if rule.kind == TERMINAL:
@@ -365,12 +383,11 @@ def decide(found: Resolved, words: Sequence[str]) -> Decision:
 
 def refused_secret(words: Sequence[str]) -> bool:
     """`secrets set` with more than a key's name: a value typed after it, --stdin (there is
-    no stdin here) or a name that is no key's (perhaps the key itself). Never shown or kept."""
+    no stdin here) or a name that is no key's (perhaps the key itself). Never shown or kept;
+    --help adds no exception (`secrets set NAME --help VALUE` is refused too)."""
     if tuple(words[:2]) != SECRET_SET:
         return False
     rest = words[2:]
-    if "--help" in rest:
-        return False
     names = [w for w in rest if not w.startswith("-")]
     return (
         len(names) > 1
@@ -407,6 +424,22 @@ def _capped(output: str | bytes | None) -> str:
     return output
 
 
+def runnable(argv: Sequence[str]) -> bool:
+    """The last check before a child starts: a fresh parse of exactly ``argv`` decides RUN
+    for exactly ``argv``. A line that fails to parse, or that decide() would send to a
+    dialog, a terminal or a refusal, never runs."""
+    words = list(argv)
+    try:
+        found = resolve(words)
+    except UsageError:
+        loose = _loose(words)
+        if loose is None:
+            return False
+        found = loose
+    decision = decide(found, words)
+    return decision.kind == RUN and decision.argv == tuple(words)
+
+
 def run(argv: Sequence[str]) -> Ran:
     """``promptmend argv`` in a child process, as in a terminal but without one: no stdin,
     no colour, stderr with stdout, at most TIMEOUT seconds. Never a shell; ``-P``, so a
@@ -415,6 +448,8 @@ def run(argv: Sequence[str]) -> Ran:
     import subprocess
     import sys
 
+    if not runnable(argv):
+        raise ValueError(f"refused to run {shown(argv)}: the command line does not run it")
     try:
         done = subprocess.run(  # noqa: S603 - our own interpreter and module, an argv list
             [sys.executable, "-P", "-m", "promptmend.cli", *argv],

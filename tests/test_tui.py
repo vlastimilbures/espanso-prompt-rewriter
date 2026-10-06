@@ -2042,15 +2042,12 @@ def test_session_log_keeps_the_latest(espanso: FakeRunner) -> None:
 # --- The command line's dialogs (#111) --------------------------------------------------------
 
 
-@pytest.fixture
-def no_child(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A line that would run a child fails the test: these lines open dialogs only."""
+# A line that would start a real child fails the test (conftest refuses console.run).
+def test_conftest_refuses_the_real_runner_here() -> None:
     from promptmend.tui import console
 
-    def refuse(argv: Any) -> Any:
-        raise AssertionError(f"ran {argv}")
-
-    monkeypatch.setattr(console, "run", refuse)
+    with pytest.raises(AssertionError, match="a test started a real promptmend"):
+        console.run(["--version"])
 
 
 async def enter(app: ManageApp, pilot: Pilot[int], line: str) -> None:
@@ -2084,7 +2081,6 @@ def _files(folder: Path) -> list[tuple[Path, bytes]]:
 def test_command_line_opens_the_dialog_and_cancel_writes_nothing(
     saved: Path,
     espanso: FakeRunner,
-    no_child: None,
     line: str,
     tab: str,
     modal: type[Widget],

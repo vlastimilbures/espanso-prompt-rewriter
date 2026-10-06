@@ -32,7 +32,17 @@ from ..config_files import SecretStoreError
 from ..factory import PROVIDER_NAMES, routes
 from ..prompt_builder import ADDED, ALIASES, PROFILES, user_profiles_dir
 from . import teach
-from .console import CommandLine, Decision, Ran, Runner, describe, shown, shown_arg, transcript
+from .console import (
+    CommandLine,
+    Decision,
+    Ran,
+    Runner,
+    describe,
+    runnable,
+    shown,
+    shown_arg,
+    transcript,
+)
 from .home import TAB_LABELS, HomeRow, headline, home_rows
 from .modals import ConfirmModal, Field, FormModal, TextModal
 from .state import State, current_plan
@@ -264,7 +274,12 @@ class HomePane(Pane):
         self.query_one("#home-session", Static).update(session_text(entries))
 
     def run_line(self, argv: tuple[str, ...], runner: Runner) -> None:
-        """Run ``argv`` in a thread; its output goes below the command line when it ends."""
+        """Run ``argv`` in a thread; its output goes below the command line when it ends.
+        Only what a fresh parse decides to run starts (console.runnable(), checked again by
+        console.run() itself)."""
+        if not runnable(argv):
+            self.report(f"error: refused to run {shown(argv)}", error=True)
+            return
         self.running = True
         output = self.query_one("#home-output", RichLog)
         output.display = True
