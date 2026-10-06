@@ -8,7 +8,7 @@ import pytest
 from promptmend import factory
 from promptmend.config import Settings
 from promptmend.factory import PROVIDER_NAMES, make_provider, openrouter_routing
-from promptmend.gate import GatedProvider
+from promptmend.gate import GateBlocked, GatedProvider
 from promptmend.providers.anthropic import AnthropicProvider
 from promptmend.providers.base import Provider, ProviderError
 from promptmend.providers.ollama import OllamaProvider
@@ -653,3 +653,43 @@ def test_gate_local_cloud_block_message(
         "Blocked cloud call. Sensitive content detected: payment_card. Remove it."
     )
     assert fake_http.requests == []
+
+
+# force_remote (the Try tab's stub runs) only ever adds the gate: False never un-gates a
+# provider that leaves the machine, nor lifts PROMPT_LOCAL_ONLY.
+@pytest.mark.parametrize("name", ["ollama", "lmstudio"])
+def test_force_remote_false_never_ungates(name: str) -> None:
+    remote = replace(
+        Settings(),
+        ollama_base_url="https://ollama.example.com",
+        lmstudio_base_url="https://lmstudio.example.com/v1",
+    )
+    assert isinstance(make_provider(name, remote, force_remote=False), GatedProvider)
+    with pytest.raises(GateBlocked, match="PROMPT_LOCAL_ONLY"):
+        make_provider(name, replace(remote, local_only=True), force_remote=False)
+
+
+@pytest.mark.parametrize("name", ["ollama", "lmstudio"])
+def test_force_remote_gates_a_loopback_stand_in(name: str) -> None:
+    local = Settings()
+    assert not isinstance(make_provider(name, local), GatedProvider)
+    assert isinstance(make_provider(name, local, force_remote=True), GatedProvider)
+    with pytest.raises(GateBlocked, match="PROMPT_LOCAL_ONLY"):
+        make_provider(name, replace(local, local_only=True), force_remote=True)
+
+
+def test_check_base_url_matches_make_provider() -> None:
+    plain = replace(
+        Settings(),
+        openrouter_base_url="http://relay.example/api/v1",
+        anthropic_base_url="http://relay.example",
+        openrouter_api_key="k",
+        anthropic_api_key="k",
+    )
+    for name, setting in factory._HTTPS_ONLY.items():
+        with pytest.raises(GateBlocked, match=f"{setting} must be an https:// URL"):
+            factory.check_base_url(name, plain)
+        with pytest.raises(GateBlocked, match=f"{setting} must be an https:// URL"):
+            make_provider(name, plain)
+    factory.check_base_url("ollama", replace(plain, ollama_base_url="http://relay.example"))
+    factory.check_base_url("openrouter", Settings())

@@ -353,12 +353,13 @@ def rewrite(
     *,
     allow_flagged: bool = False,
     observer: UsageObserver | None = None,
-    remote: bool | None = None,
+    force_remote: bool = False,
 ) -> str:
     """Rewrite the draft ``raw`` with ``provider`` on ``cfg`` (the call's settings), as improve
     does once it has read its input; the interface's Try tab calls it too. Raises on any
-    failure (marker() words it), with what was known by then kept in ``ran``. ``remote`` is
-    make_provider()'s, for the Try tab's stub runs only; improve never passes it."""
+    failure (marker() words it), with what was known by then kept in ``ran``.
+    ``force_remote`` is make_provider()'s, for the Try tab's stub runs only; improve never
+    passes it."""
     # Checked before cleaning, which would otherwise run over a pasted multi-megabyte log.
     if len(raw) > MAX_DRAFT_CHARS:
         raise ProviderError(f"Input is too long ({len(raw)} chars, max {MAX_DRAFT_CHARS})")
@@ -371,11 +372,11 @@ def rewrite(
     name = profile or cfg.profile
     system = system_prompt(name, cfg.persona, cfg.profile_overrides)
     ran.profile_id = name if name in PROFILES else ALIASES.get(name, name)
-    if remote is None:  # improve: built exactly as it always has been
+    if not force_remote:  # improve: built exactly as it always has been
         built = make_provider(provider, cfg, allow_flagged=allow_flagged, observer=observer)
     else:
         built = make_provider(
-            provider, cfg, allow_flagged=allow_flagged, observer=observer, remote=remote
+            provider, cfg, allow_flagged=allow_flagged, observer=observer, force_remote=True
         )
     ran.built = built
     result = built.generate(draft, system)

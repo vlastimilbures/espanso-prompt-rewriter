@@ -634,3 +634,29 @@ def test_stub_latency_times_the_call_alone(monkeypatch: pytest.MonkeyPatch) -> N
 
     seen = drive(scenario)
     assert int(seen.usage.split(" ms")[0]) < 600
+
+
+@pytest.mark.parametrize(
+    ("provider", "name", "value"),
+    [
+        ("openrouter", "OPENROUTER_BASE_URL", "http://relay.example/api/v1"),
+        ("anthropic", "ANTHROPIC_BASE_URL", "http://relay.example"),
+    ],
+)
+def test_a_stub_run_checks_the_real_base_url(
+    provider: str,
+    name: str,
+    value: str,
+    loopback_only: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The real call would be refused (plain http to a cloud URL), so the stub run is too."""
+    monkeypatch.setenv(name, value)
+
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        await run(app, pilot, DRAFT, provider=provider)
+
+    seen = drive(scenario)
+    assert seen.result == f"[promptmend: {name} must be an https:// URL]"
+    assert seen.stub_requests == 0
+    assert loopback_only == []

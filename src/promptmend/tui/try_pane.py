@@ -28,7 +28,7 @@ from textual.widgets import Button, Label, Select, Static, TextArea
 from .. import cli, recorder, smoke
 from ..commands import common
 from ..config import TIERS, ConfigLayers, Settings, openrouter_only
-from ..factory import PROVIDER_NAMES, _leaves_machine
+from ..factory import PROVIDER_NAMES, _leaves_machine, check_base_url
 from ..prompt_builder import ADDED, PROFILES
 from . import teach
 from .modals import ConfirmModal
@@ -298,8 +298,10 @@ class TryPane(Pane):
         try:
             if command is None:
                 # Gated (and refused under PROMPT_LOCAL_ONLY) as the real settings would be,
-                # though the stub settings point every provider at 127.0.0.1.
+                # though the stub settings point every provider at 127.0.0.1, and the real
+                # base URL checked first (an http:// cloud URL is refused for real too).
                 remote = _leaves_machine(provider, cfg)
+                check_base_url(provider, cfg)
                 with smoke.stub_server() as stub:
                     stub_cfg = smoke.stub_settings(cfg, stub.port)
                     started = time.monotonic()
@@ -311,7 +313,7 @@ class TryPane(Pane):
                             profile,
                             ran,
                             observer=attempts.append,
-                            remote=remote,
+                            force_remote=remote,
                         )
                     finally:
                         # The call alone, not the stub's start or shutdown.

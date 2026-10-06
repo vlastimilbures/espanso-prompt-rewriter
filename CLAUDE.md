@@ -401,8 +401,10 @@ Rules for agents:
   `for_call()` and `openrouter_only()`, and calls `cli.rewrite()` in process in
   `Pane.background()` (the draft is never in an argv), one run at a time (`running`, Run
   disabled). Stub (default): `smoke.stub_server()` + `stub_settings()`, gated as the real
-  call would be (`cli.rewrite(remote=_leaves_machine(provider, real cfg))`, passed on to
-  `make_provider(remote=)`, which only this passes), timed around the call alone, no
+  call would be (`cli.rewrite(force_remote=_leaves_machine(provider, real cfg))`, passed on
+  to `make_provider(force_remote=)`, which only this passes and which only escalates:
+  remote = `_leaves_machine() or force_remote`), after `factory.check_base_url()` on the real
+  cfg (the https rule make_provider() applies to OpenRouter/Anthropic), timed around the call alone, no
   `Recorder`, no session-log entry (its command would call the real provider). Real: a
   `ConfirmModal`
   (provider, model and base URL via `common.shown_value()`, whether it is recorded), then a
