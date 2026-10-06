@@ -2,7 +2,9 @@ import ctypes
 import os
 import sys
 import time
+from collections.abc import Sequence
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -16,23 +18,25 @@ from prompt_workflow.clipboard_guard import is_concealed, mac_concealed, win_con
 class _FakeObjC:
     """An Objective-C runtime whose general pasteboard holds the given types."""
 
-    def __init__(self, types):
+    def __init__(self, types: list[str] | None) -> None:
         self.types = types
 
-    def cls(self, name):
+    def cls(self, name: str) -> object:
         return name
 
-    def call(self, obj, selector, *args):
+    def call(self, obj: object, selector: str, *args: int) -> Any:
         if (obj, selector) == ("NSPasteboard", "generalPasteboard"):
             return "general"
         if (obj, selector) == ("general", "types"):
             return None if self.types is None else "types"
+        assert self.types is not None
         if selector == "count":
             return len(self.types)
         assert selector == "objectAtIndex:"
         return self.types[args[0]]
 
-    def string(self, obj):
+    def string(self, obj: object) -> str:
+        assert isinstance(obj, str)
         return obj
 
 
@@ -50,20 +54,20 @@ class _FakeObjC:
     ],
     ids=["plain", "concealed", "transient", "onepassword", "auto-generated", "no-types", "nil"],
 )
-def test_mac_concealed(types, concealed):
+def test_mac_concealed(types: list[str] | None, concealed: bool) -> None:
     assert mac_concealed(_FakeObjC(types)) is concealed
 
 
 class _FakeClipboard:
     """A Windows clipboard holding the given formats; DWORD formats map to their value."""
 
-    def __init__(self, formats):
+    def __init__(self, formats: dict[str, int | None]) -> None:
         self.formats = formats
 
-    def has_format(self, name):
+    def has_format(self, name: str) -> bool:
         return name in self.formats
 
-    def read_dword(self, name):
+    def read_dword(self, name: str) -> int | None:
         return self.formats[name]
 
 
@@ -81,12 +85,12 @@ class _FakeClipboard:
     ],
     ids=["plain", "exclude-monitor", "viewer-ignore", "no-history", "history-ok", "busy"],
 )
-def test_win_concealed(formats, concealed):
+def test_win_concealed(formats: dict[str, int | None], concealed: bool) -> None:
     assert win_concealed(_FakeClipboard(formats)) is concealed
 
 
 # Every OS dispatches to its own probe; one without a probe cannot tell.
-def test_is_concealed_dispatch(monkeypatch):
+def test_is_concealed_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(clipboard_guard._PROBES, "darwin", lambda: True)
     monkeypatch.setitem(clipboard_guard._PROBES, "win32", lambda: False)
     assert is_concealed("darwin") is True
@@ -98,8 +102,8 @@ def test_is_concealed_dispatch(monkeypatch):
 @pytest.mark.parametrize(
     "error", [OSError, AttributeError, ValueError, TypeError, ctypes.ArgumentError, RuntimeError]
 )
-def test_is_concealed_fails_open(monkeypatch, error):
-    def broken():
+def test_is_concealed_fails_open(monkeypatch: pytest.MonkeyPatch, error: type[Exception]) -> None:
+    def broken() -> None:
         raise error("no clipboard")
 
     monkeypatch.setitem(clipboard_guard._PROBES, sys.platform, broken)
@@ -108,23 +112,23 @@ def test_is_concealed_fails_open(monkeypatch, error):
 
 # The ctypes wrappers fail cleanly on the wrong OS, which is_concealed() turns into None.
 @pytest.mark.skipif(sys.platform == "win32", reason="user32 exists on Windows")
-def test_windows_probe_is_none_elsewhere():
+def test_windows_probe_is_none_elsewhere() -> None:
     assert is_concealed("win32") is None
 
 
 @pytest.mark.skipif(sys.platform == "darwin", reason="AppKit exists on macOS")
-def test_mac_probe_is_none_elsewhere():
+def test_mac_probe_is_none_elsewhere() -> None:
     assert is_concealed("darwin") is None
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="needs the macOS pasteboard")
-def test_mac_probe_on_a_real_pasteboard():
+def test_mac_probe_on_a_real_pasteboard() -> None:
     """Write items to a private pasteboard (never the user's clipboard) and probe it through
     the real Objective-C runtime."""
     runtime = clipboard_guard._MacRuntime()
-    buffers = []
+    buffers: list[ctypes.Array[ctypes.c_char]] = []
 
-    def nsstring(text):
+    def nsstring(text: str) -> Any:
         buffers.append(ctypes.create_string_buffer(text.encode()))
         address = ctypes.addressof(buffers[-1])
         return runtime.call(runtime.cls("NSString"), "stringWithUTF8String:", address)
@@ -150,23 +154,36 @@ def test_mac_probe_on_a_real_pasteboard():
 
 # On the two supported OSes the real probe answers, quickly: it runs before every expansion.
 @pytest.mark.skipif(sys.platform not in ("darwin", "win32"), reason="no probe on this OS")
-def test_real_probe_answers_quickly():
+def test_real_probe_answers_quickly() -> None:
     started = time.perf_counter()
     assert is_concealed() is not None
     assert time.perf_counter() - started < 0.5
 
 
-def _win_clipboard(opened=True, handle=1, pointer=None, formats=(), size=4):
+def _win_clipboard(
+    opened: bool | list[bool] = True,
+    handle: int | None = 1,
+    pointer: int | None = None,
+    formats: Sequence[str] = (),
+    size: int = 4,
+) -> tuple[clipboard_guard._WinClipboard, list[str]]:
     """A _WinClipboard over fake user32/kernel32 functions, so its logic runs on any OS.
     ``opened`` is a bool, or a list of OpenClipboard results in order."""
-    calls = []
+    calls: list[str] = []
     opens = list(opened) if isinstance(opened, list) else None
     clipboard = clipboard_guard._WinClipboard.__new__(clipboard_guard._WinClipboard)
     ids = {name: i for i, name in enumerate(formats, 0xC000)}
+
+    def open_clipboard(owner: object) -> bool:
+        if opens:
+            calls.append("open")
+            return opens.pop(0)
+        return bool(opened)
+
     clipboard._user32 = SimpleNamespace(
         RegisterClipboardFormatW=lambda name: ids.get(name, 0xC100),
         IsClipboardFormatAvailable=lambda fmt: fmt in ids.values(),
-        OpenClipboard=lambda owner: (calls.append("open") or opens.pop(0)) if opens else opened,
+        OpenClipboard=open_clipboard,
         GetClipboardData=lambda fmt: handle,
         CloseClipboard=lambda: calls.append("close"),
     )
@@ -179,7 +196,7 @@ def _win_clipboard(opened=True, handle=1, pointer=None, formats=(), size=4):
 
 
 # The DWORD is read under a lock that is always released, and the clipboard always closed.
-def test_win_read_dword():
+def test_win_read_dword() -> None:
     value = ctypes.c_uint32(0)
     clipboard, calls = _win_clipboard(pointer=ctypes.addressof(value))
     assert clipboard.read_dword("CanIncludeInClipboardHistory") == 0
@@ -198,7 +215,13 @@ def test_win_read_dword():
     ],
     ids=["held", "no-data", "no-lock", "too-small"],
 )
-def test_win_read_dword_unavailable(monkeypatch, opened, handle, size, closes):
+def test_win_read_dword_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+    opened: bool,
+    handle: int | None,
+    size: int,
+    closes: list[str],
+) -> None:
     monkeypatch.setattr(clipboard_guard, "OPEN_RETRY_SECONDS", 0)
     clipboard, calls = _win_clipboard(opened=opened, handle=handle, pointer=None, size=size)
     assert clipboard.read_dword("CanIncludeInClipboardHistory") is None
@@ -206,14 +229,14 @@ def test_win_read_dword_unavailable(monkeypatch, opened, handle, size, closes):
 
 
 # Data smaller than a DWORD is never read past its end.
-def test_win_read_dword_too_small():
+def test_win_read_dword_too_small() -> None:
     value = ctypes.c_uint32(0)
     clipboard, _ = _win_clipboard(pointer=ctypes.addressof(value), size=2)
     assert clipboard.read_dword("CanIncludeInClipboardHistory") is None
 
 
 # A clipboard held for a moment is retried, as pyperclip does, before giving up.
-def test_win_read_dword_retries_open(monkeypatch):
+def test_win_read_dword_retries_open(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(clipboard_guard, "OPEN_RETRY_SECONDS", 0)
     value = ctypes.c_uint32(1)
     clipboard, calls = _win_clipboard(opened=[False, False, True], pointer=ctypes.addressof(value))
@@ -221,7 +244,7 @@ def test_win_read_dword_retries_open(monkeypatch):
     assert calls == ["open", "open", "open", "unlock", "close"]
 
 
-def test_win_has_format():
+def test_win_has_format() -> None:
     clipboard, _ = _win_clipboard(formats=["ExcludeClipboardContentFromMonitorProcessing"])
     assert clipboard.has_format("ExcludeClipboardContentFromMonitorProcessing") is True
     assert clipboard.has_format("Clipboard Viewer Ignore") is False
@@ -242,8 +265,9 @@ def test_win_has_format():
     ],
     ids=["exclude-monitor", "viewer-ignore", "no-history", "history-ok", "plain"],
 )
-def test_windows_probe_on_the_real_clipboard(name, value, concealed):
-    user32, kernel32 = ctypes.WinDLL("user32"), ctypes.WinDLL("kernel32")
+def test_windows_probe_on_the_real_clipboard(name: str | None, value: int, concealed: bool) -> None:
+    win_dll = getattr(ctypes, "WinDLL")  # noqa: B009 - absent from ctypes off Windows
+    user32, kernel32 = win_dll("user32"), win_dll("kernel32")
     kernel32.GlobalAlloc.restype = ctypes.c_void_p
     kernel32.GlobalAlloc.argtypes = [ctypes.c_uint, ctypes.c_size_t]
     kernel32.GlobalLock.restype = ctypes.c_void_p
@@ -253,7 +277,12 @@ def test_windows_probe_on_the_real_clipboard(name, value, concealed):
     user32.SetClipboardData.argtypes = [ctypes.c_uint, ctypes.c_void_p]
     user32.RegisterClipboardFormatW.restype = ctypes.c_uint
     user32.RegisterClipboardFormatW.argtypes = [ctypes.c_wchar_p]
-    assert any(user32.OpenClipboard(None) or time.sleep(0.05) for _ in range(20))
+    for _ in range(20):
+        if user32.OpenClipboard(None):
+            break
+        time.sleep(0.05)
+    else:
+        pytest.fail("the clipboard stayed held by another app")
     try:
         user32.EmptyClipboard()
         if name:

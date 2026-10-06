@@ -30,7 +30,7 @@ held to `fail_under = 95`):
 ```bash
 uv run pytest --cov                             # unit tests, offline
 uv run ruff check . && uv run ruff format --check .
-uv run mypy                                     # strict, src and scripts
+uv run mypy                                     # strict: src, scripts and tests
 uv run pre-commit run --all-files               # also YAML checks, gitleaks and zizmor
 UPDATE_SNAPSHOTS=1 uv run pytest tests/test_tui_snapshots.py  # after a tui/ screen change
 ```

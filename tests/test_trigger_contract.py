@@ -3,10 +3,14 @@ and what running them imports. Espanso pastes stdout verbatim and starts a fresh
 each trigger, so a changed byte reaches the user and a heavy import slows every expansion.
 Parser (usage) errors exit 2 and are not part of this contract."""
 
+from __future__ import annotations
+
 import json
 import os
 import subprocess
 import sys
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from typer.testing import CliRunner
@@ -15,6 +19,9 @@ from prompt_workflow.cli import app
 from prompt_workflow.config import env_names
 from prompt_workflow.providers.base import ProviderError
 from prompt_workflow.providers.openai_compatible import OpenAICompatibleProvider
+
+if TYPE_CHECKING:
+    from conftest import FakeHttp, StubProvider
 
 runner = CliRunner()
 
@@ -31,7 +38,7 @@ EOL = os.linesep.encode()
 # Every in-process golden test runs with the usage history on (the default) and off: recording
 # a run must not change a byte of it.
 @pytest.fixture(autouse=True, params=["true", "false"], ids=["history-on", "history-off"])
-def _history_setting(request, monkeypatch):
+def _history_setting(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PROMPT_HISTORY", request.param)
 
 
@@ -47,7 +54,7 @@ IMPROVE = ["improve", "--provider", "ollama", "--source", "argument", "--text", 
 
 
 # The rewrite is pasted as-is, UTF-8, cleaned of control characters, with no newline added.
-def test_improve_success(stub_provider):
+def test_improve_success(stub_provider: StubProvider) -> None:
     stub_provider.result = "Přepiš —\ndone\x1b[201~ ✓"
     _golden(IMPROVE, "Přepiš —\ndone[201~ ✓".encode())
 
@@ -65,7 +72,7 @@ def test_improve_success(stub_provider):
     ],
     ids=["provider-error", "value-error", "unexpected"],
 )
-def test_improve_error_marker(stub_provider, exc, expected):
+def test_improve_error_marker(stub_provider: StubProvider, exc: Exception, expected: bytes) -> None:
     stub_provider.exc = exc
     _golden(IMPROVE, expected)
 
@@ -74,7 +81,9 @@ def test_improve_error_marker(stub_provider, exc, expected):
 SETTINGS_ERROR = b"[prompt-workflow: PROMPT_LOCAL_ONLY must be true or false, got 'maybe']"
 
 
-def test_improve_settings_error_marker(monkeypatch, stub_provider):
+def test_improve_settings_error_marker(
+    monkeypatch: pytest.MonkeyPatch, stub_provider: StubProvider
+) -> None:
     monkeypatch.setenv("PROMPT_LOCAL_ONLY", "maybe")
     _golden(IMPROVE, SETTINGS_ERROR)
     assert not stub_provider.built
@@ -89,16 +98,16 @@ NOTE = b"[prompt-workflow: sent despite: email, confidential_label]\n\n"
 FLAGGED = ["improve", "--provider", "openrouter", "--allow-flagged", "--source", "argument"]
 
 
-def test_improve_sent_despite_note(monkeypatch, fake_http):
+def test_improve_sent_despite_note(monkeypatch: pytest.MonkeyPatch, fake_http: FakeHttp) -> None:
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     fake_http.reply({"choices": [{"message": {"content": "rewrite"}}]})
     _golden([*FLAGGED, "--text", DRAFT], NOTE + b"rewrite")
 
 
-def test_improve_sent_despite_note_with_error(monkeypatch):
+def test_improve_sent_despite_note_with_error(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
 
-    def fail(self, prompt, system_prompt):
+    def fail(self: OpenAICompatibleProvider, prompt: str, system_prompt: str) -> None:
         raise ProviderError("upstream down")
 
     monkeypatch.setattr(OpenAICompatibleProvider, "generate", fail)
@@ -122,18 +131,18 @@ def test_improve_clipboard_output_sent_despite(monkeypatch, fake_http):
     _golden([*FLAGGED, "--output", "clipboard", "--text", DRAFT], NOTE.rstrip(b"\n"))
 
 
-def test_persona_set(monkeypatch):
+def test_persona_set(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PROMPT_PERSONA", "I am a risk analyst at Česká banka.")
     _golden(["persona"], "I am a risk analyst at Česká banka.".encode())
 
 
-def test_persona_unset_placeholder():
+def test_persona_unset_placeholder() -> None:
     _golden(["persona"], PLACEHOLDER)
 
 
 # Settings that fail to load never give a marker or a blank: an unrelated bad value still
 # leaves the persona, and a persona that cannot be read gives the placeholder.
-def test_persona_when_settings_fail(monkeypatch, tmp_path):
+def test_persona_when_settings_fail(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("PROMPT_PERSONA", "I am a tester.")
     monkeypatch.setenv("PROMPT_LOCAL_ONLY", "maybe")
     _golden(["persona"], b"I am a tester.")
@@ -250,7 +259,9 @@ _PRELOADING = ("COVERAGE_PROCESS_START", "COVERAGE_PROCESS_CONFIG", "PYTHONSTART
 
 
 @pytest.fixture(scope="module", params=[True, False], ids=["tracking-on", "tracking-off"])
-def trigger_run(request, tmp_path_factory):
+def trigger_run(
+    request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory
+) -> tuple[list[bytes], dict[str, Any]]:
     tmp = tmp_path_factory.mktemp("trigger")
     (tmp / ".env").write_text("", encoding="utf-8")
     # Module-scoped, so conftest's per-test isolation has not run yet: drop every setting here,
@@ -283,7 +294,7 @@ def trigger_run(request, tmp_path_factory):
 
 # The real process prints the same contract as the in-process runner and exits 0 every time,
 # with tracking on and off.
-def test_trigger_run_output(trigger_run):
+def test_trigger_run_output(trigger_run: tuple[list[bytes], dict[str, Any]]) -> None:
     outputs, data = trigger_run
     local, cloud, cloud_error, settings_error, persona, persona_fallback, copied, rest = outputs
     assert (local, cloud, persona, persona_fallback, copied, rest) == (
@@ -304,7 +315,9 @@ def test_trigger_run_output(trigger_run):
 # Checked against everything loaded, not only what the run added, so a module loaded before
 # the script started cannot make the check pass vacuously.
 @pytest.mark.parametrize("module", FORBIDDEN + HISTORY_MODULES)
-def test_trigger_path_does_not_import(trigger_run, module):
+def test_trigger_path_does_not_import(
+    trigger_run: tuple[list[bytes], dict[str, Any]], module: str
+) -> None:
     _, data = trigger_run
     if data["tracking"] and module in HISTORY_MODULES:
         pytest.skip("history is on: the run is recorded")
@@ -312,7 +325,7 @@ def test_trigger_path_does_not_import(trigger_run, module):
 
 
 # With tracking on, the guard above is not vacuous: the history really was loaded.
-def test_tracking_run_loads_history(trigger_run):
+def test_tracking_run_loads_history(trigger_run: tuple[list[bytes], dict[str, Any]]) -> None:
     _, data = trigger_run
     loaded = set(data["loaded"])
     assert (
@@ -320,7 +333,7 @@ def test_tracking_run_loads_history(trigger_run):
     )
 
 
-def test_trigger_path_module_count(trigger_run):
+def test_trigger_path_module_count(trigger_run: tuple[list[bytes], dict[str, Any]]) -> None:
     _, data = trigger_run
     added = len(data["added"])
     assert added <= MODULE_CEILING, f"the trigger run added {added} modules"
@@ -360,7 +373,7 @@ Path(sys.argv[1]).write_text(json.dumps({"codes": codes, "loaded": sorted(sys.mo
 """
 
 
-def test_management_commands_do_not_import_the_interface(tmp_path):
+def test_management_commands_do_not_import_the_interface(tmp_path: Path) -> None:
     env = {
         key: value for key, value in os.environ.items() if key not in {*env_names(), *_PRELOADING}
     }

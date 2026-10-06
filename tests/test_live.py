@@ -6,10 +6,13 @@ in the environment or the repo's .env. An unmarked offline twin runs the same co
 checks on a canned reply, so this file cannot break unseen between live runs.
 """
 
+from __future__ import annotations
+
 import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from bench_module import GOOD, bench
@@ -17,6 +20,9 @@ from typer.testing import CliRunner
 
 from prompt_workflow.cli import app
 from prompt_workflow.config import read_env_file
+
+if TYPE_CHECKING:
+    from conftest import FakeHttp
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -54,7 +60,7 @@ needs_key = pytest.mark.skipif(
 )
 
 
-def _assert_rewrite(returncode: int, out: str, draft) -> None:
+def _assert_rewrite(returncode: int, out: str, draft: bench.Draft) -> None:
     assert returncode == 0
     assert not out.startswith("[prompt-workflow:"), out
     assert not out.endswith("\n")
@@ -67,14 +73,14 @@ def _assert_rewrite(returncode: int, out: str, draft) -> None:
 
 @pytest.mark.live
 @needs_key
-def test_live_rewrite_produces_golden_template():
+def test_live_rewrite_produces_golden_template() -> None:
     draft = bench.DRAFTS["board"]
     proc = _improve(draft.text)
     _assert_rewrite(proc.returncode, proc.stdout, draft)
 
 
 # The same command and checks on a canned golden rewrite, run in every default test run.
-def test_live_checks_run_offline(monkeypatch, fake_http):
+def test_live_checks_run_offline(monkeypatch: pytest.MonkeyPatch, fake_http: FakeHttp) -> None:
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     fake_http.reply({"choices": [{"message": {"content": GOOD}}]})
     draft = bench.DRAFTS["board"]
@@ -88,7 +94,7 @@ def test_live_checks_run_offline(monkeypatch, fake_http):
 # The gate blocks before any network call, so this one needs no credits, only a key.
 @pytest.mark.live
 @needs_key
-def test_live_sensitive_draft_is_blocked():
+def test_live_sensitive_draft_is_blocked() -> None:
     proc = _improve("customer data for card 4111 1111 1111 1111")
     assert proc.returncode == 0
     assert proc.stdout.startswith("[prompt-workflow: Blocked cloud call")

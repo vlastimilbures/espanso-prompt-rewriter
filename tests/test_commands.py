@@ -8,17 +8,25 @@ import io
 import json
 import re
 import shutil
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from decimal import Decimal
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import pytest
-from typer.testing import CliRunner
+
+# typer vendors click (no click package): get_command() returns its classes.
+from typer._click.core import Command, Context, Parameter
+from typer.testing import CliRunner, Result
 
 from prompt_workflow import __version__, assets, config, deploy, doctor, history, smoke
 from prompt_workflow.cli import app
 from prompt_workflow.commands import common
 from prompt_workflow.config import secret_names
 from prompt_workflow.history import HistoryStore
+
+if TYPE_CHECKING:
+    from conftest import SeedHistory
 
 runner = CliRunner()
 LAUNCHER = "/Users/me/.local/bin/prompt-workflow"
@@ -29,17 +37,19 @@ ALLOWED_EXITS = {0, 1, 2, 3, 4}
 
 
 class FakeRunner:
-    def __init__(self, answers=None):
-        self.answers = answers or {}
+    def __init__(
+        self, answers: Mapping[str, str | deploy.CommandFailure | None] | None = None
+    ) -> None:
+        self.answers = dict(answers or {})
         self.calls: list[list[str]] = []
 
-    def __call__(self, argv):
+    def __call__(self, argv: Sequence[str]) -> str | deploy.CommandFailure | None:
         self.calls.append(list(argv))
         return self.answers.get(" ".join(argv))
 
 
 @pytest.fixture
-def fake_run(monkeypatch):
+def fake_run(monkeypatch: pytest.MonkeyPatch) -> FakeRunner:
     fake = FakeRunner({"espanso restart": ""})
     monkeypatch.setattr(deploy, "run_command", fake)
     return fake
@@ -52,7 +62,7 @@ def _changes(calls: list[list[str]]) -> list[list[str]]:
 
 
 @pytest.fixture
-def saved(monkeypatch):
+def saved(monkeypatch: pytest.MonkeyPatch) -> Path:
     """Saved mode: no PROMPT_WORKFLOW_ENV, so config.toml and the secret store are read (in
     conftest's per-test config dir)."""
     monkeypatch.delenv("PROMPT_WORKFLOW_ENV")
@@ -60,12 +70,12 @@ def saved(monkeypatch):
 
 
 @pytest.fixture
-def tty(monkeypatch):
+def tty(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(common, "stdin_is_tty", lambda: True)
 
 
 @pytest.fixture
-def clipboard(monkeypatch):
+def clipboard(monkeypatch: pytest.MonkeyPatch) -> str:
     import pyperclip
 
     from prompt_workflow import clipboard_guard
@@ -77,13 +87,13 @@ def clipboard(monkeypatch):
 
 
 @pytest.fixture
-def espanso(tmp_path):
+def espanso(tmp_path: Path) -> Path:
     root = tmp_path / "espanso"
     (root / "match").mkdir(parents=True)
     return root
 
 
-def _run(*args, input=None):
+def _run(*args: str, input: str | None = None) -> Result:
     return runner.invoke(app, list(args), input=input)
 
 
@@ -94,13 +104,13 @@ def _tree(root: Path) -> list[Path]:
 # --- --version, help, lazy loading --------------------------------------------------------
 
 
-def test_version():
+def test_version() -> None:
     result = _run("--version")
     assert result.exit_code == 0
     assert result.stdout == f"{__version__}\n"
 
 
-def test_help_lists_every_command():
+def test_help_lists_every_command() -> None:
     result = _run("--help")
     assert result.exit_code == 0
     for name in (
@@ -121,12 +131,12 @@ def test_help_lists_every_command():
 # --- exit codes, NO_COLOR -----------------------------------------------------------------
 
 
-def test_unknown_setting_is_a_usage_error():
+def test_unknown_setting_is_a_usage_error() -> None:
     result = _run("config", "get", "NOPE")
     assert result.exit_code == 2
 
 
-def test_no_terminal_never_prompts(saved):
+def test_no_terminal_never_prompts(saved: Path) -> None:
     config_store_secret(saved)
     result = _run("secrets", "remove", "OPENROUTER_API_KEY")
     assert result.exit_code == common.NEEDS_TERMINAL
@@ -142,7 +152,9 @@ def test_no_terminal_never_prompts(saved):
         ("", False, False),
     ],
 )
-def test_no_color(monkeypatch, no_color, tty_out, colored):
+def test_no_color(
+    monkeypatch: pytest.MonkeyPatch, no_color: str, tty_out: bool, colored: bool
+) -> None:
     monkeypatch.setenv("NO_COLOR", no_color)
     monkeypatch.setattr(common, "stdout_is_tty", lambda: tty_out)
     assert ("\x1b[" in common.paint("ok", "green")) is colored
@@ -158,7 +170,9 @@ def config_store_secret(directory: Path, value: str = KEY) -> None:
     assert (directory / "secrets.toml").is_file()
 
 
-def test_config_show_provenance_and_masking(monkeypatch, tmp_path):
+def test_config_show_provenance_and_masking(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     (tmp_path / ".env").write_text(
         f"PROMPT_PROFILE=general\nPROMPT_PERSONA={PERSONA}\nOPENROUTER_API_KEY={KEY}\n", "utf-8"
     )
@@ -173,7 +187,7 @@ def test_config_show_provenance_and_masking(monkeypatch, tmp_path):
     assert f"<set, {len(KEY)} chars>" in result.stdout
 
 
-def test_config_get_never_prints_a_secret(monkeypatch):
+def test_config_get_never_prints_a_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENROUTER_API_KEY", KEY)
     result = _run("config", "get", "OPENROUTER_API_KEY")
     assert result.exit_code == 1
@@ -182,7 +196,7 @@ def test_config_get_never_prints_a_secret(monkeypatch):
     assert _run("config", "get", "PROMPT_PROFILE").stdout == "general\n"
 
 
-def test_config_set_and_unset(saved):
+def test_config_set_and_unset(saved: Path) -> None:
     result = _run("config", "set", "PROMPT_PROFILE", "general")
     assert result.exit_code == 0, result.output
     assert 'PROMPT_PROFILE = "general"' in (saved / "config.toml").read_text("utf-8")
@@ -191,7 +205,7 @@ def test_config_set_and_unset(saved):
     assert "PROMPT_PROFILE" not in (saved / "config.toml").read_text("utf-8")
 
 
-def test_config_set_validates(saved):
+def test_config_set_validates(saved: Path) -> None:
     result = _run("config", "set", "PROMPT_LOCAL_ONLY", "maybe")
     assert result.exit_code == 1
     assert "true or false" in result.stderr
@@ -200,7 +214,7 @@ def test_config_set_validates(saved):
 
 # OPENROUTER_PRO_MAX_TOKENS takes a whole number above 0, or empty to inherit
 # OPENROUTER_MAX_TOKENS (#31).
-def test_config_set_pro_max_tokens(saved):
+def test_config_set_pro_max_tokens(saved: Path) -> None:
     result = _run("config", "set", "OPENROUTER_PRO_MAX_TOKENS", "0")
     assert result.exit_code == 1
     assert "empty or a whole number above 0" in result.stderr
@@ -212,7 +226,7 @@ def test_config_set_pro_max_tokens(saved):
     assert _run("config", "validate").exit_code == 0
 
 
-def test_config_set_refuses_a_secret_and_a_key_shaped_value(saved):
+def test_config_set_refuses_a_secret_and_a_key_shaped_value(saved: Path) -> None:
     for name in secret_names():
         result = _run("config", "set", name, KEY)
         assert result.exit_code == 2
@@ -223,14 +237,14 @@ def test_config_set_refuses_a_secret_and_a_key_shaped_value(saved):
     assert not (saved / "config.toml").exists()
 
 
-def test_config_set_refuses_in_legacy_mode(tmp_path):
+def test_config_set_refuses_in_legacy_mode(tmp_path: Path) -> None:
     result = _run("config", "set", "PROMPT_PROFILE", "general")
     assert result.exit_code == 1
     assert "PROMPT_WORKFLOW_ENV is set" in result.stderr
     assert not config.settings_file().exists()
 
 
-def test_config_set_refuses_to_orphan_a_dotenv(saved):
+def test_config_set_refuses_to_orphan_a_dotenv(saved: Path) -> None:
     saved.mkdir(parents=True)
     (saved / ".env").write_text("PROMPT_PROFILE=general\n", "utf-8")
     result = _run("config", "set", "PROMPT_TIMEOUT_SECONDS", "10")
@@ -239,7 +253,7 @@ def test_config_set_refuses_to_orphan_a_dotenv(saved):
     assert not (saved / "config.toml").exists()
 
 
-def test_config_validate(monkeypatch):
+def test_config_validate(monkeypatch: pytest.MonkeyPatch) -> None:
     assert _run("config", "validate").exit_code == 0
     monkeypatch.setenv("PROMPT_LOCAL_ONLY", "maybe")
     result = _run("config", "validate")
@@ -247,7 +261,9 @@ def test_config_validate(monkeypatch):
     assert "PROMPT_LOCAL_ONLY must be true or false" in result.stdout
 
 
-def test_config_validate_and_set_reject_an_invalid_extra_pattern(monkeypatch, saved):
+def test_config_validate_and_set_reject_an_invalid_extra_pattern(
+    monkeypatch: pytest.MonkeyPatch, saved: Path
+) -> None:
     result = _run("config", "set", "PROMPT_EXTRA_PATTERNS", "falcon;(")
     assert result.exit_code == 1
     assert "entry 2 (custom_2) is not a valid regex" in result.stderr
@@ -261,7 +277,7 @@ def test_config_validate_and_set_reject_an_invalid_extra_pattern(monkeypatch, sa
 
 # A .env value cut at an unquoted ` #` is a problem for `config validate`, named by setting
 # only (#32).
-def test_config_validate_reports_a_value_cut_at_a_comment(tmp_path):
+def test_config_validate_reports_a_value_cut_at_a_comment(tmp_path: Path) -> None:
     (tmp_path / ".env").write_text("PROMPT_EXTRA_PATTERNS=ticket #\\d{5}\n")
     result = _run("config", "validate")
     assert result.exit_code == common.PROBLEMS
@@ -273,7 +289,9 @@ def test_config_validate_reports_a_value_cut_at_a_comment(tmp_path):
     assert _run("config", "validate").exit_code == 0
 
 
-def test_config_validate_redacts_a_value_matching_a_user_pattern(monkeypatch):
+def test_config_validate_redacts_a_value_matching_a_user_pattern(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("PROMPT_EXTRA_PATTERNS", "falcon")
     monkeypatch.setenv("PROMPT_TIMEOUT_SECONDS", "falcon")
     result = _run("config", "validate")
@@ -284,7 +302,7 @@ def test_config_validate_redacts_a_value_matching_a_user_pattern(monkeypatch):
 
 # The persona goes with every call, unscanned by the gate: validate scans it once and names
 # the findings only (#29 B).
-def test_config_validate_scans_the_persona(monkeypatch):
+def test_config_validate_scans_the_persona(monkeypatch: pytest.MonkeyPatch) -> None:
     assert _run("config", "validate").exit_code == 0  # no persona
     monkeypatch.setenv("PROMPT_PERSONA", "I am a data engineer at Example Corp.")
     assert _run("config", "validate").exit_code == 0
@@ -311,7 +329,7 @@ def test_config_validate_scans_the_persona(monkeypatch):
     assert _run("config", "validate").exit_code == 0
 
 
-def test_config_validate_unknown_profile(monkeypatch):
+def test_config_validate_unknown_profile(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PROMPT_PROFILE", "nosuch")
     result = _run("config", "validate")
     assert result.exit_code == common.PROBLEMS
@@ -325,7 +343,7 @@ def _dotenv(saved: Path) -> Path:
     return env
 
 
-def test_config_migrate_needs_consent(saved):
+def test_config_migrate_needs_consent(saved: Path) -> None:
     env = _dotenv(saved)
     result = _run("config", "migrate")
     assert result.exit_code == common.NEEDS_TERMINAL
@@ -338,7 +356,7 @@ def test_config_migrate_needs_consent(saved):
     assert not (saved / "config.toml").exists()
 
 
-def test_config_migrate_and_rollback_with_the_token(saved):
+def test_config_migrate_and_rollback_with_the_token(saved: Path) -> None:
     env = _dotenv(saved)
     preview = _run("config", "migrate", "--dry-run").stdout
     token = preview.split("Preview token: ")[1].split()[0]
@@ -355,7 +373,7 @@ def test_config_migrate_and_rollback_with_the_token(saved):
     assert not (saved / "config.toml").exists()
 
 
-def test_config_migrate_interactive(saved, tty):
+def test_config_migrate_interactive(saved: Path, tty: None) -> None:
     env = _dotenv(saved)
     assert _run("config", "migrate", input="n\n").exit_code == 1
     assert env.is_file()
@@ -366,7 +384,7 @@ def test_config_migrate_interactive(saved, tty):
 # --- secrets ------------------------------------------------------------------------------
 
 
-def test_secrets_set_from_stdin_status_and_remove(saved):
+def test_secrets_set_from_stdin_status_and_remove(saved: Path) -> None:
     result = _run("secrets", "set", "OPENROUTER_API_KEY", "--stdin", input=f"{KEY}\n")
     assert result.exit_code == 0, result.output
     assert KEY not in result.output
@@ -378,43 +396,46 @@ def test_secrets_set_from_stdin_status_and_remove(saved):
     assert "not set" in _run("secrets", "status").stdout.splitlines()[-1]
 
 
-def test_secrets_set_hidden_prompt(saved, tty, monkeypatch):
+def test_secrets_set_hidden_prompt(saved: Path, tty: None, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(common, "_getpass", lambda prompt: KEY)
     assert _run("secrets", "set", "ANTHROPIC_API_KEY").exit_code == 0
     assert KEY in (saved / "secrets.toml").read_text("utf-8")
 
 
-def test_secrets_set_without_terminal_or_stdin(saved):
+def test_secrets_set_without_terminal_or_stdin(saved: Path) -> None:
     result = _run("secrets", "set", "OPENROUTER_API_KEY")
     assert result.exit_code == common.NEEDS_TERMINAL
     assert "--stdin" in result.stderr
 
 
-def test_secrets_refused_in_legacy_mode():
+def test_secrets_refused_in_legacy_mode() -> None:
     result = _run("secrets", "set", "OPENROUTER_API_KEY", "--stdin", input=f"{KEY}\n")
     assert result.exit_code == 1
     assert "PROMPT_WORKFLOW_ENV is set" in result.stderr
 
 
-def test_secrets_set_rejects_a_non_secret_name(saved):
+def test_secrets_set_rejects_a_non_secret_name(saved: Path) -> None:
     assert _run("secrets", "set", "PROMPT_PROFILE", "--stdin", input="x\n").exit_code == 2
 
 
 # --- No command accepts a key as an argument ----------------------------------------------
 
 
-def _leaves(command, path=()):
+def _leaves(
+    command: Command | None, path: tuple[str, ...] = ()
+) -> Iterator[tuple[tuple[str, ...], Command]]:
     from typer.core import TyperGroup
 
+    assert command is not None
     if isinstance(command, TyperGroup):
-        ctx = None
+        ctx = Context(command)
         for name in command.list_commands(ctx):
             yield from _leaves(command.get_command(ctx, name), (*path, name))
     else:
         yield path, command
 
 
-def _all_leaves():
+def _all_leaves() -> dict[tuple[str, ...], Command]:
     import typer
 
     return dict(_leaves(typer.main.get_command(app)))
@@ -423,14 +444,14 @@ def _all_leaves():
 # improve takes the draft (--text), which the data-protection gate scans; it is data, never a
 # setting. Every other value a command takes is listed here with a harmless stand-in.
 TRIGGER_COMMANDS = {("improve",), ("persona",)}
-REQUIRED = {
+REQUIRED: dict[tuple[str, ...], list[str]] = {
     ("config", "get"): ["PROMPT_PROFILE"],
     ("config", "set"): ["PROMPT_PERSONA", "x"],
     ("config", "unset"): ["PROMPT_PROFILE"],
     ("secrets", "set"): ["OPENROUTER_API_KEY"],
     ("secrets", "remove"): ["OPENROUTER_API_KEY"],
 }
-BASE = {
+BASE: dict[tuple[str, ...], list[str]] = {
     ("setup",): ["--non-interactive", "--no-smoke-test"],
 }
 # Option names that suggest a secret. Allowed: the migration preview's consent token and the
@@ -439,7 +460,7 @@ SUSPICIOUS = ("key", "secret", "password", "token", "credential")
 ALLOWED_NAMES = {"preview_token", "max_tokens"}  # a consent digest; an output cap
 
 
-def test_no_option_is_named_like_a_secret():
+def test_no_option_is_named_like_a_secret() -> None:
     for path, command in _all_leaves().items():
         for param in command.params:
             name = param.name or ""
@@ -449,18 +470,24 @@ def test_no_option_is_named_like_a_secret():
             assert flag_only or not any(w in name for w in SUSPICIOUS), (path, name)
 
 
-def test_secrets_set_takes_no_value_argument():
+def test_secrets_set_takes_no_value_argument() -> None:
     command = _all_leaves()[("secrets", "set")]
     values = [p.name for p in command.params if not getattr(p, "is_flag", False)]
     assert values == ["name"]
 
 
-def _value_params(command):
+def _value_params(command: Command) -> list[Parameter]:
     return [p for p in command.params if not getattr(p, "is_flag", False) and p.name != "help"]
 
 
 @pytest.mark.parametrize("path", sorted(set(_all_leaves()) - TRIGGER_COMMANDS), ids=" ".join)
-def test_no_command_accepts_a_key_as_an_argument(path, saved, tmp_path, monkeypatch, clipboard):
+def test_no_command_accepts_a_key_as_an_argument(
+    path: tuple[str, ...],
+    saved: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    clipboard: str,
+) -> None:
     """Each value a command takes, given a key: the key is never saved anywhere and never
     becomes a setting or a secret."""
     monkeypatch.setattr(deploy, "run_command", FakeRunner())
@@ -535,11 +562,11 @@ def _commands(espanso: Path) -> dict[tuple[str, ...], list[list[str]]]:
     }
 
 
-def test_the_repair_list_covers_every_command(tmp_path):
+def test_the_repair_list_covers_every_command(tmp_path: Path) -> None:
     assert set(_commands(tmp_path)) == set(_all_leaves())
 
 
-def _break(kind: str, tmp_path: Path, monkeypatch) -> None:
+def _break(kind: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     if kind == "dotenv":
         (tmp_path / ".env").write_text(
             "PROMPT_LOCAL_ONLY=maybe\nOPENROUTER_MODEL=xPROMPT_PROFILE=general\nno equals\n\xff\n",
@@ -554,7 +581,9 @@ def _break(kind: str, tmp_path: Path, monkeypatch) -> None:
 
 
 @pytest.mark.parametrize("kind", ["dotenv", "toml", "secrets"])
-def test_every_command_runs_on_a_broken_config(kind, tmp_path, monkeypatch, espanso, clipboard):
+def test_every_command_runs_on_a_broken_config(
+    kind: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, espanso: Path, clipboard: str
+) -> None:
     _break(kind, tmp_path, monkeypatch)
     monkeypatch.setattr(deploy, "run_command", FakeRunner())
     for argv_list in _commands(espanso).values():
@@ -571,11 +600,13 @@ def test_every_command_runs_on_a_broken_config(kind, tmp_path, monkeypatch, espa
 # --- doctor -------------------------------------------------------------------------------
 
 
-def _doctor(*args):
+def _doctor(*args: str) -> Result:
     return _run("doctor", "--launcher", LAUNCHER, *args)
 
 
-def test_doctor_json_schema_is_stable(espanso, clipboard, monkeypatch):
+def test_doctor_json_schema_is_stable(
+    espanso: Path, clipboard: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     fake = FakeRunner({"espanso path config": str(espanso), "espanso status": "espanso is running"})
     monkeypatch.setattr(deploy, "run_command", fake)
     result = _doctor("--json")
@@ -624,7 +655,7 @@ def test_doctor_json_schema_is_stable(espanso, clipboard, monkeypatch):
 _PANIC = deploy.CommandFailure(
     found=True, path="/opt/bin/espanso", returncode=101, error="unable to load config"
 )
-_ESPANSO_CASES = [
+_ESPANSO_CASES: list[tuple[deploy.CommandFailure | None, str, dict[str, Any]]] = [
     (
         None,
         "espanso was not found on PATH",
@@ -646,7 +677,13 @@ _ESPANSO_CASES = [
 
 
 @pytest.mark.parametrize(("answer", "message", "data"), _ESPANSO_CASES)
-def test_doctor_tells_espanso_failures_apart(answer, message, data, clipboard, monkeypatch):
+def test_doctor_tells_espanso_failures_apart(
+    answer: deploy.CommandFailure | None,
+    message: str,
+    data: dict[str, Any],
+    clipboard: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     fake = FakeRunner({"espanso status": "espanso is running"})
     fake.answers["espanso path config"] = answer
     monkeypatch.setattr(deploy, "run_command", fake)
@@ -668,8 +705,13 @@ def test_doctor_tells_espanso_failures_apart(answer, message, data, clipboard, m
 
 @pytest.mark.parametrize(("answer", "message", "data"), _ESPANSO_CASES)
 def test_deploy_and_setup_say_when_they_use_the_default_folder(
-    answer, message, data, saved, monkeypatch, tmp_path
-):
+    answer: deploy.CommandFailure | None,
+    message: str,
+    data: dict[str, Any],
+    saved: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     default = tmp_path / "default-espanso"
     (default / "match").mkdir(parents=True)
     monkeypatch.setattr(deploy, "default_espanso_dir", lambda: default)
@@ -697,7 +739,9 @@ def test_deploy_and_setup_say_when_they_use_the_default_folder(
     assert "default Espanso folder" not in result.stderr
 
 
-def test_doctor_drift_case_reports_stale_and_no_secret(saved, espanso, clipboard, monkeypatch):
+def test_doctor_drift_case_reports_stale_and_no_secret(
+    saved: Path, espanso: Path, clipboard: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The #25 drift case: a prompts-template.yml an older version deployed."""
     monkeypatch.setattr(deploy, "run_command", FakeRunner({"espanso status": "running"}))
     config_store_secret(saved)
@@ -724,7 +768,9 @@ def test_doctor_drift_case_reports_stale_and_no_secret(saved, espanso, clipboard
             assert sentinel not in result.output
 
 
-def test_doctor_clipboard_reports_the_length_only(clipboard, monkeypatch):
+def test_doctor_clipboard_reports_the_length_only(
+    clipboard: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(deploy, "run_command", FakeRunner())
     result = _doctor()
     assert f"readable: {len(clipboard)} character(s)" in result.stdout
@@ -732,7 +778,7 @@ def test_doctor_clipboard_reports_the_length_only(clipboard, monkeypatch):
     assert "skipped" in _doctor("--no-clipboard").stdout
 
 
-def test_doctor_never_reads_a_concealed_clipboard(monkeypatch):
+def test_doctor_never_reads_a_concealed_clipboard(monkeypatch: pytest.MonkeyPatch) -> None:
     import pyperclip
 
     from prompt_workflow import clipboard_guard
@@ -743,7 +789,9 @@ def test_doctor_never_reads_a_concealed_clipboard(monkeypatch):
     assert "not read" in _doctor().stdout
 
 
-def test_doctor_launcher_drift_and_missing(espanso, clipboard, monkeypatch, tmp_path):
+def test_doctor_launcher_drift_and_missing(
+    espanso: Path, clipboard: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setattr(deploy, "run_command", FakeRunner())
     deploy.apply(deploy.plan(espanso, LAUNCHER, deploy.Manifest.load()))
     exe = tmp_path / "bin" / "prompt-workflow"
@@ -763,10 +811,10 @@ def test_doctor_launcher_drift_and_missing(espanso, clipboard, monkeypatch, tmp_
 
 
 @pytest.fixture
-def record_ops(seed_history):
+def record_ops(seed_history: SeedHistory) -> Callable[..., None]:
     """record_ops(n) seeds n recorded -i- calls to OpenRouter."""
 
-    def record(n=2):
+    def record(n: int = 2) -> None:
         for _ in range(n):
             op = {
                 "id": history.new_operation_id(),
@@ -793,7 +841,9 @@ def record_ops(seed_history):
     return record
 
 
-def test_stats_text_states_the_caveats_and_the_history(monkeypatch, record_ops):
+def test_stats_text_states_the_caveats_and_the_history(
+    monkeypatch: pytest.MonkeyPatch, record_ops: Callable[..., None]
+) -> None:
     result = _run("stats")
     assert result.exit_code == 0
     for caveat in (
@@ -811,7 +861,7 @@ def test_stats_text_states_the_caveats_and_the_history(monkeypatch, record_ops):
     assert "reported 0.0002 credits" in result.stdout
 
 
-def test_stats_help_states_the_caveats(monkeypatch):
+def test_stats_help_states_the_caveats(monkeypatch: pytest.MonkeyPatch) -> None:
     # Help panels wrap at the terminal width, which differs on CI runners (Windows too).
     monkeypatch.setenv("COLUMNS", "400")
     out = " ".join(re.sub(r"\x1b\[[0-9;]*m|[│╭╮╰╯─]", " ", _run("stats", "--help").stdout).split())
@@ -820,7 +870,7 @@ def test_stats_help_states_the_caveats(monkeypatch):
     assert "ignore PROMPT_PROVIDER" in out
 
 
-def test_stats_json(record_ops):
+def test_stats_json(record_ops: Callable[..., None]) -> None:
     record_ops()
     data = json.loads(_run("stats", "--json").stdout)
     assert data["group_by"] == "trigger"
@@ -830,11 +880,11 @@ def test_stats_json(record_ops):
     assert data["rows"][0]["reported"] == {"credits": "0.0002"}
 
 
-def test_stats_bad_group():
+def test_stats_bad_group() -> None:
     assert _run("stats", "--by", "week").exit_code == 2
 
 
-def test_history_export_prune_reset(tmp_path, record_ops):
+def test_history_export_prune_reset(tmp_path: Path, record_ops: Callable[..., None]) -> None:
     record_ops()
     data = json.loads(_run("history", "export").stdout)
     assert len(data["operations"]) == 2
@@ -854,7 +904,7 @@ def test_history_export_prune_reset(tmp_path, record_ops):
 # --- profiles -----------------------------------------------------------------------------
 
 
-def test_profiles_list(monkeypatch):
+def test_profiles_list(monkeypatch: pytest.MonkeyPatch) -> None:
     folder = config._user_config_dir() / "profiles"
     folder.mkdir(parents=True)
     (folder / "mine.md").write_text("mine", "utf-8")
@@ -866,7 +916,7 @@ def test_profiles_list(monkeypatch):
     assert "general: shadowed" in result.stdout
 
 
-def test_profiles_migrate(monkeypatch, tmp_path, tty):
+def test_profiles_migrate(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, tty: None) -> None:
     from prompt_workflow import profiles
 
     checkout = tmp_path / "checkout"
@@ -883,7 +933,7 @@ def test_profiles_migrate(monkeypatch, tmp_path, tty):
     assert target.read_text("utf-8") == "my profile"
 
 
-def test_profiles_migrate_needs_a_checkout():
+def test_profiles_migrate_needs_a_checkout() -> None:
     result = _run("profiles", "migrate")
     assert result.exit_code == 1
     assert "--checkout" in result.stderr
@@ -892,7 +942,7 @@ def test_profiles_migrate_needs_a_checkout():
 # --- espanso deploy --dry-run -------------------------------------------------------------
 
 
-def test_espanso_deploy_dry_run_and_no_terminal(espanso, fake_run):
+def test_espanso_deploy_dry_run_and_no_terminal(espanso: Path, fake_run: FakeRunner) -> None:
     where = ["--espanso-dir", str(espanso), "--launcher", LAUNCHER]
     result = _run("espanso", "deploy", "--dry-run", *where)
     assert result.exit_code == 0
@@ -906,11 +956,11 @@ def test_espanso_deploy_dry_run_and_no_terminal(espanso, fake_run):
 # --- setup --------------------------------------------------------------------------------
 
 
-def _setup(espanso, *args, input=None):
+def _setup(espanso: Path, *args: str, input: str | None = None) -> Result:
     return _run("setup", "--espanso-dir", str(espanso), "--launcher", LAUNCHER, *args, input=input)
 
 
-def test_setup_non_interactive_end_to_end(saved, espanso, fake_run):
+def test_setup_non_interactive_end_to_end(saved: Path, espanso: Path, fake_run: FakeRunner) -> None:
     """CI acceptance: config written, deploy in dry run, the real improve against the stub."""
     result = _setup(espanso, "--non-interactive", "--api-key-stdin", input=f"{KEY}\n")
     assert result.exit_code == 0, result.output
@@ -927,13 +977,15 @@ def test_setup_non_interactive_end_to_end(saved, espanso, fake_run):
     assert json.loads(_run("history", "export").stdout)["operations"] == []
 
 
-def test_setup_needs_a_terminal_or_non_interactive(espanso):
+def test_setup_needs_a_terminal_or_non_interactive(espanso: Path) -> None:
     result = _setup(espanso)
     assert result.exit_code == common.NEEDS_TERMINAL
     assert "--non-interactive" in result.stderr
 
 
-def test_setup_deploy_applies(saved, espanso, fake_run, monkeypatch):
+def test_setup_deploy_applies(
+    saved: Path, espanso: Path, fake_run: FakeRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(smoke, "run", lambda p: smoke.SmokeResult(True, smoke.REPLY, 1, "ok"))
     result = _setup(espanso, "--non-interactive", "--deploy", "--provider", "ollama")
     assert result.exit_code == 0, result.output
@@ -942,7 +994,9 @@ def test_setup_deploy_applies(saved, espanso, fake_run, monkeypatch):
     assert 'PROMPT_PROVIDER = "ollama"' in (saved / "config.toml").read_text("utf-8")
 
 
-def test_setup_smoke_failure_exits_1(saved, espanso, fake_run, monkeypatch):
+def test_setup_smoke_failure_exits_1(
+    saved: Path, espanso: Path, fake_run: FakeRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(smoke, "run", lambda p: smoke.SmokeResult(False, "", 0, "[pw: down]"))
     result = _setup(espanso, "--non-interactive")
     assert result.exit_code == 1
@@ -950,8 +1004,8 @@ def test_setup_smoke_failure_exits_1(saved, espanso, fake_run, monkeypatch):
 
 
 def test_setup_offers_migration_and_writes_nothing_without_consent(
-    saved, espanso, fake_run, tty, monkeypatch
-):
+    saved: Path, espanso: Path, fake_run: FakeRunner, tty: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(smoke, "run", lambda p: smoke.SmokeResult(True, smoke.REPLY, 1, "ok"))
     env = _dotenv(saved)
     result = _setup(espanso, "--provider", "openrouter", "--profile", "default", input="n\nn\n")
@@ -965,7 +1019,9 @@ def test_setup_offers_migration_and_writes_nothing_without_consent(
     assert not (saved / "config.toml").exists()
 
 
-def test_setup_interactive_migrates_with_consent(saved, espanso, fake_run, tty, monkeypatch):
+def test_setup_interactive_migrates_with_consent(
+    saved: Path, espanso: Path, fake_run: FakeRunner, tty: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(smoke, "run", lambda p: smoke.SmokeResult(True, smoke.REPLY, 1, "ok"))
     monkeypatch.setattr(common, "_getpass", lambda prompt: "")
     env = _dotenv(saved)
@@ -976,7 +1032,9 @@ def test_setup_interactive_migrates_with_consent(saved, espanso, fake_run, tty, 
     assert (saved / "config.toml").is_file()
 
 
-def test_setup_in_legacy_mode_writes_no_settings(espanso, fake_run, monkeypatch):
+def test_setup_in_legacy_mode_writes_no_settings(
+    espanso: Path, fake_run: FakeRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(smoke, "run", lambda p: smoke.SmokeResult(True, smoke.REPLY, 1, "ok"))
     result = _setup(espanso, "--non-interactive")
     assert result.exit_code == 0, result.output
@@ -984,7 +1042,7 @@ def test_setup_in_legacy_mode_writes_no_settings(espanso, fake_run, monkeypatch)
     assert not config.settings_file().exists()
 
 
-def test_setup_rejects_a_bad_provider(espanso):
+def test_setup_rejects_a_bad_provider(espanso: Path) -> None:
     assert _setup(espanso, "--non-interactive", "--provider", "nope").exit_code == 2
 
 
@@ -992,17 +1050,17 @@ def test_setup_rejects_a_bad_provider(espanso):
 
 
 @pytest.mark.parametrize("provider", ["openrouter", "anthropic", "ollama", "lmstudio"])
-def test_smoke_runs_the_real_improve_against_the_stub(provider):
+def test_smoke_runs_the_real_improve_against_the_stub(provider: str) -> None:
     result = smoke.run(provider)
     assert result.ok, result.message
     assert result.requests == 1
 
 
-def test_smoke_env_points_every_provider_at_the_stub(monkeypatch):
+def test_smoke_env_points_every_provider_at_the_stub(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENROUTER_API_KEY", KEY)
-    seen = {}
+    seen: dict[str, str] = {}
 
-    def fake(argv, env):
+    def fake(argv: Sequence[str], env: Mapping[str, str]) -> tuple[int, bytes]:
         seen.update(env)
         return 0, smoke.REPLY.encode()
 
@@ -1025,11 +1083,13 @@ def _history_rows() -> str:
     return out.getvalue()
 
 
-def test_smoke_and_setup_add_no_history_row(saved, espanso, fake_run, monkeypatch):
+def test_smoke_and_setup_add_no_history_row(
+    saved: Path, espanso: Path, fake_run: FakeRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """#116: a real smoke run reaches the stub but never the real (per-test) history."""
     monkeypatch.setenv("PROMPT_HISTORY", "true")
 
-    def recorded(argv, env):
+    def recorded(argv: Sequence[str], env: Mapping[str, str]) -> tuple[int, bytes]:
         return smoke.run_cli(argv, {**env, "PROMPT_HISTORY": "true"})
 
     # The same run with the history forced on is recorded, so the checks below are not vacuous.
@@ -1064,14 +1124,14 @@ def test_smoke_and_setup_add_no_history_row(saved, espanso, fake_run, monkeypatc
     ],
     ids=["command", "doctor", "secrets-set", "config-set", "stats", "prune", "group", "improve"],
 )
-def test_usage_errors_never_repeat_a_key(argv):
+def test_usage_errors_never_repeat_a_key(argv: list[str]) -> None:
     result = _run(*argv)
     assert result.exit_code == 2
     assert KEY not in result.output
     assert "<redacted" in result.output
 
 
-def test_a_key_under_a_setting_name_is_never_shown(monkeypatch):
+def test_a_key_under_a_setting_name_is_never_shown(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENROUTER_MODEL", KEY)
     show = _run("config", "show")
     assert KEY not in show.output
@@ -1081,27 +1141,36 @@ def test_a_key_under_a_setting_name_is_never_shown(monkeypatch):
     assert KEY not in get.output
 
 
-def test_prune_sooner_than_retention_asks(tty, record_ops):
+def test_prune_sooner_than_retention_asks(tty: None, record_ops: Callable[..., None]) -> None:
     record_ops()
     assert _run("history", "prune", "--older-than", "0", input="n\n").exit_code == 1
     assert len(json.loads(_run("history", "export").stdout)["operations"]) == 2
 
 
-def test_prune_sooner_than_retention_needs_yes_without_terminal(record_ops):
+def test_prune_sooner_than_retention_needs_yes_without_terminal(
+    record_ops: Callable[..., None],
+) -> None:
     record_ops()
     assert _run("history", "prune", "--older-than", "0").exit_code == common.NEEDS_TERMINAL
     assert "Deleted 2" in _run("history", "prune", "--older-than", "0", "--yes").stdout
 
 
-def test_stdin_at_a_terminal_asks_hidden(saved, tty, monkeypatch):
+def test_stdin_at_a_terminal_asks_hidden(
+    saved: Path, tty: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
     prompts = []
-    monkeypatch.setattr(common, "_getpass", lambda prompt: prompts.append(prompt) or KEY)
+
+    def getpass(prompt: str) -> str:
+        prompts.append(prompt)
+        return KEY
+
+    monkeypatch.setattr(common, "_getpass", getpass)
     assert _run("secrets", "set", "OPENROUTER_API_KEY", "--stdin").exit_code == 0
     assert prompts
     assert KEY in (saved / "secrets.toml").read_text("utf-8")
 
 
-def test_stdin_drops_a_byte_order_mark(saved):
+def test_stdin_drops_a_byte_order_mark(saved: Path) -> None:
     result = _run("secrets", "set", "OPENROUTER_API_KEY", "--stdin", input=f"\ufeff{KEY}\r\n")
     assert result.exit_code == 0, result.output
     from prompt_workflow import config_store
@@ -1110,10 +1179,12 @@ def test_stdin_drops_a_byte_order_mark(saved):
     assert f'"{KEY}"' in (saved / "secrets.toml").read_text("utf-8")
 
 
-def test_doctor_data_keys_are_stable_when_a_check_fails(clipboard, monkeypatch):
+def test_doctor_data_keys_are_stable_when_a_check_fails(
+    clipboard: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(deploy, "run_command", FakeRunner())
 
-    def broken(settings):
+    def broken(settings: Any) -> None:
         raise RuntimeError("boom")
 
     monkeypatch.setattr(doctor, "_profiles_check", broken)
@@ -1129,10 +1200,10 @@ def test_doctor_data_keys_are_stable_when_a_check_fails(clipboard, monkeypatch):
 
 
 @pytest.fixture
-def smoke_ok(monkeypatch):
+def smoke_ok(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     calls = []
 
-    def fake(provider):
+    def fake(provider: str) -> smoke.SmokeResult:
         calls.append(provider)
         return smoke.SmokeResult(True, smoke.REPLY, 1, "ok")
 
@@ -1140,7 +1211,9 @@ def smoke_ok(monkeypatch):
     return calls
 
 
-def test_setup_stops_writing_when_the_dotenv_is_broken(saved, espanso, fake_run, smoke_ok):
+def test_setup_stops_writing_when_the_dotenv_is_broken(
+    saved: Path, espanso: Path, fake_run: FakeRunner, smoke_ok: list[str]
+) -> None:
     saved.mkdir(parents=True)
     (saved / ".env").write_text("PROMPT_LOCAL_ONLY=maybe\n", "utf-8")
     result = _setup(espanso, "--non-interactive")
@@ -1149,7 +1222,9 @@ def test_setup_stops_writing_when_the_dotenv_is_broken(saved, espanso, fake_run,
     assert not (saved / "config.toml").exists()
 
 
-def test_setup_local_provider_takes_no_key(saved, espanso, fake_run, smoke_ok):
+def test_setup_local_provider_takes_no_key(
+    saved: Path, espanso: Path, fake_run: FakeRunner, smoke_ok: list[str]
+) -> None:
     args = ("--non-interactive", "--provider", "ollama", "--api-key-stdin")
     result = _setup(espanso, *args, input=f"{KEY}\n")
     assert result.exit_code == 1
@@ -1158,20 +1233,26 @@ def test_setup_local_provider_takes_no_key(saved, espanso, fake_run, smoke_ok):
     assert smoke_ok == ["ollama"]
 
 
-def test_setup_key_from_stdin_in_legacy_mode_is_refused(espanso, fake_run, smoke_ok):
+def test_setup_key_from_stdin_in_legacy_mode_is_refused(
+    espanso: Path, fake_run: FakeRunner, smoke_ok: list[str]
+) -> None:
     result = _setup(espanso, "--non-interactive", "--api-key-stdin", input=f"{KEY}\n")
     assert result.exit_code == 1
     assert "the key was not saved" in result.stderr
 
 
-def test_setup_refuses_a_malformed_key(saved, espanso, fake_run, smoke_ok):
+def test_setup_refuses_a_malformed_key(
+    saved: Path, espanso: Path, fake_run: FakeRunner, smoke_ok: list[str]
+) -> None:
     result = _setup(espanso, "--non-interactive", "--api-key-stdin", input="two words\n")
     assert result.exit_code == 1
     assert "one line of visible characters" in result.stderr
     assert not (saved / "secrets.toml").exists()
 
 
-def test_setup_reports_a_set_key_without_showing_it(saved, espanso, fake_run, smoke_ok):
+def test_setup_reports_a_set_key_without_showing_it(
+    saved: Path, espanso: Path, fake_run: FakeRunner, smoke_ok: list[str]
+) -> None:
     config_store_secret(saved)
     result = _setup(espanso, "--non-interactive")
     assert result.exit_code == 0
@@ -1179,7 +1260,14 @@ def test_setup_reports_a_set_key_without_showing_it(saved, espanso, fake_run, sm
     assert KEY not in result.output
 
 
-def test_setup_interactive_replaces_the_key(saved, espanso, fake_run, smoke_ok, tty, monkeypatch):
+def test_setup_interactive_replaces_the_key(
+    saved: Path,
+    espanso: Path,
+    fake_run: FakeRunner,
+    smoke_ok: list[str],
+    tty: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     config_store_secret(saved, "-".join(("old", "key")))
     monkeypatch.setattr(common, "_getpass", lambda prompt: KEY)
     # Provider and profile: the defaults; replace the key: yes; deploy: no.
@@ -1188,7 +1276,14 @@ def test_setup_interactive_replaces_the_key(saved, espanso, fake_run, smoke_ok, 
     assert KEY in (saved / "secrets.toml").read_text("utf-8")
 
 
-def test_setup_interactive_skips_an_empty_key(saved, espanso, fake_run, smoke_ok, tty, monkeypatch):
+def test_setup_interactive_skips_an_empty_key(
+    saved: Path,
+    espanso: Path,
+    fake_run: FakeRunner,
+    smoke_ok: list[str],
+    tty: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(common, "_getpass", lambda prompt: "")
     result = _setup(espanso, input="\n\nn\n")
     assert result.exit_code == 0, result.output
@@ -1196,8 +1291,13 @@ def test_setup_interactive_skips_an_empty_key(saved, espanso, fake_run, smoke_ok
 
 
 def test_setup_interactive_asks_again_for_a_bad_provider(
-    saved, espanso, fake_run, smoke_ok, tty, monkeypatch
-):
+    saved: Path,
+    espanso: Path,
+    fake_run: FakeRunner,
+    smoke_ok: list[str],
+    tty: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(common, "_getpass", lambda prompt: "")
     result = _setup(espanso, input="nope\nollama\n\nn\n")
     assert result.exit_code == 0, result.output
@@ -1205,7 +1305,14 @@ def test_setup_interactive_asks_again_for_a_bad_provider(
     assert smoke_ok == ["ollama"]
 
 
-def test_setup_interactive_deploys_on_yes(saved, espanso, fake_run, smoke_ok, tty, monkeypatch):
+def test_setup_interactive_deploys_on_yes(
+    saved: Path,
+    espanso: Path,
+    fake_run: FakeRunner,
+    smoke_ok: list[str],
+    tty: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(common, "_getpass", lambda prompt: "")
     result = _setup(espanso, "--provider", "ollama", "--profile", "general", input="y\n")
     assert result.exit_code == 0, result.output
@@ -1215,7 +1322,9 @@ def test_setup_interactive_deploys_on_yes(saved, espanso, fake_run, smoke_ok, tt
     assert "Every match file is in sync." in result.stdout
 
 
-def test_setup_forgets_gone_entries_without_asking(saved, espanso, fake_run, smoke_ok, tmp_path):
+def test_setup_forgets_gone_entries_without_asking(
+    saved: Path, espanso: Path, fake_run: FakeRunner, smoke_ok: list[str], tmp_path: Path
+) -> None:
     """Every file in sync and only gone entries on record: nothing to write, so no question,
     no dry run and no "later" step; the entries are forgotten and the files left as they are."""
     deploy.apply(deploy.plan(espanso, LAUNCHER, deploy.Manifest.load()))
@@ -1235,7 +1344,9 @@ def test_setup_forgets_gone_entries_without_asking(saved, espanso, fake_run, smo
     assert all(Path(t).parent.parent == espanso for t in deploy.Manifest.load().entries)
 
 
-def test_setup_deploy_keeps_an_edited_file(saved, espanso, fake_run, smoke_ok):
+def test_setup_deploy_keeps_an_edited_file(
+    saved: Path, espanso: Path, fake_run: FakeRunner, smoke_ok: list[str]
+) -> None:
     target = espanso / "match" / "prompts-llm.yml"
     target.write_text("# mine\n", "utf-8")
     result = _setup(espanso, "--non-interactive", "--deploy")
@@ -1244,7 +1355,9 @@ def test_setup_deploy_keeps_an_edited_file(saved, espanso, fake_run, smoke_ok):
     assert "files you edited were kept" in result.stdout
 
 
-def test_setup_deploy_error_fails_the_step(saved, espanso, fake_run, smoke_ok):
+def test_setup_deploy_error_fails_the_step(
+    saved: Path, espanso: Path, fake_run: FakeRunner, smoke_ok: list[str]
+) -> None:
     result = _run(
         "setup", "--non-interactive", "--espanso-dir", str(espanso), "--launcher", '/a"b/pw'
     )
@@ -1252,7 +1365,9 @@ def test_setup_deploy_error_fails_the_step(saved, espanso, fake_run, smoke_ok):
     assert "deploy failed" in result.stderr
 
 
-def test_setup_no_deploy_and_no_smoke(saved, espanso, fake_run, smoke_ok):
+def test_setup_no_deploy_and_no_smoke(
+    saved: Path, espanso: Path, fake_run: FakeRunner, smoke_ok: list[str]
+) -> None:
     result = _setup(espanso, "--non-interactive", "--no-deploy", "--no-smoke-test")
     assert result.exit_code == 0
     assert "Skipped (--no-deploy)." in result.stdout
@@ -1260,7 +1375,9 @@ def test_setup_no_deploy_and_no_smoke(saved, espanso, fake_run, smoke_ok):
     assert smoke_ok == []
 
 
-def test_setup_option_errors(saved, espanso, tty, monkeypatch, fake_run):
+def test_setup_option_errors(
+    saved: Path, espanso: Path, tty: None, monkeypatch: pytest.MonkeyPatch, fake_run: FakeRunner
+) -> None:
     assert _setup(espanso, "--api-key-stdin").exit_code == 2
     assert _setup(espanso, "--non-interactive", "--profile", "nosuch").exit_code == 2
     monkeypatch.setenv("PROMPT_PROVIDER", "nope")
@@ -1271,14 +1388,16 @@ def test_setup_option_errors(saved, espanso, tty, monkeypatch, fake_run):
     assert "pass --provider" in re.sub(r"\x1b\[[0-9;]*m", "", result.output)
 
 
-def test_setup_in_legacy_mode_lists_what_to_set(espanso, fake_run, smoke_ok):
+def test_setup_in_legacy_mode_lists_what_to_set(
+    espanso: Path, fake_run: FakeRunner, smoke_ok: list[str]
+) -> None:
     result = _setup(espanso, "--non-interactive", "--provider", "ollama")
     assert result.exit_code == 0
     assert "to do: set PROMPT_PROVIDER=ollama" in result.stdout
 
 
-def test_smoke_reports_a_cli_that_cannot_start():
-    def broken(argv, env):
+def test_smoke_reports_a_cli_that_cannot_start() -> None:
+    def broken(argv: Sequence[str], env: Mapping[str, str]) -> tuple[int, bytes]:
         raise OSError("no python")
 
     result = smoke.run("openrouter", runner=broken)
@@ -1289,7 +1408,9 @@ def test_smoke_reports_a_cli_that_cannot_start():
 # --- odds and ends ------------------------------------------------------------------------
 
 
-def test_stats_shows_estimated_unknown_and_local_costs(monkeypatch, seed_history):
+def test_stats_shows_estimated_unknown_and_local_costs(
+    monkeypatch: pytest.MonkeyPatch, seed_history: SeedHistory
+) -> None:
     for attempt in (
         {"provider": "ollama", "requested_model": "qwen3:8b", "cost_state": "not_applicable"},
         {"provider": "anthropic", "requested_model": "claude-sonnet-5"},
@@ -1304,22 +1425,22 @@ def test_stats_shows_estimated_unknown_and_local_costs(monkeypatch, seed_history
     out = _run("stats", "--by", "provider").stdout
     assert "1 local (no cost)" in out
     assert "1 attempt(s) with an unknown cost" in out
-    estimated = {"estimated": {"USD": Decimal("0.5")}, "reported": {}}
+    estimated: dict[str, Any] = {"estimated": {"USD": Decimal("0.5")}, "reported": {}}
     row = history.StatsRow("x", 1, 1, "2026-10-05T00:00:00.000000Z", None, None, {}, **estimated)
     from prompt_workflow.commands import usage
 
     assert "estimated 0.5 USD" in " ".join(usage._row_text(row))
 
 
-def test_stats_when_history_is_off(monkeypatch):
+def test_stats_when_history_is_off(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PROMPT_HISTORY", "false")
     assert "Usage history is off" in _run("stats").stdout
 
 
-def test_an_unexpected_error_is_one_line(monkeypatch):
+def test_an_unexpected_error_is_one_line(monkeypatch: pytest.MonkeyPatch) -> None:
     from prompt_workflow.commands import usage
 
-    def broken(settings):
+    def broken(settings: Any) -> None:
         raise RuntimeError("kaput")
 
     monkeypatch.setattr(usage, "store", broken)
@@ -1328,9 +1449,9 @@ def test_an_unexpected_error_is_one_line(monkeypatch):
     assert result.stderr == "error: unexpected RuntimeError: kaput\n"
 
 
-def test_terminal_probes_survive_a_closed_stream(monkeypatch):
+def test_terminal_probes_survive_a_closed_stream(monkeypatch: pytest.MonkeyPatch) -> None:
     class Closed:
-        def isatty(self):
+        def isatty(self) -> None:
             raise ValueError("I/O operation on closed file")
 
     monkeypatch.setattr("sys.stdin", Closed())
@@ -1339,40 +1460,46 @@ def test_terminal_probes_survive_a_closed_stream(monkeypatch):
     assert common.stdout_is_tty() is False
 
 
-def test_getpass_is_hidden_input(monkeypatch):
+def test_getpass_is_hidden_input(monkeypatch: pytest.MonkeyPatch) -> None:
     import getpass
 
     monkeypatch.setattr(getpass, "getpass", lambda prompt: f"typed for {prompt}")
     assert common._getpass("KEY: ") == "typed for KEY: "
 
 
-def test_secrets_set_empty_hidden_input(saved, tty, monkeypatch):
+def test_secrets_set_empty_hidden_input(
+    saved: Path, tty: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(common, "_getpass", lambda prompt: " ")
     result = _run("secrets", "set", "OPENROUTER_API_KEY")
     assert result.exit_code == 1
     assert "no value entered" in result.stderr
 
 
-def test_config_show_quotes_an_unprintable_value(monkeypatch):
+def test_config_show_quotes_an_unprintable_value(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PROMPT_EXTRA_PATTERNS", "a\tb")
     assert "PROMPT_EXTRA_PATTERNS            'a\\tb'" in _run("config", "show").stdout
 
 
-def test_config_set_warns_when_the_environment_wins(saved, monkeypatch):
+def test_config_set_warns_when_the_environment_wins(
+    saved: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("PROMPT_PROFILE", "default")
     result = _run("config", "set", "PROMPT_PROFILE", "general")
     assert result.exit_code == 0
     assert "environment variable PROMPT_PROFILE is set" in result.stderr
 
 
-def test_config_unset_of_an_unsaved_setting(saved):
+def test_config_unset_of_an_unsaved_setting(saved: Path) -> None:
     result = _run("config", "unset", "PROMPT_PROFILE")
     assert result.exit_code == 0
     assert "nothing to do" in result.stdout
     assert not (saved / "config.toml").exists()
 
 
-def test_secrets_remove_says_where_a_key_still_comes_from(saved, monkeypatch):
+def test_secrets_remove_says_where_a_key_still_comes_from(
+    saved: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     config_store_secret(saved)
     monkeypatch.setenv("OPENROUTER_API_KEY", KEY)
     result = _run("secrets", "remove", "OPENROUTER_API_KEY", "--yes")
@@ -1382,7 +1509,9 @@ def test_secrets_remove_says_where_a_key_still_comes_from(saved, monkeypatch):
     assert "nothing to do" in _run("secrets", "remove", "OPENROUTER_API_KEY").stdout
 
 
-def test_profiles_migrate_nothing_changed_and_default(monkeypatch, tmp_path):
+def test_profiles_migrate_nothing_changed_and_default(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     from prompt_workflow import profiles
 
     checkout = tmp_path / "checkout"
@@ -1405,7 +1534,9 @@ def test_profiles_migrate_nothing_changed_and_default(monkeypatch, tmp_path):
 
 # config set saves a persona the gate's patterns match (exit 0) and warns on stderr with the
 # finding names only, as validate would (#29 follow-up). The same exemptions apply.
-def test_config_set_warns_about_a_flagged_persona(saved, monkeypatch):
+def test_config_set_warns_about_a_flagged_persona(
+    saved: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     address = "jane.doe" + "@" + "example.com"
     result = _run("config", "set", "PROMPT_PERSONA", f"I am an analyst, mail {address}.")
     assert result.exit_code == 0, result.output
@@ -1430,7 +1561,7 @@ def test_config_set_warns_about_a_flagged_persona(saved, monkeypatch):
 
 # An empty value set on purpose reads "(empty)" in config show; one left at an empty default
 # stays blank, and config get prints the raw value for scripts.
-def test_config_show_marks_an_empty_value(saved, monkeypatch):
+def test_config_show_marks_an_empty_value(saved: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert _run("config", "set", "PROMPT_TEMPERATURE", "").exit_code == 0
     monkeypatch.setenv("OPENROUTER_PRO_MAX_TOKENS", "")
     lines = _run("config", "show").stdout.splitlines()

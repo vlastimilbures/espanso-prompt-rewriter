@@ -8,10 +8,13 @@ import io
 import json
 import os
 import re
-from pathlib import Path, PurePosixPath, PureWindowsPath
+import shutil
+from collections.abc import Callable, Mapping, MutableMapping, Sequence
+from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
+from typing import Any
 
 import pytest
-from typer.testing import CliRunner
+from typer.testing import CliRunner, Result
 
 from prompt_workflow import (
     assets,
@@ -32,16 +35,21 @@ UV_BIN = "/Users/me/.local/bin/prompt-workflow"
 
 
 class FakeRunner:
-    def __init__(self, answers=None):
+    def __init__(self, answers: dict[str, str] | None = None) -> None:
         self.answers = answers or {}
         self.calls: list[list[str]] = []
 
-    def __call__(self, argv):
+    def __call__(self, argv: Sequence[str]) -> str | None:
         self.calls.append(list(argv))
         return self.answers.get(" ".join(argv))
 
 
-def checkout(tmp_path: Path, name: str = previous_install.PROJECT_NAME, *, env=True) -> Path:
+def checkout(
+    tmp_path: Path,
+    name: str = previous_install.PROJECT_NAME,
+    *,
+    env: bool = True,
+) -> Path:
     """A checkout as an editable install left it: pyproject.toml, a .env with one setting and
     one key (built at runtime, so no scanner takes it for a credential), an edited profile."""
     root = tmp_path / "Projects" / "epr"
@@ -70,7 +78,7 @@ def deploy_old(espanso: Path, launcher: str) -> None:
         (espanso / "match" / name).write_bytes(text.encode("utf-8"))
 
 
-def receipt(tools: Path, **source) -> None:
+def receipt(tools: Path, **source: Any) -> None:
     folder = tools / previous_install.PROJECT_NAME
     folder.mkdir(parents=True, exist_ok=True)
     ((key, value),) = source.items()
@@ -80,23 +88,23 @@ def receipt(tools: Path, **source) -> None:
 
 
 @pytest.fixture
-def espanso(tmp_path):
+def espanso(tmp_path: Path) -> Path:
     root = tmp_path / "espanso"
     (root / "match").mkdir(parents=True)
     return root
 
 
 @pytest.fixture
-def env(monkeypatch):
+def env(monkeypatch: pytest.MonkeyPatch) -> MutableMapping[str, str]:
     """The process environment the tests run under (conftest's temp dirs), without a legacy
     PROMPT_WORKFLOW_ENV and with a PATH that holds no prompt-workflow."""
     monkeypatch.delenv("PROMPT_WORKFLOW_ENV", raising=False)
     monkeypatch.delenv("VIRTUAL_ENV", raising=False)
-    monkeypatch.setattr(previous_install.shutil, "which", lambda *a, **k: None)
+    monkeypatch.setattr(shutil, "which", lambda *a, **k: None)
     return os.environ
 
 
-def _roots(found):
+def _roots(found: previous_install.Detection) -> dict[Path, frozenset[str]]:
     return {c.root: c.signals for c in found.candidates}
 
 
@@ -120,14 +128,16 @@ def _roots(found):
         (".venv/bin/prompt-workflow", None),  # relative: never resolved against the cwd
     ],
 )
-def test_checkout_root_of(launcher, root):
+def test_checkout_root_of(launcher: str, root: PurePath | None) -> None:
     assert previous_install.checkout_root_of(launcher) == root
 
 
 # --- Signals ------------------------------------------------------------------------------
 
 
-def test_detects_the_launcher_in_old_match_files(tmp_path, espanso, env):
+def test_detects_the_launcher_in_old_match_files(
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str]
+) -> None:
     root = checkout(tmp_path)
     launcher = str(venv_launcher(root))
     deploy_old(espanso, launcher)
@@ -141,7 +151,9 @@ def test_detects_the_launcher_in_old_match_files(tmp_path, espanso, env):
     assert found.gated is None
 
 
-def test_detects_a_manifest_entry(tmp_path, espanso, env):
+def test_detects_a_manifest_entry(
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str]
+) -> None:
     root = checkout(tmp_path)
     launcher = str(venv_launcher(root)).replace("\\", "/")
     deploy.apply(deploy.plan(espanso, launcher, deploy.Manifest.load()))
@@ -149,7 +161,9 @@ def test_detects_a_manifest_entry(tmp_path, espanso, env):
     assert _roots(found) == {root.resolve(): {LAUNCHER, MANIFEST}}
 
 
-def test_a_manifest_entry_whose_file_is_gone_is_no_signal(tmp_path, espanso, env):
+def test_a_manifest_entry_whose_file_is_gone_is_no_signal(
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str]
+) -> None:
     root = checkout(tmp_path)
     launcher = str(venv_launcher(root)).replace("\\", "/")
     deploy.apply(deploy.plan(espanso, launcher, deploy.Manifest.load()))
@@ -159,7 +173,9 @@ def test_a_manifest_entry_whose_file_is_gone_is_no_signal(tmp_path, espanso, env
 
 
 @pytest.mark.parametrize("kind", ["editable", "directory"])
-def test_detects_the_uv_receipt(tmp_path, espanso, env, kind):
+def test_detects_the_uv_receipt(
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str], kind: str
+) -> None:
     root = checkout(tmp_path)
     tools = tmp_path / "uv" / "tools"
     receipt(tools, **{kind: str(root)})
@@ -168,7 +184,9 @@ def test_detects_the_uv_receipt(tmp_path, espanso, env, kind):
     assert _roots(found) == {root.resolve(): {RECEIPT}}
 
 
-def test_a_wheel_receipt_gives_nothing(tmp_path, espanso, env):
+def test_a_wheel_receipt_gives_nothing(
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str]
+) -> None:
     checkout(tmp_path)
     tools = tmp_path / "uv" / "tools"
     receipt(tools, url="https://example.invalid/espanso_prompt_rewriter-0.16.1-py3-none-any.whl")
@@ -177,20 +195,26 @@ def test_a_wheel_receipt_gives_nothing(tmp_path, espanso, env):
 
 
 @pytest.mark.parametrize("text", ["not toml [", "[tool]\nrequirements = 3\n", ""])
-def test_a_damaged_receipt_gives_nothing(tmp_path, espanso, env, text):
+def test_a_damaged_receipt_gives_nothing(
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str], text: str
+) -> None:
     tools = tmp_path / "uv" / "tools"
     (tools / previous_install.PROJECT_NAME).mkdir(parents=True)
     (tools / previous_install.PROJECT_NAME / "uv-receipt.toml").write_text(text, "utf-8")
     assert previous_install.receipt_root(FakeRunner({"uv tool dir": str(tools)})) is None
 
 
-def test_detects_an_entered_path(tmp_path, espanso, env):
+def test_detects_an_entered_path(
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str]
+) -> None:
     root = checkout(tmp_path)
     found = previous_install.detect(runner=FakeRunner(), espanso_dir=espanso, entered=root)
     assert _roots(found) == {root.resolve(): {ENTERED}}
 
 
-def test_signals_for_one_root_merge(tmp_path, espanso, env):
+def test_signals_for_one_root_merge(
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str]
+) -> None:
     root = checkout(tmp_path)
     deploy_old(espanso, str(venv_launcher(root)))
     tools = tmp_path / "uv" / "tools"
@@ -200,14 +224,18 @@ def test_signals_for_one_root_merge(tmp_path, espanso, env):
     assert _roots(found) == {root.resolve(): {LAUNCHER, RECEIPT, ENTERED}}
 
 
-def test_a_uv_bin_launcher_alone_gives_nothing(tmp_path, espanso, env):
+def test_a_uv_bin_launcher_alone_gives_nothing(
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str]
+) -> None:
     checkout(tmp_path)
     deploy_old(espanso, UV_BIN)
     assert previous_install.detect(runner=FakeRunner(), espanso_dir=espanso).candidates == ()
 
 
 @pytest.mark.parametrize("name", ["something-else", None])
-def test_a_folder_that_is_not_this_project_gives_nothing(tmp_path, espanso, env, name):
+def test_a_folder_that_is_not_this_project_gives_nothing(
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str], name: str | None
+) -> None:
     root = checkout(tmp_path, name or "x")
     if name is None:
         (root / "pyproject.toml").unlink()
@@ -216,19 +244,23 @@ def test_a_folder_that_is_not_this_project_gives_nothing(tmp_path, espanso, env,
     assert found.candidates == ()
 
 
-def test_the_running_checkout_gives_nothing(tmp_path, espanso, env, monkeypatch):
+def test_the_running_checkout_gives_nothing(
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     root = checkout(tmp_path)
     monkeypatch.setattr(config, "_PROJECT_ROOT", root)
     found = previous_install.detect(runner=FakeRunner(), espanso_dir=espanso, entered=root)
     assert found.candidates == ()
 
 
-def test_detection_never_reads_the_env_file(tmp_path, espanso, env, monkeypatch):
+def test_detection_never_reads_the_env_file(
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     root = checkout(tmp_path)
     opened = []
     real_open = io.open
 
-    def guarded(file, *args, **kwargs):
+    def guarded(file: Any, *args: Any, **kwargs: Any) -> Any:
         opened.append(Path(os.fspath(file)).name if not isinstance(file, int) else "")
         return real_open(file, *args, **kwargs)
 
@@ -242,7 +274,9 @@ def test_detection_never_reads_the_env_file(tmp_path, espanso, env, monkeypatch)
 
 
 @pytest.mark.skipif(WINDOWS, reason="POSIX permissions")
-def test_an_unreadable_env_file_is_still_reported(tmp_path, espanso, env):
+def test_an_unreadable_env_file_is_still_reported(
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str]
+) -> None:
     root = checkout(tmp_path)
     (root / ".env").chmod(0)
     try:
@@ -253,7 +287,9 @@ def test_an_unreadable_env_file_is_still_reported(tmp_path, espanso, env):
 
 
 @pytest.mark.skipif(WINDOWS, reason="POSIX permissions")
-def test_an_unreadable_checkout_folder_never_fails_doctor(tmp_path, espanso, env, no_clipboard):
+def test_an_unreadable_checkout_folder_never_fails_doctor(
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str], no_clipboard: None
+) -> None:
     root = checkout(tmp_path)
     deploy_old(espanso, str(venv_launcher(root)))
     (root / "src").chmod(0)
@@ -266,8 +302,13 @@ def test_an_unreadable_checkout_folder_never_fails_doctor(tmp_path, espanso, env
     assert check.data["roots"] == [str(root.resolve())]
 
 
-def test_a_check_that_raises_is_a_warning_not_a_failure(espanso, env, no_clipboard, monkeypatch):
-    def broken(**_):
+def test_a_check_that_raises_is_a_warning_not_a_failure(
+    espanso: Path,
+    env: MutableMapping[str, str],
+    no_clipboard: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def broken(**_: Any) -> None:
         raise PermissionError("no")
 
     monkeypatch.setattr(previous_install, "detect", broken)
@@ -275,7 +316,9 @@ def test_a_check_that_raises_is_a_warning_not_a_failure(espanso, env, no_clipboa
     assert _check(report).status == "warn"
 
 
-def test_without_espanso_dir_it_asks_espanso(tmp_path, espanso, env):
+def test_without_espanso_dir_it_asks_espanso(
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str]
+) -> None:
     root = checkout(tmp_path)
     deploy_old(espanso, str(venv_launcher(root)))
     runner = FakeRunner({"espanso path config": str(espanso)})
@@ -286,14 +329,18 @@ def test_without_espanso_dir_it_asks_espanso(tmp_path, espanso, env):
 # --- Gate (D-MIG-4) -----------------------------------------------------------------------
 
 
-def test_legacy_mode_detects_nothing(tmp_path, espanso, monkeypatch):
+def test_legacy_mode_detects_nothing(
+    tmp_path: Path, espanso: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     root = checkout(tmp_path)
     monkeypatch.setenv("PROMPT_WORKFLOW_ENV", str(tmp_path / "legacy.env"))
     found = previous_install.detect(runner=FakeRunner(), espanso_dir=espanso, entered=root)
     assert (found.candidates, found.gated) == ((), previous_install.LEGACY)
 
 
-def test_a_saved_config_detects_nothing(tmp_path, espanso, env):
+def test_a_saved_config_detects_nothing(
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str]
+) -> None:
     root = checkout(tmp_path)
     deploy_old(espanso, str(venv_launcher(root)))
     path = config.settings_file()
@@ -303,7 +350,9 @@ def test_a_saved_config_detects_nothing(tmp_path, espanso, env):
     assert (found.candidates, found.gated) == ((), previous_install.SAVED)
 
 
-def test_a_secret_store_detects_nothing(tmp_path, espanso, env):
+def test_a_secret_store_detects_nothing(
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str]
+) -> None:
     root = checkout(tmp_path)
     store = config.settings_file().with_name("secrets.toml")
     store.parent.mkdir(parents=True, exist_ok=True)
@@ -312,7 +361,9 @@ def test_a_secret_store_detects_nothing(tmp_path, espanso, env):
     assert (found.candidates, found.gated) == ((), previous_install.SECRETS)
 
 
-def test_a_config_toml_folder_is_not_a_saved_config(tmp_path, espanso, env):
+def test_a_config_toml_folder_is_not_a_saved_config(
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str]
+) -> None:
     root = checkout(tmp_path)
     config.settings_file().mkdir(parents=True)
     found = previous_install.detect(runner=FakeRunner(), espanso_dir=espanso, entered=root)
@@ -320,7 +371,9 @@ def test_a_config_toml_folder_is_not_a_saved_config(tmp_path, espanso, env):
     assert found.candidates
 
 
-def test_a_manifest_alone_does_not_close_the_gate(tmp_path, espanso, env):
+def test_a_manifest_alone_does_not_close_the_gate(
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str]
+) -> None:
     """The editable install deployed (with a manifest) before the switch, so a manifest
     pointing into the checkout must still be found."""
     root = checkout(tmp_path)
@@ -334,7 +387,9 @@ def test_a_manifest_alone_does_not_close_the_gate(tmp_path, espanso, env):
 # --- Skip marker (D-MIG-3) ----------------------------------------------------------------
 
 
-def test_a_skipped_root_is_offered_only_when_entered(tmp_path, espanso, env):
+def test_a_skipped_root_is_offered_only_when_entered(
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str]
+) -> None:
     root = checkout(tmp_path)
     deploy_old(espanso, str(venv_launcher(root)))
     previous_install.skip(root.resolve())
@@ -344,7 +399,9 @@ def test_a_skipped_root_is_offered_only_when_entered(tmp_path, espanso, env):
 
 
 @pytest.mark.skipif(WINDOWS, reason="symlinks need privileges on Windows")
-def test_a_root_skipped_through_a_link_is_skipped(tmp_path, espanso, env):
+def test_a_root_skipped_through_a_link_is_skipped(
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str]
+) -> None:
     root = checkout(tmp_path)
     link = tmp_path / "link"
     link.symlink_to(root, target_is_directory=True)
@@ -353,7 +410,7 @@ def test_a_root_skipped_through_a_link_is_skipped(tmp_path, espanso, env):
     assert previous_install.detect(runner=FakeRunner(), espanso_dir=espanso).candidates == ()
 
 
-def test_a_skip_keeps_earlier_times(tmp_path, env):
+def test_a_skip_keeps_earlier_times(tmp_path: Path, env: MutableMapping[str, str]) -> None:
     path = previous_install.skip_file()
     path.parent.mkdir(parents=True, exist_ok=True)
     first = str((tmp_path / "a").resolve())
@@ -365,7 +422,9 @@ def test_a_skip_keeps_earlier_times(tmp_path, env):
     assert len(items) == 2
 
 
-def test_another_checkout_is_offered_after_a_skip(tmp_path, espanso, env):
+def test_another_checkout_is_offered_after_a_skip(
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str]
+) -> None:
     previous_install.skip(tmp_path / "elsewhere")
     root = checkout(tmp_path)
     deploy_old(espanso, str(venv_launcher(root)))
@@ -373,7 +432,9 @@ def test_another_checkout_is_offered_after_a_skip(tmp_path, espanso, env):
 
 
 @pytest.mark.parametrize("text", ["{", "[]", '{"skipped": 3}', '{"skipped": [3, {"root": 4}]}'])
-def test_a_damaged_skip_marker_counts_as_empty(tmp_path, espanso, env, text):
+def test_a_damaged_skip_marker_counts_as_empty(
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str], text: str
+) -> None:
     path = previous_install.skip_file()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, "utf-8")
@@ -389,7 +450,7 @@ def test_a_damaged_skip_marker_counts_as_empty(tmp_path, espanso, env, text):
 
 
 @pytest.fixture
-def installed(tmp_path, monkeypatch):
+def installed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     launcher = tmp_path / "uv-bin" / "prompt-workflow"
     launcher.parent.mkdir()
     launcher.write_text("", "utf-8")
@@ -397,11 +458,13 @@ def installed(tmp_path, monkeypatch):
     return launcher
 
 
-def _which(monkeypatch, path):
-    monkeypatch.setattr(previous_install.shutil, "which", lambda *a, **k: str(path))
+def _which(monkeypatch: pytest.MonkeyPatch, path: Path | str) -> None:
+    monkeypatch.setattr(shutil, "which", lambda *a, **k: str(path))
 
 
-def test_an_active_venv_shadows_the_launcher(tmp_path, installed, monkeypatch):
+def test_an_active_venv_shadows_the_launcher(
+    tmp_path: Path, installed: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     root = checkout(tmp_path)
     old = venv_launcher(root)
     old.parent.mkdir(parents=True)
@@ -414,7 +477,9 @@ def test_an_active_venv_shadows_the_launcher(tmp_path, installed, monkeypatch):
     assert "deactivate" in found.hint
 
 
-def test_a_venv_on_path_without_virtual_env(tmp_path, installed, monkeypatch):
+def test_a_venv_on_path_without_virtual_env(
+    tmp_path: Path, installed: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     old = venv_launcher(checkout(tmp_path))
     old.parent.mkdir(parents=True)
     old.write_text("", "utf-8")
@@ -424,7 +489,9 @@ def test_a_venv_on_path_without_virtual_env(tmp_path, installed, monkeypatch):
     assert str(old.parent) in found.hint
 
 
-def test_another_cli_on_path(tmp_path, installed, monkeypatch):
+def test_another_cli_on_path(
+    tmp_path: Path, installed: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     other = tmp_path / "pipx" / "prompt-workflow"
     other.parent.mkdir()
     other.write_text("", "utf-8")
@@ -434,23 +501,25 @@ def test_another_cli_on_path(tmp_path, installed, monkeypatch):
     assert "uninstall" in found.hint
 
 
-def test_no_shadow_when_path_finds_the_launcher(installed, monkeypatch):
+def test_no_shadow_when_path_finds_the_launcher(
+    installed: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _which(monkeypatch, installed)
     assert previous_install.shadow({"PATH": str(installed.parent)}, FakeRunner()) is None
 
 
-def test_no_shadow_without_a_launcher(tmp_path, monkeypatch):
+def test_no_shadow_without_a_launcher(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _which(monkeypatch, tmp_path / "prompt-workflow")
 
-    def nothing(**_):
+    def nothing(**_: Any) -> None:
         raise deploy.DeployError("none")
 
     monkeypatch.setattr(deploy, "resolve_launcher", nothing)
     assert previous_install.shadow({}, FakeRunner()) is None
 
 
-def test_a_given_launcher_is_not_looked_up(tmp_path, monkeypatch):
-    def unexpected(**_):
+def test_a_given_launcher_is_not_looked_up(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def unexpected(**_: Any) -> None:
         raise AssertionError("looked up")
 
     monkeypatch.setattr(deploy, "resolve_launcher", unexpected)
@@ -466,12 +535,12 @@ def test_a_given_launcher_is_not_looked_up(tmp_path, monkeypatch):
 # --- doctor -------------------------------------------------------------------------------
 
 
-def _check(report):
+def _check(report: doctor.Report) -> doctor.Check:
     return next(c for c in report.checks if c.id == "previous_install")
 
 
 @pytest.fixture
-def no_clipboard(monkeypatch):
+def no_clipboard(monkeypatch: pytest.MonkeyPatch) -> None:
     import pyperclip
 
     from prompt_workflow import clipboard_guard
@@ -480,7 +549,9 @@ def no_clipboard(monkeypatch):
     monkeypatch.setattr(pyperclip, "paste", lambda: "")
 
 
-def test_doctor_reports_a_previous_install(tmp_path, espanso, env, no_clipboard):
+def test_doctor_reports_a_previous_install(
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str], no_clipboard: None
+) -> None:
     root = checkout(tmp_path)
     deploy_old(espanso, str(venv_launcher(root)))
     report = doctor.run(espanso_dir=espanso, launcher=UV_BIN, runner=FakeRunner())
@@ -498,12 +569,16 @@ def test_doctor_reports_a_previous_install(tmp_path, espanso, env, no_clipboard)
     assert "sk-or" not in repr(report.to_json())
 
 
-def test_doctor_with_nothing_found(espanso, env, no_clipboard):
+def test_doctor_with_nothing_found(
+    espanso: Path, env: MutableMapping[str, str], no_clipboard: None
+) -> None:
     report = doctor.run(espanso_dir=espanso, launcher=UV_BIN, runner=FakeRunner())
     assert (_check(report).status, _check(report).message) == ("ok", "no previous install found")
 
 
-def test_doctor_after_migration_looks_for_nothing(tmp_path, espanso, env, no_clipboard):
+def test_doctor_after_migration_looks_for_nothing(
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str], no_clipboard: None
+) -> None:
     root = checkout(tmp_path)
     deploy_old(espanso, str(venv_launcher(root)))
     path = config.settings_file()
@@ -515,8 +590,13 @@ def test_doctor_after_migration_looks_for_nothing(tmp_path, espanso, env, no_cli
 
 
 def test_doctor_warns_about_a_shadowed_cli(
-    tmp_path, espanso, env, installed, no_clipboard, monkeypatch
-):
+    tmp_path: Path,
+    espanso: Path,
+    env: MutableMapping[str, str],
+    installed: Path,
+    no_clipboard: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     old = venv_launcher(checkout(tmp_path))
     old.parent.mkdir(parents=True)
     old.write_text("", "utf-8")
@@ -551,19 +631,25 @@ def user_dir() -> Path:
     return directory
 
 
-def _copy(root: Path, **kwargs):
+def _copy(
+    root: Path, **kwargs: Any
+) -> tuple[config_store.MigrationPlan, config_store.MigrationResult]:
     plan = config_store.plan_migration(source=root)
     return plan, config_store.apply_migration(source=root, consent=plan.token, **kwargs)
 
 
 # Copy mode refuses an earlier .env whose value was cut at an unquoted ` #` (#32).
-def test_copy_refuses_a_value_cut_at_a_comment(tmp_path, env):
+def test_copy_refuses_a_value_cut_at_a_comment(
+    tmp_path: Path, env: MutableMapping[str, str]
+) -> None:
     root = old_checkout(tmp_path, "PROMPT_EXTRA_PATTERNS=ticket #\\d{5}\n")
     with pytest.raises(config_store.MigrationError, match="was cut at ' #'"):
         config_store.plan_migration(source=root)
 
 
-def test_copy_fills_only_settings_at_their_default(tmp_path, env):
+def test_copy_fills_only_settings_at_their_default(
+    tmp_path: Path, env: MutableMapping[str, str]
+) -> None:
     root = old_checkout(tmp_path)
     original = (root / ".env").read_bytes()
     active = user_dir() / ".env"
@@ -610,7 +696,9 @@ def test_copy_fills_only_settings_at_their_default(tmp_path, env):
     ]
 
 
-def test_copy_never_overrides_a_stored_key_or_a_real_variable(tmp_path, env, monkeypatch):
+def test_copy_never_overrides_a_stored_key_or_a_real_variable(
+    tmp_path: Path, env: MutableMapping[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     root = old_checkout(tmp_path)
     stored = "sk-or-v1-" + "ef56" * 16
     config_store.save_secret("OPENROUTER_API_KEY", stored)
@@ -622,7 +710,9 @@ def test_copy_never_overrides_a_stored_key_or_a_real_variable(tmp_path, env, mon
     assert Settings.load().openrouter_api_key == stored
 
 
-def test_copy_needs_the_preview_token_and_writes_nothing_without_it(tmp_path, env):
+def test_copy_needs_the_preview_token_and_writes_nothing_without_it(
+    tmp_path: Path, env: MutableMapping[str, str]
+) -> None:
     root = old_checkout(tmp_path)
     plan = config_store.plan_migration(source=root)
     for consent in ("", "yes", plan.token[::-1]):
@@ -650,31 +740,37 @@ def test_copy_needs_the_preview_token_and_writes_nothing_without_it(tmp_path, en
         ),
     ],
 )
-def test_copy_refusals(tmp_path, env, make, error):
+def test_copy_refusals(
+    tmp_path: Path, env: MutableMapping[str, str], make: Callable[[Path], Path], error: str
+) -> None:
     with pytest.raises(MigrationError, match=error):
         config_store.plan_migration(source=make(tmp_path))
     assert not config.settings_file().exists()
 
 
-def test_copy_refuses_the_running_checkout(tmp_path, env, monkeypatch):
+def test_copy_refuses_the_running_checkout(
+    tmp_path: Path, env: MutableMapping[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     root = old_checkout(tmp_path)
     monkeypatch.setattr(config, "_PROJECT_ROOT", root)
     with pytest.raises(MigrationError, match="this install's own checkout"):
         config_store.plan_migration(source=root)
 
 
-def test_copy_in_legacy_mode_is_refused(tmp_path):
+def test_copy_in_legacy_mode_is_refused(tmp_path: Path) -> None:
     with pytest.raises(MigrationError, match="PROMPT_WORKFLOW_ENV is set"):
         config_store.plan_migration(source=old_checkout(tmp_path))
 
 
-def test_a_failed_copy_check_undoes_everything(tmp_path, env, monkeypatch):
+def test_a_failed_copy_check_undoes_everything(
+    tmp_path: Path, env: MutableMapping[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     root = old_checkout(tmp_path)
     plan = config_store.plan_migration(source=root)
     real = config_store._effective
     calls = []
 
-    def effective(environ):
+    def effective(environ: Mapping[str, str]) -> dict[str, tuple[Any, str]]:
         calls.append(1)
         values = real(environ)
         if len(calls) == 2:  # the reload after the writes
@@ -689,7 +785,9 @@ def test_a_failed_copy_check_undoes_everything(tmp_path, env, monkeypatch):
     assert not (user_dir() / "migration.json").exists()
 
 
-def test_plain_migration_keeps_a_value_a_real_variable_shadows(tmp_path, env, monkeypatch):
+def test_plain_migration_keeps_a_value_a_real_variable_shadows(
+    tmp_path: Path, env: MutableMapping[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     # The .env's value is migrated, the variable still wins: nothing the CLI uses changes.
     (user_dir() / ".env").write_text(
         f"OLLAMA_MODEL=from-dotenv\nOPENROUTER_API_KEY={COPIED_KEY}x\n"
@@ -702,7 +800,9 @@ def test_plain_migration_keeps_a_value_a_real_variable_shadows(tmp_path, env, mo
     assert 'OLLAMA_MODEL = "from-dotenv"' in config.settings_file().read_text("utf-8")
 
 
-def test_copy_keeps_a_shadowed_value_of_the_env_in_use(tmp_path, env, monkeypatch):
+def test_copy_keeps_a_shadowed_value_of_the_env_in_use(
+    tmp_path: Path, env: MutableMapping[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     root = old_checkout(tmp_path)
     (user_dir() / ".env").write_text("OPENROUTER_MAX_TOKENS=900\n", "utf-8")
     monkeypatch.setenv("OPENROUTER_MAX_TOKENS", "1200")
@@ -716,7 +816,9 @@ def _redeployed(espanso: Path) -> None:
     deploy_old(espanso, UV_BIN)
 
 
-def test_retire_waits_for_the_redeploy(tmp_path, espanso, env):
+def test_retire_waits_for_the_redeploy(
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str]
+) -> None:
     root = old_checkout(tmp_path)
     original = (root / ".env").read_bytes()
     deploy_old(espanso, str(venv_launcher(root)))
@@ -743,7 +845,9 @@ def test_retire_waits_for_the_redeploy(tmp_path, espanso, env):
         config_store.plan_retire(root, espanso_dir=espanso)
 
 
-def test_retire_refuses_while_the_manifest_names_the_checkout(tmp_path, espanso, env):
+def test_retire_refuses_while_the_manifest_names_the_checkout(
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str]
+) -> None:
     root = old_checkout(tmp_path)
     launcher = str(venv_launcher(root)).replace("\\", "/")
     deploy.apply(deploy.plan(espanso, launcher, deploy.Manifest.load()))
@@ -754,19 +858,23 @@ def test_retire_refuses_while_the_manifest_names_the_checkout(tmp_path, espanso,
         config_store.plan_retire(root, espanso_dir=espanso)
 
 
-def test_retire_refuses_when_espanso_cannot_say_where_its_files_are(tmp_path, env):
+def test_retire_refuses_when_espanso_cannot_say_where_its_files_are(
+    tmp_path: Path, env: MutableMapping[str, str]
+) -> None:
     root = old_checkout(tmp_path)
     _copy(root)
     with pytest.raises(MigrationError, match="pass --espanso-dir"):
         config_store.plan_retire(root, runner=FakeRunner())
 
 
-def test_a_retire_cut_short_can_be_done_again(tmp_path, espanso, env, monkeypatch):
+def test_a_retire_cut_short_can_be_done_again(
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     root = old_checkout(tmp_path)
     _copy(root)
     plan = config_store.plan_retire(root, espanso_dir=espanso)
 
-    def interrupted(source, target):
+    def interrupted(source: Path, target: Path) -> bool:
         raise KeyboardInterrupt
 
     with monkeypatch.context() as patched:
@@ -781,7 +889,9 @@ def test_a_retire_cut_short_can_be_done_again(tmp_path, espanso, env, monkeypatc
     assert not (root / ".env").exists()
 
 
-def test_retire_in_legacy_mode_is_refused(tmp_path, espanso, env, monkeypatch):
+def test_retire_in_legacy_mode_is_refused(
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     root = old_checkout(tmp_path)
     _copy(root)
     monkeypatch.setenv("PROMPT_WORKFLOW_ENV", str(root / ".env"))
@@ -789,7 +899,7 @@ def test_retire_in_legacy_mode_is_refused(tmp_path, espanso, env, monkeypatch):
         config_store.plan_retire(root, espanso_dir=espanso)
 
 
-def test_retire_refusals(tmp_path, espanso, env):
+def test_retire_refusals(tmp_path: Path, espanso: Path, env: MutableMapping[str, str]) -> None:
     root = old_checkout(tmp_path)
     with pytest.raises(MigrationError, match="nothing was copied"):
         config_store.plan_retire(root, espanso_dir=espanso)
@@ -809,7 +919,9 @@ def _rollback() -> None:
     config_store.apply_rollback(consent=config_store.plan_rollback().token)
 
 
-def test_rollback_of_a_copy_leaves_the_old_env_alone(tmp_path, espanso, env):
+def test_rollback_of_a_copy_leaves_the_old_env_alone(
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str]
+) -> None:
     root = old_checkout(tmp_path)
     original = (root / ".env").read_bytes()
     active = user_dir() / ".env"
@@ -830,7 +942,9 @@ def test_rollback_of_a_copy_leaves_the_old_env_alone(tmp_path, espanso, env):
     assert _roots(found) == {root.resolve(): {LAUNCHER}}
 
 
-def test_rollback_after_a_retire_puts_the_old_env_back(tmp_path, espanso, env):
+def test_rollback_after_a_retire_puts_the_old_env_back(
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str]
+) -> None:
     root = old_checkout(tmp_path)
     original = (root / ".env").read_bytes()
     _copy(root)
@@ -846,7 +960,9 @@ def test_rollback_after_a_retire_puts_the_old_env_back(tmp_path, espanso, env):
     assert not config.settings_file().exists()
 
 
-def test_rollback_refuses_a_new_env_where_a_retired_one_goes_back(tmp_path, espanso, env):
+def test_rollback_refuses_a_new_env_where_a_retired_one_goes_back(
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str]
+) -> None:
     root = old_checkout(tmp_path)
     _copy(root)
     plan = config_store.plan_retire(root, espanso_dir=espanso)
@@ -856,7 +972,9 @@ def test_rollback_refuses_a_new_env_where_a_retired_one_goes_back(tmp_path, espa
         config_store.plan_rollback()
 
 
-def test_the_copy_is_pending_after_the_gate_closes(tmp_path, espanso, env, no_clipboard):
+def test_the_copy_is_pending_after_the_gate_closes(
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str], no_clipboard: None
+) -> None:
     root = old_checkout(tmp_path)
     launcher = str(venv_launcher(root)).replace("\\", "/") if WINDOWS else str(venv_launcher(root))
     deploy_old(espanso, str(venv_launcher(root)))
@@ -890,7 +1008,7 @@ def test_the_copy_is_pending_after_the_gate_closes(tmp_path, espanso, env, no_cl
 
 
 @pytest.mark.parametrize("text", ["{", "[]", '{"mode": "copy", "sources": {}}'])
-def test_a_damaged_marker_has_nothing_pending(env, text):
+def test_a_damaged_marker_has_nothing_pending(env: MutableMapping[str, str], text: str) -> None:
     (user_dir() / "migration.json").write_text(text, "utf-8")
     assert previous_install.copied_env(os.environ) is None
 
@@ -898,15 +1016,19 @@ def test_a_damaged_marker_has_nothing_pending(env, text):
 # --- The commands ----------------------------------------------------------------------------
 
 
-def _cli(*args, input=None):
+def _cli(*args: str, input: str | None = None) -> Result:
     return CliRunner().invoke(app, list(args), input=input)
 
 
 def _token(output: str) -> str:
-    return re.search(r"Preview token: (\w+)", output).group(1)
+    match = re.search(r"Preview token: (\w+)", output)
+    assert match
+    return match.group(1)
 
 
-def test_config_migrate_from_and_retire(tmp_path, espanso, env, monkeypatch):
+def test_config_migrate_from_and_retire(
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     root = old_checkout(tmp_path)
     deploy_old(espanso, str(venv_launcher(root)))
     preview = _cli("config", "migrate", "--from", str(root), "--dry-run")
@@ -938,8 +1060,8 @@ def test_config_migrate_from_and_retire(tmp_path, espanso, env, monkeypatch):
 
 
 def test_setup_non_interactive_offers_the_copy_and_writes_nothing(
-    tmp_path, espanso, env, monkeypatch
-):
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     root = old_checkout(tmp_path)
     deploy_old(espanso, str(venv_launcher(root)))
     monkeypatch.setattr(deploy, "run_command", FakeRunner())
@@ -962,7 +1084,9 @@ def test_setup_non_interactive_offers_the_copy_and_writes_nothing(
     assert (root / ".env").is_file()
 
 
-def _interactive(monkeypatch, answers=None):
+def _interactive(
+    monkeypatch: pytest.MonkeyPatch, answers: dict[str, str] | None = None
+) -> FakeRunner:
     from prompt_workflow import smoke
     from prompt_workflow.commands import common
 
@@ -975,8 +1099,8 @@ def _interactive(monkeypatch, answers=None):
 
 
 def test_setup_does_not_redeploy_by_default_after_a_declined_copy(
-    tmp_path, espanso, env, monkeypatch
-):
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     root = old_checkout(tmp_path)
     old = str(venv_launcher(root))
     deploy_old(espanso, old)
@@ -992,7 +1116,9 @@ def test_setup_does_not_redeploy_by_default_after_a_declined_copy(
     assert not config.settings_file().exists()
 
 
-def test_setup_carries_on_past_a_broken_env_it_found_itself(tmp_path, espanso, env, monkeypatch):
+def test_setup_carries_on_past_a_broken_env_it_found_itself(
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     root = old_checkout(tmp_path, "OPENROUTER_MAX_TOKENS=lots\n")
     deploy_old(espanso, str(venv_launcher(root)))
     monkeypatch.setattr(deploy, "run_command", FakeRunner())
@@ -1011,8 +1137,8 @@ def test_setup_carries_on_past_a_broken_env_it_found_itself(tmp_path, espanso, e
 
 
 def test_setup_copies_with_consent_then_offers_retire_after_the_deploy(
-    tmp_path, espanso, env, monkeypatch
-):
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     from prompt_workflow import smoke
     from prompt_workflow.commands import common
 
@@ -1040,7 +1166,9 @@ def test_setup_copies_with_consent_then_offers_retire_after_the_deploy(
     assert COPIED_KEY not in result.output
 
 
-def test_rollback_of_a_retired_copy_never_says_the_env_is_read_again(tmp_path, espanso, env):
+def test_rollback_of_a_retired_copy_never_says_the_env_is_read_again(
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str]
+) -> None:
     root = old_checkout(tmp_path)
     _copy(root)
     plan = config_store.plan_retire(root, espanso_dir=espanso)

@@ -6,16 +6,16 @@ from prompt_workflow.redaction import compile_extra
 
 
 class _Stub:
-    def __init__(self):
-        self.calls = []
+    def __init__(self) -> None:
+        self.calls: list[str] = []
 
-    def generate(self, prompt, system_prompt):
+    def generate(self, prompt: str, system_prompt: str) -> str:
         self.calls.append(prompt)
         return "improved"
 
 
 # GatedProvider blocks a sensitive draft and never calls through to the inner provider.
-def test_blocks_on_findings():
+def test_blocks_on_findings() -> None:
     inner = _Stub()
     provider = GatedProvider(inner, allow_override=False)
     with pytest.raises(ProviderError, match=r"Blocked cloud call.*payment_card"):
@@ -24,7 +24,7 @@ def test_blocks_on_findings():
 
 
 # ALLOW_CLOUD_OVERRIDE lets a sensitive draft through.
-def test_allow_override_passes_through():
+def test_allow_override_passes_through() -> None:
     inner = _Stub()
     provider = GatedProvider(inner, allow_override=True)
     result = provider.generate("card 4111 1111 1111 1111", "system")
@@ -33,7 +33,7 @@ def test_allow_override_passes_through():
 
 
 # A clean draft always passes through, override or not.
-def test_clean_draft_passes_through():
+def test_clean_draft_passes_through() -> None:
     inner = _Stub()
     provider = GatedProvider(inner, allow_override=False)
     result = provider.generate("summarize the quarterly report", "system")
@@ -41,7 +41,7 @@ def test_clean_draft_passes_through():
 
 
 # User-defined patterns block a draft that the built-in patterns would let through.
-def test_blocks_on_extra_pattern():
+def test_blocks_on_extra_pattern() -> None:
     inner = _Stub()
     provider = GatedProvider(inner, allow_override=False, extra_patterns=compile_extra("falcon"))
     with pytest.raises(ProviderError, match="custom_1"):
@@ -50,7 +50,7 @@ def test_blocks_on_extra_pattern():
 
 
 # A password left alone on the clipboard is blocked, though no pattern names it.
-def test_blocks_bare_token_draft():
+def test_blocks_bare_token_draft() -> None:
     inner = _Stub()
     provider = GatedProvider(inner, allow_override=False)
     with pytest.raises(ProviderError, match="bare_token"):
@@ -59,7 +59,7 @@ def test_blocks_bare_token_draft():
 
 
 # --allow-flagged sends a draft whose findings are all soft, once, and records them.
-def test_allow_flagged_sends_soft_findings():
+def test_allow_flagged_sends_soft_findings() -> None:
     inner = _Stub()
     provider = GatedProvider(inner, allow_override=False, allow_flagged=True)
     assert provider.generate("CONFIDENTIAL: write to jane@example.com", "system") == "improved"
@@ -78,7 +78,7 @@ def test_allow_flagged_sends_soft_findings():
     ],
     ids=["card", "card-and-label", "bare-token", "password"],
 )
-def test_allow_flagged_never_sends_hard_findings(draft):
+def test_allow_flagged_never_sends_hard_findings(draft: str) -> None:
     inner = _Stub()
     provider = GatedProvider(inner, allow_override=False, allow_flagged=True)
     with pytest.raises(ProviderError, match=r"-iok- never sends .*Remove it"):
@@ -88,7 +88,7 @@ def test_allow_flagged_never_sends_hard_findings(draft):
 
 
 # The user's own patterns count as hard: they name what must not leave.
-def test_allow_flagged_never_sends_extra_pattern():
+def test_allow_flagged_never_sends_extra_pattern() -> None:
     inner = _Stub()
     provider = GatedProvider(
         inner, allow_override=False, extra_patterns=compile_extra("falcon"), allow_flagged=True
@@ -108,7 +108,7 @@ def test_allow_flagged_never_sends_extra_pattern():
     ],
     ids=["soft", "hard"],
 )
-def test_block_message_hint(draft, hint):
+def test_block_message_hint(draft: str, hint: str) -> None:
     provider = GatedProvider(_Stub(), allow_override=False)
     with pytest.raises(ProviderError) as exc:
         provider.generate(draft, "system")
@@ -118,7 +118,7 @@ def test_block_message_hint(draft, hint):
 
 
 # The global override sends everything silently, as before; sent_despite is per-call only.
-def test_allow_override_records_nothing():
+def test_allow_override_records_nothing() -> None:
     provider = GatedProvider(_Stub(), allow_override=True, allow_flagged=True)
     provider.generate("CONFIDENTIAL card 4111 1111 1111 1111", "system")
     assert provider.sent_despite == ()
@@ -133,7 +133,7 @@ def test_allow_override_records_nothing():
         ("CMND 123456789", "vietnam_id_9"),
     ],
 )
-def test_allow_flagged_sends_each_soft_finding(draft, finding):
+def test_allow_flagged_sends_each_soft_finding(draft: str, finding: str) -> None:
     provider = GatedProvider(_Stub(), allow_override=False, allow_flagged=True)
     provider.generate(draft, "system")
     assert finding in provider.sent_despite
@@ -141,7 +141,7 @@ def test_allow_flagged_sends_each_soft_finding(draft, finding):
 
 # A remote Ollama or LM Studio is not told to use -iok- (an OpenRouter trigger) or -il-.
 @pytest.mark.parametrize("name", ["ollama", "lmstudio", "anthropic"])
-def test_block_message_hint_per_provider(name):
+def test_block_message_hint_per_provider(name: str) -> None:
     provider = GatedProvider(_Stub(), allow_override=False, name=name)
     with pytest.raises(ProviderError) as exc:
         provider.generate("Output is CONFIDENTIAL", "system")
@@ -151,7 +151,7 @@ def test_block_message_hint_per_provider(name):
 
 
 # sent_despite describes the last call only.
-def test_sent_despite_resets_per_call():
+def test_sent_despite_resets_per_call() -> None:
     provider = GatedProvider(_Stub(), allow_override=False, allow_flagged=True)
     provider.generate("Output is CONFIDENTIAL", "system")
     provider.generate("plain text", "system")
@@ -159,7 +159,7 @@ def test_sent_despite_resets_per_call():
 
 
 # The default cloud block message, byte for byte (README quotes it).
-def test_block_message_default_wording():
+def test_block_message_default_wording() -> None:
     with pytest.raises(ProviderError) as exc:
         GatedProvider(_Stub(), allow_override=False).generate("card 4111 1111 1111 1111", "s")
     assert str(exc.value) == (
@@ -179,7 +179,7 @@ def test_block_message_default_wording():
     ],
     ids=["soft", "hard"],
 )
-def test_block_message_with_gate_local(name, draft, tail):
+def test_block_message_with_gate_local(name: str, draft: str, tail: str) -> None:
     provider = GatedProvider(_Stub(), allow_override=False, name=name, gate_local=True)
     with pytest.raises(ProviderError) as exc:
         provider.generate(draft, "system")

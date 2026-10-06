@@ -2,6 +2,8 @@
 the real Espanso folder, and the real espanso, uv and brew are never run (conftest refuses
 deploy.run_command; a test passes or patches in a fake runner)."""
 
+from __future__ import annotations
+
 import contextlib
 import hashlib
 import importlib.util
@@ -13,13 +15,15 @@ import stat
 import subprocess
 import sys
 import time
+from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
-from typer.testing import CliRunner
+from typer.testing import CliRunner, Result
 
-from prompt_workflow import assets, deploy
+from prompt_workflow import __version__, assets, deploy
 from prompt_workflow.cli import app
 from prompt_workflow.config import user_data_dir
 from prompt_workflow.match_history import KNOWN_SOURCES
@@ -29,7 +33,7 @@ REPO = Path(__file__).resolve().parents[1]
 MATCH = REPO / "espanso" / "match"
 NAMES = sorted(p.name for p in MATCH.glob("*.yml"))
 LAUNCHER = "/Users/me/.local/bin/prompt-workflow"
-VERSION = deploy.__version__
+VERSION = __version__
 # Captured at import, before conftest swaps it for a refusal in every test.
 REAL_RUN_COMMAND = deploy.run_command
 EXE = "prompt-workflow.exe" if os.name == "nt" else "prompt-workflow"
@@ -53,7 +57,7 @@ def _script_render_windows(source: str, cli: str) -> str:
 @pytest.mark.parametrize(
     "path", ["/Users/me/.local/bin/prompt-workflow", "/Users/Jan Novák/a|b&c/prompt-workflow"]
 )
-def test_render_matches_the_macos_script_plus_stamp(name, path):
+def test_render_matches_the_macos_script_plus_stamp(name: str, path: str) -> None:
     source = (MATCH / name).read_bytes().decode("utf-8")
     rendered = deploy.render(source, deploy.launcher_text(path, windows=False), "1.2.3")
     stamp = "# prompt-workflow 1.2.3 (managed; edit at your own risk)\n"
@@ -63,7 +67,7 @@ def test_render_matches_the_macos_script_plus_stamp(name, path):
 
 
 @pytest.mark.parametrize("name", NAMES)
-def test_render_matches_the_windows_script_plus_stamp(name):
+def test_render_matches_the_windows_script_plus_stamp(name: str) -> None:
     cli = r"C:\Users\Jan Novák\.local\bin\prompt-workflow.exe"
     source = (MATCH / name).read_bytes().decode("utf-8")
     rendered = deploy.render(source, deploy.launcher_text(cli, windows=True), "1.2.3")
@@ -72,23 +76,23 @@ def test_render_matches_the_windows_script_plus_stamp(name):
 
 
 # The packaged files are the ones the scripts deployed from.
-def test_assets_are_the_repo_match_files():
+def test_assets_are_the_repo_match_files() -> None:
     assert assets.match_names() == NAMES
 
 
 @pytest.mark.parametrize("bad", ['"', "$", "`", "\\"])
-def test_launcher_guard_posix(bad):
+def test_launcher_guard_posix(bad: str) -> None:
     with pytest.raises(deploy.DeployError, match="quote, \\$, backtick or backslash"):
         deploy.launcher_text(f"/opt/a{bad}b/prompt-workflow", windows=False)
 
 
 @pytest.mark.parametrize("bad", ['"', "%", "^", "&", "|", "<", ">"])
-def test_launcher_guard_windows(bad):
+def test_launcher_guard_windows(bad: str) -> None:
     with pytest.raises(deploy.DeployError, match=r"cmd\.exe or YAML"):
         deploy.launcher_text(rf"C:\a{bad}b\prompt-workflow.exe", windows=True)
 
 
-def test_launcher_windows_slashes():
+def test_launcher_windows_slashes() -> None:
     assert deploy.launcher_text(r"C:\x\prompt-workflow.exe", windows=True) == (
         "C:/x/prompt-workflow.exe"
     )
@@ -98,17 +102,17 @@ def test_launcher_windows_slashes():
 
 
 @pytest.fixture
-def espanso(tmp_path):
+def espanso(tmp_path: Path) -> Path:
     root = tmp_path / "espanso"
     (root / "match").mkdir(parents=True)
     return root
 
 
-def _plan(espanso, launcher=LAUNCHER):
+def _plan(espanso: Path, launcher: str = LAUNCHER) -> deploy.Plan:
     return deploy.plan(espanso, launcher, deploy.Manifest.load())
 
 
-def _states(espanso, launcher=LAUNCHER):
+def _states(espanso: Path, launcher: str = LAUNCHER) -> dict[str, str]:
     return {s.name: s.state for s in _plan(espanso, launcher).steps}
 
 
@@ -116,7 +120,7 @@ def _tree(root: Path) -> dict[str, bytes]:
     return {str(p.relative_to(root)): p.read_bytes() for p in root.rglob("*") if p.is_file()}
 
 
-def test_manifest_lives_in_the_user_data_dir(espanso):
+def test_manifest_lives_in_the_user_data_dir(espanso: Path) -> None:
     deploy.apply(_plan(espanso))
     path = user_data_dir() / deploy.MANIFEST_NAME
     assert path.is_relative_to(Path(os.environ["XDG_DATA_HOME"]))
@@ -128,7 +132,7 @@ def test_manifest_lives_in_the_user_data_dir(espanso):
     assert entry["launcher"] == LAUNCHER
 
 
-def test_deploy_twice_is_a_noop(espanso):
+def test_deploy_twice_is_a_noop(espanso: Path) -> None:
     assert set(_states(espanso).values()) == {deploy.MISSING}
     first = deploy.apply(_plan(espanso))
     assert first.changed
@@ -148,7 +152,7 @@ def test_deploy_twice_is_a_noop(espanso):
 
 
 # No code path writes to Espanso's config/ (#37), and deploy touches nothing but match/.
-def test_deploy_never_touches_config(espanso):
+def test_deploy_never_touches_config(espanso: Path) -> None:
     config = espanso / "config" / "default.yml"
     config.parent.mkdir()
     config.write_text("toggle_key: ALT\n", "utf-8")
@@ -158,21 +162,21 @@ def test_deploy_never_touches_config(espanso):
     assert config.read_text("utf-8") == "toggle_key: ALT\n"
 
 
-def test_apply_refuses_a_target_outside_match(espanso):
+def test_apply_refuses_a_target_outside_match(espanso: Path) -> None:
     the_plan = _plan(espanso)
     the_plan.steps[0].target = espanso / "config" / "x.yml"
     with pytest.raises(deploy.DeployError, match="Refusing to write outside"):
         deploy.apply(the_plan)
 
 
-def _edit(espanso, name="prompts-llm.yml"):
+def _edit(espanso: Path, name: str = "prompts-llm.yml") -> Path:
     target = espanso / "match" / name
     target.write_text(target.read_text("utf-8") + "# my tweak\n", "utf-8")
     return target
 
 
 # A user-edited file is never overwritten without a choice.
-def test_modified_file_is_kept_without_a_choice(espanso):
+def test_modified_file_is_kept_without_a_choice(espanso: Path) -> None:
     deploy.apply(_plan(espanso))
     target = _edit(espanso)
     edited = target.read_bytes()
@@ -189,7 +193,7 @@ def test_modified_file_is_kept_without_a_choice(espanso):
     assert _states(espanso)["prompts-llm.yml"] == deploy.MODIFIED
 
 
-def test_modified_take_ours_backs_up(espanso):
+def test_modified_take_ours_backs_up(espanso: Path) -> None:
     deploy.apply(_plan(espanso))
     target = _edit(espanso)
     edited = target.read_bytes()
@@ -202,7 +206,7 @@ def test_modified_take_ours_backs_up(espanso):
     assert backup.read_bytes() == edited
 
 
-def test_modified_side_by_side(espanso):
+def test_modified_side_by_side(espanso: Path) -> None:
     deploy.apply(_plan(espanso))
     target = _edit(espanso)
     edited = target.read_bytes()
@@ -213,14 +217,14 @@ def test_modified_side_by_side(espanso):
     assert not side.name.endswith(".yml")  # Espanso does not load it
 
 
-def test_unknown_choice(espanso):
+def test_unknown_choice(espanso: Path) -> None:
     deploy.apply(_plan(espanso))
     _edit(espanso)
     with pytest.raises(deploy.DeployError, match="Unknown choice"):
         deploy.apply(_plan(espanso), {"prompts-llm.yml": "merge"})
 
 
-def test_foreign_file(espanso):
+def test_foreign_file(espanso: Path) -> None:
     (espanso / "match" / STATIC).write_text("matches: []\n", "utf-8")
     the_plan = _plan(espanso)
     assert {s.name: s.state for s in the_plan.conflicts} == {STATIC: deploy.FOREIGN}
@@ -230,7 +234,7 @@ def test_foreign_file(espanso):
 
 
 # A file the install scripts wrote (same body, no stamp, no manifest) is ours and stale.
-def test_script_deployed_file_is_stale(espanso):
+def test_script_deployed_file_is_stale(espanso: Path) -> None:
     for name in NAMES:
         source = (MATCH / name).read_text("utf-8")
         (espanso / "match" / name).write_text(_script_render_macos(source, LAUNCHER), "utf-8")
@@ -242,7 +246,9 @@ def test_script_deployed_file_is_stale(espanso):
 
 
 # The #25 drift case: an old prompts-template.yml deployed next to a newer CLI.
-def test_status_reports_stale_after_an_upgrade(monkeypatch, espanso):
+def test_status_reports_stale_after_an_upgrade(
+    monkeypatch: pytest.MonkeyPatch, espanso: Path
+) -> None:
     old_source = "# old template\nmatches: []\n"
     real = assets.read_match
     monkeypatch.setattr(deploy, "__version__", "0.15.0")
@@ -270,13 +276,15 @@ def test_status_reports_stale_after_an_upgrade(monkeypatch, espanso):
 
 
 # A new launcher path makes every CLI-calling file stale; the static one stays in sync.
-def test_new_launcher_is_stale(espanso):
+def test_new_launcher_is_stale(espanso: Path) -> None:
     deploy.apply(_plan(espanso))
     states = _states(espanso, "/opt/homebrew/bin/prompt-workflow")
     assert states == {n: deploy.IN_SYNC if n == STATIC else deploy.STALE for n in NAMES}
 
 
-def test_backups_pruned_to_the_last_two_of_ours(monkeypatch, espanso):
+def test_backups_pruned_to_the_last_two_of_ours(
+    monkeypatch: pytest.MonkeyPatch, espanso: Path
+) -> None:
     deploy.apply(_plan(espanso))
     target = espanso / "match" / "prompts-llm.yml"
     theirs = target.with_name("prompts-llm.yml.bak-19990101000000")
@@ -296,7 +304,7 @@ def test_backups_pruned_to_the_last_two_of_ours(monkeypatch, espanso):
     assert [Path(b).name for b in entry.backups] == left[1:]
 
 
-def test_backup_name_never_clobbers(espanso):
+def test_backup_name_never_clobbers(espanso: Path) -> None:
     path = espanso / "match" / "a.yml"
     path.write_text("one", "utf-8")
     first = deploy._backup(path, "20260101000000")
@@ -304,7 +312,7 @@ def test_backup_name_never_clobbers(espanso):
     assert (first.name, second.name) == ("a.yml.bak-20260101000000", "a.yml.bak-20260101000000-1")
 
 
-def test_legacy_base_yml_is_retired(espanso):
+def test_legacy_base_yml_is_retired(espanso: Path) -> None:
     legacy = espanso / "match" / "base.yml"
     legacy.write_text('matches:\n  - trigger: "-p-"\n    # prompt-workflow\n', "utf-8")
     the_plan = _plan(espanso)
@@ -315,13 +323,13 @@ def test_legacy_base_yml_is_retired(espanso):
     assert _plan(espanso).is_noop
 
 
-def test_other_base_yml_is_left_alone(espanso):
+def test_other_base_yml_is_left_alone(espanso: Path) -> None:
     legacy = espanso / "match" / "base.yml"
     legacy.write_text('matches:\n  - trigger: ":date"\n', "utf-8")
     assert _plan(espanso).legacy is None
 
 
-def test_non_utf8_file_is_foreign(espanso):
+def test_non_utf8_file_is_foreign(espanso: Path) -> None:
     (espanso / "match" / STATIC).write_bytes(b"\xff\xfe")
     assert _states(espanso)[STATIC] == deploy.FOREIGN
 
@@ -329,7 +337,7 @@ def test_non_utf8_file_is_foreign(espanso):
 # --- Detach -------------------------------------------------------------------------------
 
 
-def test_detach_keep_static(espanso):
+def test_detach_keep_static(espanso: Path) -> None:
     deploy.apply(_plan(espanso))
     template = _edit(espanso, "prompts-template.yml")
     outcome = deploy.detach(deploy.Manifest.load(), espanso)
@@ -343,7 +351,7 @@ def test_detach_keep_static(espanso):
     )
 
 
-def test_detach_remove_all(espanso):
+def test_detach_remove_all(espanso: Path) -> None:
     deploy.apply(_plan(espanso))
     edited = _edit(espanso, STATIC)
     deploy.detach(deploy.Manifest.load(), espanso, remove_all=True)
@@ -355,14 +363,14 @@ def test_detach_remove_all(espanso):
     assert not (user_data_dir() / deploy.MANIFEST_NAME).exists()
 
 
-def _deploy_elsewhere(tmp_path, name):
+def _deploy_elsewhere(tmp_path: Path, name: str) -> Path:
     other = tmp_path / name
     (other / "match").mkdir(parents=True)
     deploy.apply(_plan(other))
     return other
 
 
-def test_apply_forgets_entries_whose_file_is_gone(tmp_path, espanso):
+def test_apply_forgets_entries_whose_file_is_gone(tmp_path: Path, espanso: Path) -> None:
     """Entries for a deleted folder are dropped; an entry outside the plan whose file still
     exists stays, and no file is touched."""
     gone = _deploy_elsewhere(tmp_path, "gone")
@@ -384,7 +392,7 @@ def test_apply_forgets_entries_whose_file_is_gone(tmp_path, espanso):
     assert _plan(espanso).is_noop
 
 
-def test_apply_keeps_an_orphan_that_came_back(tmp_path, espanso):
+def test_apply_keeps_an_orphan_that_came_back(tmp_path: Path, espanso: Path) -> None:
     gone = _deploy_elsewhere(tmp_path, "gone")
     shutil.rmtree(gone)
     the_plan = _plan(espanso)
@@ -395,7 +403,7 @@ def test_apply_keeps_an_orphan_that_came_back(tmp_path, espanso):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="chmod cannot lock a folder on Windows")
-def test_an_unreadable_folder_is_not_gone(tmp_path, espanso):
+def test_an_unreadable_folder_is_not_gone(tmp_path: Path, espanso: Path) -> None:
     """An entry under a folder we may not look into (chmod 000, a privacy-guarded folder) is
     neither a crash nor an orphan: it stays on record."""
     locked = _deploy_elsewhere(tmp_path, "locked")
@@ -413,7 +421,9 @@ def test_an_unreadable_folder_is_not_gone(tmp_path, espanso):
     assert all(str(locked / "match" / n) in deploy.Manifest.load().entries for n in NAMES)
 
 
-def test_cli_deploy_forgets_gone_entries_when_in_sync(tmp_path, espanso, fake_run):
+def test_cli_deploy_forgets_gone_entries_when_in_sync(
+    tmp_path: Path, espanso: Path, fake_run: FakeRunner
+) -> None:
     deploy.apply(_plan(espanso))
     shutil.rmtree(_deploy_elsewhere(tmp_path, "gone"))
     result = _cli("deploy", "--yes", *_where(espanso))
@@ -424,7 +434,7 @@ def test_cli_deploy_forgets_gone_entries_when_in_sync(tmp_path, espanso, fake_ru
     assert "Nothing to do" in _cli("deploy", "--yes", *_where(espanso)).stdout
 
 
-def test_detach_leaves_unowned_files(espanso):
+def test_detach_leaves_unowned_files(espanso: Path) -> None:
     other = espanso / "match" / "mine.yml"
     other.write_text("matches: []\n", "utf-8")
     deploy.apply(_plan(espanso))
@@ -443,7 +453,7 @@ def test_detach_leaves_unowned_files(espanso):
         ('{"format": 1, "files": [{"target": "x"}]}', "damaged"),
     ],
 )
-def test_bad_manifest(content, error):
+def test_bad_manifest(content: str, error: str) -> None:
     path = user_data_dir() / deploy.MANIFEST_NAME
     path.parent.mkdir(parents=True)
     path.write_text(content, "utf-8")
@@ -455,11 +465,11 @@ def test_bad_manifest(content, error):
 
 
 class FakeRunner:
-    def __init__(self, answers=None):
+    def __init__(self, answers: Mapping[str, str | deploy.CommandFailure] | None = None) -> None:
         self.answers = answers or {}
         self.calls: list[list[str]] = []
 
-    def __call__(self, argv):
+    def __call__(self, argv: Sequence[str]) -> str | deploy.CommandFailure | None:
         self.calls.append(list(argv))
         return self.answers.get(" ".join(argv))
 
@@ -473,7 +483,7 @@ def _exe(path: Path, body: str = "") -> Path:
 
 # The same for every uv channel: a wheel URL, a local wheel and PyPI
 # (`uv tool install espanso-prompt-rewriter`) all install into `<uv tool dir>/<project name>`.
-def test_resolve_uv(tmp_path):
+def test_resolve_uv(tmp_path: Path) -> None:
     tools, bin_dir = tmp_path / "uv" / "tools", tmp_path / "bin"
     launcher = _exe(bin_dir / "prompt-workflow")
     fake = FakeRunner({"uv tool dir": f"{tools}\n", "uv tool dir --bin": f"{bin_dir}\n"})
@@ -483,7 +493,7 @@ def test_resolve_uv(tmp_path):
     assert found == deploy.Launcher(launcher, "uv")
 
 
-def test_resolve_uv_windows_exe(tmp_path):
+def test_resolve_uv_windows_exe(tmp_path: Path) -> None:
     tools, bin_dir = tmp_path / "tools", tmp_path / "bin"
     launcher = _exe(bin_dir / "prompt-workflow.exe")
     fake = FakeRunner({"uv tool dir": str(tools), "uv tool dir --bin": str(bin_dir)})
@@ -493,11 +503,11 @@ def test_resolve_uv_windows_exe(tmp_path):
     assert found.path == launcher
 
 
-def _cellar(tmp_path, version):
+def _cellar(tmp_path: Path, version: str) -> Path:
     return tmp_path / "brew" / "Cellar" / "espanso-prompt-rewriter" / version / "libexec"
 
 
-def test_resolve_homebrew_never_cellar(tmp_path):
+def test_resolve_homebrew_never_cellar(tmp_path: Path) -> None:
     brew = tmp_path / "brew"
     launcher = _exe(brew / "bin" / "prompt-workflow")
     _exe(_cellar(tmp_path, "0.15.0") / "bin" / "prompt-workflow")
@@ -510,7 +520,7 @@ def test_resolve_homebrew_never_cellar(tmp_path):
     assert found == deploy.Launcher(launcher, "homebrew")
 
 
-def test_resolve_homebrew_opt(tmp_path):
+def test_resolve_homebrew_opt(tmp_path: Path) -> None:
     brew = tmp_path / "brew"
     launcher = _exe(brew / "opt" / "espanso-prompt-rewriter" / "bin" / "prompt-workflow")
     found = deploy.resolve_launcher(
@@ -527,7 +537,7 @@ def test_resolve_homebrew_opt(tmp_path):
 # console script. Python may report the venv through the Cellar path or the `opt` link.
 @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need a privilege on Windows")
 @pytest.mark.parametrize("via", ["cellar", "opt"])
-def test_resolve_the_tap_formula(tmp_path, via):
+def test_resolve_the_tap_formula(tmp_path: Path, via: str) -> None:
     brew = tmp_path / "homebrew"
     libexec = brew / "Cellar" / "prompt-workflow" / "0.19.0" / "libexec"
     script = _exe(libexec / "bin" / "prompt-workflow")
@@ -545,7 +555,7 @@ def test_resolve_the_tap_formula(tmp_path, via):
 
 
 # A venv under some other `opt` folder (or no brew at all) is not Homebrew's.
-def test_resolve_an_opt_prefix_outside_homebrew(tmp_path):
+def test_resolve_an_opt_prefix_outside_homebrew(tmp_path: Path) -> None:
     script = _exe(tmp_path / "opt" / "tools" / "bin" / "prompt-workflow")
     for answer in ({"brew --prefix": str(tmp_path / "homebrew")}, {}):
         found = deploy.resolve_launcher(
@@ -557,7 +567,7 @@ def test_resolve_an_opt_prefix_outside_homebrew(tmp_path):
         assert found == deploy.Launcher(script, "script")
 
 
-def test_resolve_scoop_shim(tmp_path):
+def test_resolve_scoop_shim(tmp_path: Path) -> None:
     scoop = tmp_path / "scoop"
     shim = _exe(scoop / "shims" / "prompt-workflow.exe")
     found = deploy.resolve_launcher(
@@ -569,7 +579,7 @@ def test_resolve_scoop_shim(tmp_path):
     assert found == deploy.Launcher(shim, "scoop")
 
 
-def test_resolve_running_script(tmp_path):
+def test_resolve_running_script(tmp_path: Path) -> None:
     script = _exe(tmp_path / "pipx" / "bin" / "prompt-workflow")
     found = deploy.resolve_launcher(
         runner=FakeRunner(), prefix=tmp_path / "venv", script=script, windows=False
@@ -578,7 +588,7 @@ def test_resolve_running_script(tmp_path):
 
 
 # Windows runs a console script as argv[0] without the .exe.
-def test_resolve_running_script_windows(tmp_path):
+def test_resolve_running_script_windows(tmp_path: Path) -> None:
     exe = _exe(tmp_path / "Scripts" / "prompt-workflow.exe")
     found = deploy.resolve_launcher(
         runner=FakeRunner(),
@@ -594,7 +604,7 @@ def test_resolve_running_script_windows(tmp_path):
     [("Cellar", "x", "bin"), ("app", "0.15.0", "bin"), ("checkout", ".venv", "bin")],
     ids=["cellar", "versioned", "project-venv"],
 )
-def test_resolve_refuses_an_unstable_script(tmp_path, parts):
+def test_resolve_refuses_an_unstable_script(tmp_path: Path, parts: tuple[str, ...]) -> None:
     script = _exe(tmp_path.joinpath(*parts) / "prompt-workflow")
     with pytest.raises(deploy.DeployError, match="stable prompt-workflow launcher"):
         deploy.resolve_launcher(
@@ -602,7 +612,7 @@ def test_resolve_refuses_an_unstable_script(tmp_path, parts):
         )
 
 
-def test_resolve_nothing(tmp_path):
+def test_resolve_nothing(tmp_path: Path) -> None:
     with pytest.raises(deploy.DeployError, match="pass --launcher"):
         deploy.resolve_launcher(
             runner=FakeRunner(), prefix=tmp_path, script=Path("prompt-workflow"), windows=False
@@ -614,7 +624,7 @@ def test_resolve_nothing(tmp_path):
 # the network (or a warm uv cache) and real installs, which tests must not do. What matters is
 # that deploy never writes a path inside the versioned install, which this checks end to end.
 @pytest.mark.skipif(sys.platform == "win32", reason="runs a POSIX shell launcher")
-def test_upgrade_keeps_the_uv_launcher(tmp_path, espanso):
+def test_upgrade_keeps_the_uv_launcher(tmp_path: Path, espanso: Path) -> None:
     tools, bin_dir = tmp_path / "tools", tmp_path / "bin"
     venv = tools / "espanso-prompt-rewriter"
     _exe(venv / "bin" / "prompt-workflow-real", "echo N")
@@ -635,7 +645,7 @@ def test_upgrade_keeps_the_uv_launcher(tmp_path, espanso):
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need a privilege on Windows")
-def test_upgrade_keeps_the_homebrew_launcher(tmp_path, espanso):
+def test_upgrade_keeps_the_homebrew_launcher(tmp_path: Path, espanso: Path) -> None:
     brew = tmp_path / "brew"
     old = _exe(_cellar(tmp_path, "0.15.0") / "bin" / "prompt-workflow", "echo N")
     (brew / "bin").mkdir(parents=True)
@@ -665,13 +675,13 @@ def test_upgrade_keeps_the_homebrew_launcher(tmp_path, espanso):
 # --- Espanso folder and restart -----------------------------------------------------------------
 
 
-def test_espanso_dir_from_espanso():
+def test_espanso_dir_from_espanso() -> None:
     fake = FakeRunner({"espanso path config": "/x/espanso\n"})
     assert deploy.espanso_dir(fake) == Path("/x/espanso")
     assert fake.calls == [["espanso", "path", "config"]]
 
 
-def test_espanso_dir_fallback(monkeypatch, tmp_path):
+def test_espanso_dir_fallback(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(deploy, "default_espanso_dir", lambda: tmp_path / "default")
     assert deploy.espanso_dir(FakeRunner()) == tmp_path / "default"
 
@@ -685,7 +695,7 @@ def test_espanso_dir_fallback(monkeypatch, tmp_path):
         ("linux", {}, Path("~/.config/espanso")),
     ],
 )
-def test_default_espanso_dir(platform, env, expected):
+def test_default_espanso_dir(platform: str, env: dict[str, str], expected: Path) -> None:
     # Expanded here: conftest gives each test its own home folder.
     assert deploy.default_espanso_dir(env, platform=platform) == expected.expanduser()
 
@@ -698,22 +708,32 @@ def test_default_espanso_dir(platform, env, expected):
         ({}, False, [["espanso", "restart"], ["espanso", "start"]]),
     ],
 )
-def test_restart(answers, ok, calls):
+def test_restart(answers: dict[str, str], ok: bool, calls: list[list[str]]) -> None:
     fake = FakeRunner(answers)
     assert deploy.restart_espanso(fake) is ok
     assert fake.calls == calls
 
 
+def _ok(answer: str | deploy.CommandFailure) -> str:
+    assert isinstance(answer, str), answer
+    return answer
+
+
+def _failed(answer: str | deploy.CommandFailure) -> deploy.CommandFailure:
+    assert isinstance(answer, deploy.CommandFailure), answer
+    return answer
+
+
 # The real runner, tried on this test's own interpreter only.
-def test_run_command():
+def test_run_command() -> None:
     py = sys.executable
-    assert REAL_RUN_COMMAND([py, "-c", "print('hi')"]).strip() == "hi"
-    failed = REAL_RUN_COMMAND([py, "-c", "raise SystemExit(3)"])
+    assert _ok(REAL_RUN_COMMAND([py, "-c", "print('hi')"])).strip() == "hi"
+    failed = _failed(REAL_RUN_COMMAND([py, "-c", "raise SystemExit(3)"]))
     assert failed == deploy.CommandFailure(found=True, path=failed.path, returncode=3)
     assert REAL_RUN_COMMAND([str(Path(py).parent / "no-such-binary")]) == deploy.CommandFailure()
 
 
-def test_run_command_keeps_the_first_useful_stderr_line():
+def test_run_command_keeps_the_first_useful_stderr_line() -> None:
     """#115: Espanso panics with a location line first; the message comes after it."""
     stderr = (
         "thread 'main' panicked at espanso/src/main.rs:611:64:\n\n"
@@ -722,7 +742,7 @@ def test_run_command_keeps_the_first_useful_stderr_line():
     # Written as UTF-8 bytes, as Espanso writes them: a Windows child's text stderr would
     # encode with the console code page instead.
     script = f"import sys; sys.stderr.buffer.write({stderr.encode()!r}); sys.exit(101)"
-    failed = REAL_RUN_COMMAND([sys.executable, "-c", script])
+    failed = _failed(REAL_RUN_COMMAND([sys.executable, "-c", script]))
     assert (failed.returncode, failed.error) == (101, "unable to load config: [31mmissing dir")
     argv = deploy.PATH_CONFIG
     assert failed.describe(argv) == (
@@ -730,32 +750,37 @@ def test_run_command_keeps_the_first_useful_stderr_line():
     )
 
 
-def test_run_command_resolves_through_path(monkeypatch):
+def test_run_command_resolves_through_path(monkeypatch: pytest.MonkeyPatch) -> None:
     """On Windows `espanso` is `espanso.cmd`: it is run by the path `shutil.which` gives, so
     an installed command is never reported as missing (#115)."""
     seen = []
-    monkeypatch.setattr(deploy.shutil, "which", lambda name: seen.append(name) or sys.executable)
-    assert REAL_RUN_COMMAND(["espanso", "-c", "print('ran')"]).strip() == "ran"
+
+    def which(name: str) -> str:
+        seen.append(name)
+        return sys.executable
+
+    monkeypatch.setattr(shutil, "which", which)
+    assert _ok(REAL_RUN_COMMAND(["espanso", "-c", "print('ran')"])).strip() == "ran"
     assert seen == ["espanso"]
 
-    def broken(*args, **kwargs):
+    def broken(*args: Any, **kwargs: Any) -> None:
         raise PermissionError("access denied")
 
-    monkeypatch.setattr(deploy.subprocess, "Popen", broken)
-    failed = REAL_RUN_COMMAND(deploy.PATH_CONFIG)
+    monkeypatch.setattr(subprocess, "Popen", broken)
+    failed = _failed(REAL_RUN_COMMAND(deploy.PATH_CONFIG))
     assert failed == deploy.CommandFailure(found=True, path=sys.executable, error="access denied")
     assert failed.describe(deploy.PATH_CONFIG) == (
         "`espanso path config` could not be run: access denied"
     )
 
 
-def test_run_command_survives_undecodable_output():
+def test_run_command_survives_undecodable_output() -> None:
     """Output that is not UTF-8 is replaced, never raised as UnicodeDecodeError."""
     script = (
         "import sys; sys.stdout.buffer.write(b'out \\xff'); "
         "sys.stderr.buffer.write(b'bad \\x8d byte\\n'); sys.exit(101)"
     )
-    failed = REAL_RUN_COMMAND([sys.executable, "-c", script])
+    failed = _failed(REAL_RUN_COMMAND([sys.executable, "-c", script]))
     assert (failed.returncode, failed.error) == (101, "bad \ufffd byte")
     ok = REAL_RUN_COMMAND(
         [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'C:/\\xc4\\x8d')"]
@@ -763,7 +788,9 @@ def test_run_command_survives_undecodable_output():
     assert ok == "C:/\u010d"
 
 
-def test_run_command_timeout_does_not_wait_for_a_grandchild(monkeypatch, tmp_path):
+def test_run_command_timeout_does_not_wait_for_a_grandchild(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """A timed-out command whose child keeps the pipes open (espanso.cmd's espansod.exe on
     Windows) still returns: the tree is killed, and the pipes are not waited on for ever."""
     monkeypatch.setattr(deploy, "COMMAND_TIMEOUT", 0.5)
@@ -776,7 +803,7 @@ def test_run_command_timeout_does_not_wait_for_a_grandchild(monkeypatch, tmp_pat
     )
     started = time.monotonic()
     try:
-        failed = REAL_RUN_COMMAND([sys.executable, "-c", script])
+        failed = _failed(REAL_RUN_COMMAND([sys.executable, "-c", script]))
         # A hang would wait the grandchild's 60 s; the margin keeps a slow runner green.
         assert time.monotonic() - started < 30
         assert failed.timed_out
@@ -786,9 +813,9 @@ def test_run_command_timeout_does_not_wait_for_a_grandchild(monkeypatch, tmp_pat
                 os.kill(int(pid_file.read_text()), signal.SIGTERM)
 
 
-def test_run_command_times_out(monkeypatch):
+def test_run_command_times_out(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(deploy, "COMMAND_TIMEOUT", 0.2)
-    failed = REAL_RUN_COMMAND([sys.executable, "-c", "import time; time.sleep(10)"])
+    failed = _failed(REAL_RUN_COMMAND([sys.executable, "-c", "import time; time.sleep(10)"]))
     assert (failed.found, failed.timed_out) == (True, True)
     assert failed.describe(deploy.PATH_CONFIG) == "`espanso path config` timed out after 0.2 s"
 
@@ -817,7 +844,7 @@ def test_run_command_times_out(monkeypatch):
         ("x" * 500, "x" * 199 + "\u2026"),
     ],
 )
-def test_error_line(stderr, expected):
+def test_error_line(stderr: str, expected: str | None) -> None:
     assert deploy._error_line(stderr) == expected
 
 
@@ -834,10 +861,16 @@ def test_error_line(stderr, expected):
         ("\n", "`espanso path config` printed nothing"),
     ],
 )
-def test_locate_espanso_dir_says_why_it_falls_back(answer, fallback, monkeypatch, tmp_path):
+def test_locate_espanso_dir_says_why_it_falls_back(
+    answer: str | deploy.CommandFailure | None,
+    fallback: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     monkeypatch.setattr(deploy, "default_espanso_dir", lambda: tmp_path / "default")
     found = deploy.locate_espanso_dir(lambda argv: answer)
     assert found.path == tmp_path / "default"
+    assert found.fallback
     assert found.fallback.startswith(fallback)
     assert deploy.locate_espanso_dir(lambda argv: "/x/espanso\n") == deploy.EspansoDir(
         Path("/x/espanso")
@@ -848,7 +881,7 @@ def test_locate_espanso_dir_says_why_it_falls_back(answer, fallback, monkeypatch
 
 
 @pytest.fixture(autouse=True)
-def _terminal(monkeypatch):
+def _terminal(monkeypatch: pytest.MonkeyPatch) -> None:
     """The CLI tests answer prompts through CliRunner's input, as a person at a terminal would;
     without a terminal the commands refuse to ask (tests/test_commands.py)."""
     from prompt_workflow.commands import common
@@ -857,21 +890,21 @@ def _terminal(monkeypatch):
 
 
 @pytest.fixture
-def fake_run(monkeypatch):
+def fake_run(monkeypatch: pytest.MonkeyPatch) -> FakeRunner:
     fake = FakeRunner({"espanso restart": ""})
     monkeypatch.setattr(deploy, "run_command", fake)
     return fake
 
 
-def _cli(*args, input=None):
+def _cli(*args: str, input: str | None = None) -> Result:
     return runner.invoke(app, ["espanso", *args], input=input)
 
 
-def _where(espanso):
+def _where(espanso: Path) -> list[str]:
     return ["--espanso-dir", str(espanso), "--launcher", LAUNCHER]
 
 
-def test_cli_deploy_yes_then_noop(espanso, fake_run):
+def test_cli_deploy_yes_then_noop(espanso: Path, fake_run: FakeRunner) -> None:
     result = _cli("deploy", "--yes", *_where(espanso))
     assert result.exit_code == 0, result.output
     assert "missing   prompts-llm.yml" in result.stdout
@@ -881,14 +914,14 @@ def test_cli_deploy_yes_then_noop(espanso, fake_run):
     assert fake_run.calls == [["espanso", "restart"]]  # no second restart
 
 
-def test_cli_deploy_asks_first(espanso, fake_run):
+def test_cli_deploy_asks_first(espanso: Path, fake_run: FakeRunner) -> None:
     result = _cli("deploy", *_where(espanso), input="n\n")
     assert result.exit_code == 1
     assert not list((espanso / "match").iterdir())
     assert fake_run.calls == []
 
 
-def test_cli_deploy_yes_keeps_modified(espanso, fake_run):
+def test_cli_deploy_yes_keeps_modified(espanso: Path, fake_run: FakeRunner) -> None:
     deploy.apply(_plan(espanso))
     target = _edit(espanso)
     result = _cli("deploy", "--yes", *_where(espanso))
@@ -898,7 +931,7 @@ def test_cli_deploy_yes_keeps_modified(espanso, fake_run):
     assert "# my tweak" in target.read_text("utf-8")
 
 
-def test_cli_deploy_interactive_choice(espanso, fake_run):
+def test_cli_deploy_interactive_choice(espanso: Path, fake_run: FakeRunner) -> None:
     deploy.apply(_plan(espanso))
     target = _edit(espanso)
     result = _cli("deploy", *_where(espanso), input="ours\ny\n")
@@ -907,7 +940,7 @@ def test_cli_deploy_interactive_choice(espanso, fake_run):
     assert "backed up to prompts-llm.yml.bak-" in result.stdout
 
 
-def test_cli_deploy_on_conflict_flag(espanso, fake_run):
+def test_cli_deploy_on_conflict_flag(espanso: Path, fake_run: FakeRunner) -> None:
     deploy.apply(_plan(espanso))
     _edit(espanso)
     result = _cli("deploy", "--yes", "--on-conflict", "side", *_where(espanso))
@@ -916,32 +949,34 @@ def test_cli_deploy_on_conflict_flag(espanso, fake_run):
     assert fake_run.calls == []  # nothing changed, so no restart
 
 
-def test_cli_deploy_no_restart(espanso, fake_run):
+def test_cli_deploy_no_restart(espanso: Path, fake_run: FakeRunner) -> None:
     result = _cli("deploy", "--yes", "--no-restart", *_where(espanso))
     assert "not restarted" in result.stdout
     assert fake_run.calls == []
 
 
-def test_cli_deploy_bad_on_conflict(espanso, fake_run):
+def test_cli_deploy_bad_on_conflict(espanso: Path, fake_run: FakeRunner) -> None:
     result = _cli("deploy", "--yes", "--on-conflict", "merge", *_where(espanso))
     assert result.exit_code == 1
     assert "--on-conflict must be one of" in result.stderr
 
 
-def test_cli_deploy_unsafe_launcher(espanso, fake_run):
+def test_cli_deploy_unsafe_launcher(espanso: Path, fake_run: FakeRunner) -> None:
     result = _cli("deploy", "--yes", "--espanso-dir", str(espanso), "--launcher", '/a"b/pw')
     assert result.exit_code == 1
     assert "error: The CLI path contains" in result.stderr
 
 
-def test_cli_restart_failure_is_reported(espanso, monkeypatch):
+def test_cli_restart_failure_is_reported(espanso: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(deploy, "run_command", FakeRunner())
     result = _cli("deploy", "--yes", *_where(espanso))
     assert result.exit_code == 0
     assert "Could not restart Espanso" in result.stderr
 
 
-def test_cli_resolves_launcher_and_espanso_dir(espanso, monkeypatch, tmp_path):
+def test_cli_resolves_launcher_and_espanso_dir(
+    espanso: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     script = _exe(tmp_path / "pipx" / "bin" / EXE)
     monkeypatch.setattr(sys, "argv", [str(script)])
     monkeypatch.setattr(sys, "prefix", str(tmp_path / "venv"))
@@ -956,7 +991,7 @@ def test_cli_resolves_launcher_and_espanso_dir(espanso, monkeypatch, tmp_path):
     assert f"Espanso match folder: {espanso / 'match'}" in result.stdout
 
 
-def test_cli_status_diff_and_legacy(espanso, fake_run):
+def test_cli_status_diff_and_legacy(espanso: Path, fake_run: FakeRunner) -> None:
     (espanso / "match" / "base.yml").write_text('trigger: "-p-" prompt-workflow', "utf-8")
     result = _cli("status", "--diff", *_where(espanso))
     assert result.exit_code == 0
@@ -966,7 +1001,7 @@ def test_cli_status_diff_and_legacy(espanso, fake_run):
     assert (espanso / "match" / "base.yml").exists()
 
 
-def test_cli_status_bad_manifest(espanso, fake_run):
+def test_cli_status_bad_manifest(espanso: Path, fake_run: FakeRunner) -> None:
     path = user_data_dir() / deploy.MANIFEST_NAME
     path.parent.mkdir(parents=True)
     path.write_text("{", "utf-8")
@@ -1034,7 +1069,7 @@ def test_cli_status_lists_yours_and_deploy_detach_leave_them(espanso, fake_run):
     assert _tree(espanso) == before
 
 
-def test_cli_detach(espanso, fake_run):
+def test_cli_detach(espanso: Path, fake_run: FakeRunner) -> None:
     where = ["--espanso-dir", str(espanso)]
     assert "Nothing to do" in _cli("detach", "--yes", *where).stdout
     _cli("deploy", "--yes", *_where(espanso))
@@ -1046,7 +1081,7 @@ def test_cli_detach(espanso, fake_run):
     assert not list((espanso / "match").iterdir())
 
 
-def test_cli_detach_bad_manifest(fake_run):
+def test_cli_detach_bad_manifest(fake_run: FakeRunner) -> None:
     path = user_data_dir() / deploy.MANIFEST_NAME
     path.parent.mkdir(parents=True)
     path.write_text("{", "utf-8")
@@ -1054,7 +1089,7 @@ def test_cli_detach_bad_manifest(fake_run):
     assert result.exit_code == 1
 
 
-def test_cli_deploy_asks_again_after_a_bad_answer(espanso, fake_run):
+def test_cli_deploy_asks_again_after_a_bad_answer(espanso: Path, fake_run: FakeRunner) -> None:
     deploy.apply(_plan(espanso))
     target = _edit(espanso)
     result = _cli("deploy", *_where(espanso), input="merge\n\ny\n")
@@ -1064,7 +1099,7 @@ def test_cli_deploy_asks_again_after_a_bad_answer(espanso, fake_run):
 
 
 # A file that already is today's rendering but is not on record (a lost manifest) is adopted.
-def test_in_sync_file_without_manifest_is_adopted(espanso):
+def test_in_sync_file_without_manifest_is_adopted(espanso: Path) -> None:
     deploy.apply(_plan(espanso))
     (user_data_dir() / deploy.MANIFEST_NAME).unlink()
     before = _tree(espanso)
@@ -1078,7 +1113,7 @@ def test_in_sync_file_without_manifest_is_adopted(espanso):
     assert _plan(espanso).is_noop
 
 
-def test_cli_deploy_retires_legacy(espanso, fake_run):
+def test_cli_deploy_retires_legacy(espanso: Path, fake_run: FakeRunner) -> None:
     (espanso / "match" / "base.yml").write_text('trigger: "-p-" prompt-workflow', "utf-8")
     result = _cli("deploy", "--yes", *_where(espanso))
     assert "legacy    base.yml will be retired" in result.stdout
@@ -1099,6 +1134,7 @@ _hist_spec.loader.exec_module(history_script)
 
 def _git_tags() -> bool:
     git = shutil.which("git")
+    assert git
     if git is None:
         return False
     tags = subprocess.run(
@@ -1108,7 +1144,7 @@ def _git_tags() -> bool:
 
 
 # Every current source is listed, so an editable install's own deploy is recognised too.
-def test_match_history_has_the_current_sources():
+def test_match_history_has_the_current_sources() -> None:
     for name, digests in history_script.current_digests().items():
         assert digests <= KNOWN_SOURCES[name], (
             f"{name} changed: run `uv run python scripts/update_match_history.py`"
@@ -1118,14 +1154,14 @@ def test_match_history_has_the_current_sources():
 # Every release, and every commit that changed a match file on this branch or the default
 # branch (an editable install runs an untagged commit), is recognised.
 @pytest.mark.skipif(not _git_tags(), reason="needs a git checkout with the release tags")
-def test_match_history_has_every_release_and_commit():
+def test_match_history_has_every_release_and_commit() -> None:
     for source in (history_script.tagged_digests(), history_script.history_digests()):
         for name, digests in source.items():
             assert digests <= KNOWN_SOURCES.get(name, frozenset()), name
 
 
 # Regenerating never drops a digest the module already lists.
-def test_match_history_regeneration_keeps_listed_digests(monkeypatch):
+def test_match_history_regeneration_keeps_listed_digests(monkeypatch: pytest.MonkeyPatch) -> None:
     for source in ("tagged_digests", "history_digests", "current_digests"):
         monkeypatch.setattr(history_script, source, dict)
     collected = history_script.collect()
@@ -1134,8 +1170,9 @@ def test_match_history_regeneration_keeps_listed_digests(monkeypatch):
 
 @pytest.mark.skipif(not _git_tags(), reason="needs a git checkout with the release tags")
 @pytest.mark.parametrize("windows", [False, True], ids=["macos", "windows"])
-def test_file_an_old_script_wrote_is_stale(espanso, windows):
+def test_file_an_old_script_wrote_is_stale(espanso: Path, windows: bool) -> None:
     git = shutil.which("git")
+    assert git
     old = subprocess.run(
         [git, "show", "v0.14.0:espanso/match/prompts-llm.yml"],
         cwd=REPO,
@@ -1195,7 +1232,9 @@ _CORE_0_18 = "1cf316c0745bbdc9827643530caacf3b782a59cb72312ccfebcfccd4ea73c656"
 
 
 @pytest.mark.parametrize("manifest", [True, False])
-def test_0_18_prompts_core_with_prompt_form_is_replaced(monkeypatch, espanso, manifest):
+def test_0_18_prompts_core_with_prompt_form_is_replaced(
+    monkeypatch: pytest.MonkeyPatch, espanso: Path, manifest: bool
+) -> None:
     old = (
         (MATCH / STATIC)
         .read_text("utf-8")
@@ -1220,18 +1259,20 @@ def test_0_18_prompts_core_with_prompt_form_is_replaced(monkeypatch, espanso, ma
     assert _plan(espanso).is_noop
 
 
-def _old_release(monkeypatch, name="prompts-llm.yml"):
+def _old_release(monkeypatch: pytest.MonkeyPatch, name: str = "prompts-llm.yml") -> str:
     """An 'older release' of a match file, registered in the history like a real one."""
     old = 'matches:\n  - trigger: "-old-"\n    cmd: "\\"__PROMPT_WORKFLOW__\\" improve"\n'
     digest = hashlib.sha256(old.encode()).hexdigest()
-    monkeypatch.setitem(deploy.KNOWN_SOURCES, name, KNOWN_SOURCES[name] | {digest})
+    monkeypatch.setitem(KNOWN_SOURCES, name, KNOWN_SOURCES[name] | {digest})
     return old
 
 
 @pytest.mark.parametrize(
     "launcher", ["/Users/me/old/prompt-workflow", "C:/Users/me/old/prompt-workflow.exe"]
 )
-def test_older_release_with_another_launcher_is_stale(monkeypatch, espanso, launcher):
+def test_older_release_with_another_launcher_is_stale(
+    monkeypatch: pytest.MonkeyPatch, espanso: Path, launcher: str
+) -> None:
     old = _old_release(monkeypatch)
     target = espanso / "match" / "prompts-llm.yml"
     target.write_text(old.replace("__PROMPT_WORKFLOW__", launcher), "utf-8")
@@ -1247,14 +1288,14 @@ def test_older_release_with_another_launcher_is_stale(monkeypatch, espanso, laun
     assert target.read_text("utf-8") == _plan(espanso).steps[1].rendered
 
 
-def test_edited_older_release_is_foreign(monkeypatch, espanso):
+def test_edited_older_release_is_foreign(monkeypatch: pytest.MonkeyPatch, espanso: Path) -> None:
     old = _old_release(monkeypatch)
     edited = old.replace("__PROMPT_WORKFLOW__", "/x/prompt-workflow") + "# mine\n"
     (espanso / "match" / "prompts-llm.yml").write_text(edited, "utf-8")
     assert _states(espanso)["prompts-llm.yml"] == deploy.FOREIGN
 
 
-def test_cli_warns_about_kept_files(espanso, fake_run):
+def test_cli_warns_about_kept_files(espanso: Path, fake_run: FakeRunner) -> None:
     (espanso / "match" / STATIC).write_text("matches: []\n", "utf-8")
     result = _cli("deploy", "--yes", *_where(espanso))
     assert result.exit_code == 0
@@ -1276,7 +1317,9 @@ def test_cli_warns_about_kept_files(espanso, fake_run):
         ("extra", 1, "has the fields"),
     ],
 )
-def test_manifest_field_types(espanso, field, value, error):
+def test_manifest_field_types(
+    espanso: Path, field: str, value: str | int | list[int], error: str
+) -> None:
     deploy.apply(_plan(espanso))
     path = user_data_dir() / deploy.MANIFEST_NAME
     data = json.loads(path.read_text("utf-8"))
@@ -1290,7 +1333,7 @@ def test_manifest_field_types(espanso, field, value, error):
 
 
 @pytest.mark.parametrize("files", ['"x"', '["x"]'])
-def test_manifest_files_shape(files):
+def test_manifest_files_shape(files: str) -> None:
     path = user_data_dir() / deploy.MANIFEST_NAME
     path.parent.mkdir(parents=True)
     path.write_text(f'{{"format": 1, "files": {files}}}', "utf-8")
@@ -1299,7 +1342,7 @@ def test_manifest_files_shape(files):
 
 
 # A listed backup that is not one of ours (elsewhere, or not named like one) is never deleted.
-def test_prune_deletes_only_our_backups(tmp_path, espanso):
+def test_prune_deletes_only_our_backups(tmp_path: Path, espanso: Path) -> None:
     target = espanso / "match" / "prompts-llm.yml"
     elsewhere = tmp_path / "prompts-llm.yml.bak-20260101000000"
     misnamed = espanso / "match" / "prompts-core.yml.bak-20260101000000"
@@ -1313,7 +1356,7 @@ def test_prune_deletes_only_our_backups(tmp_path, espanso):
     assert [p.exists() for p in ours] == [False, False, True, True]
 
 
-def test_detach_only_touches_our_files_in_the_match_folder(tmp_path, espanso):
+def test_detach_only_touches_our_files_in_the_match_folder(tmp_path: Path, espanso: Path) -> None:
     deploy.apply(_plan(espanso))
     manifest = deploy.Manifest.load()
     outside = tmp_path / "important.txt"
@@ -1332,7 +1375,7 @@ def test_detach_only_touches_our_files_in_the_match_folder(tmp_path, espanso):
     assert not list((espanso / "match").iterdir())
 
 
-def test_relative_espanso_dir_is_stored_absolute(tmp_path, fake_run):
+def test_relative_espanso_dir_is_stored_absolute(tmp_path: Path, fake_run: FakeRunner) -> None:
     (tmp_path / "rel" / "match").mkdir(parents=True)  # conftest chdirs into tmp_path
     result = _cli("deploy", "--yes", "--espanso-dir", "rel", "--launcher", LAUNCHER)
     assert result.exit_code == 0, result.output
@@ -1349,7 +1392,7 @@ def _symlink(link: Path, to: Path) -> None:
         pytest.skip("symlinks are not available")
 
 
-def test_symlinked_target_is_foreign_and_kept(tmp_path, espanso):
+def test_symlinked_target_is_foreign_and_kept(tmp_path: Path, espanso: Path) -> None:
     real = tmp_path / "dotfiles" / "prompts-llm.yml"
     real.parent.mkdir()
     real.write_text("mine", "utf-8")
@@ -1361,7 +1404,7 @@ def test_symlinked_target_is_foreign_and_kept(tmp_path, espanso):
     assert real.read_text("utf-8") == "mine"
 
 
-def test_writes_never_follow_a_planted_link(tmp_path, espanso):
+def test_writes_never_follow_a_planted_link(tmp_path: Path, espanso: Path) -> None:
     victim = tmp_path / "victim.txt"
     victim.write_text("safe", "utf-8")
     match = espanso / "match"
@@ -1371,7 +1414,7 @@ def test_writes_never_follow_a_planted_link(tmp_path, espanso):
     assert not [p for p in match.iterdir() if p.name.startswith(".")]  # no temp left over
 
 
-def test_backup_skips_a_planted_link(tmp_path, espanso):
+def test_backup_skips_a_planted_link(tmp_path: Path, espanso: Path) -> None:
     victim = tmp_path / "victim.txt"
     target = espanso / "match" / "prompts-llm.yml"
     target.write_text("mine", "utf-8")
@@ -1382,7 +1425,7 @@ def test_backup_skips_a_planted_link(tmp_path, espanso):
     assert not victim.exists()
 
 
-def test_backup_names_run_out(monkeypatch, espanso):
+def test_backup_names_run_out(monkeypatch: pytest.MonkeyPatch, espanso: Path) -> None:
     target = espanso / "match" / "a.yml"
     target.write_text("x", "utf-8")
     monkeypatch.setattr(Path, "is_symlink", lambda self: True)
@@ -1390,8 +1433,8 @@ def test_backup_names_run_out(monkeypatch, espanso):
         deploy._backup(target, "20260101000000")
 
 
-def test_write_cleans_up_on_failure(monkeypatch, espanso):
-    def boom(src, dst):
+def test_write_cleans_up_on_failure(monkeypatch: pytest.MonkeyPatch, espanso: Path) -> None:
+    def boom(src: Any, dst: Any) -> None:
         raise OSError("disk full")
 
     monkeypatch.setattr(os, "replace", boom)
@@ -1400,7 +1443,7 @@ def test_write_cleans_up_on_failure(monkeypatch, espanso):
     assert not list((espanso / "match").iterdir())
 
 
-def test_detach_leaves_a_link_alone(tmp_path, espanso):
+def test_detach_leaves_a_link_alone(tmp_path: Path, espanso: Path) -> None:
     deploy.apply(_plan(espanso))
     link = espanso / "match" / "prompts-llm.yml"
     real = tmp_path / "real.yml"
@@ -1414,7 +1457,9 @@ def test_detach_leaves_a_link_alone(tmp_path, espanso):
 
 
 # Before v0.11 a Windows checkout had CRLF sources, which the Windows script copied as they were.
-def test_crlf_file_an_old_windows_script_wrote_is_stale(monkeypatch, espanso):
+def test_crlf_file_an_old_windows_script_wrote_is_stale(
+    monkeypatch: pytest.MonkeyPatch, espanso: Path
+) -> None:
     old = _old_release(monkeypatch)
     rendered = old.replace("__PROMPT_WORKFLOW__", "C:/Users/me/prompt-workflow.exe")
     target = espanso / "match" / "prompts-llm.yml"

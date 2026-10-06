@@ -1,5 +1,7 @@
 import re
+from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -14,16 +16,17 @@ KNOWN_PROVIDERS = set(PROVIDER_NAMES)
 
 
 # Every YAML file under espanso/ parses to something.
-def test_espanso_yaml_parses():
+def test_espanso_yaml_parses() -> None:
     for path in ESPANSO_ROOT.rglob("*.yml"):
         assert yaml.safe_load(path.read_text(encoding="utf-8")) is not None
 
 
-def _load(path: Path) -> dict:
-    return yaml.safe_load(path.read_text(encoding="utf-8"))
+def _load(path: Path) -> dict[str, Any]:
+    data: dict[str, Any] = yaml.safe_load(path.read_text(encoding="utf-8"))
+    return data
 
 
-def _commented_matches(path: Path) -> list[dict]:
+def _commented_matches(path: Path) -> list[dict[str, Any]]:
     """Matches shipped commented out (such as -ic-): each `# - trigger:` block, uncommented."""
     blocks: list[list[str]] = []
     current: list[str] | None = None
@@ -43,7 +46,7 @@ def _commented_matches(path: Path) -> list[dict]:
 
 
 # Every match file has a top-level matches: list.
-def test_match_files_have_matches_list():
+def test_match_files_have_matches_list() -> None:
     for path in MATCH_FILES:
         data = _load(path)
         assert isinstance(data.get("matches"), list), f"{path.name} has no matches: list"
@@ -51,7 +54,7 @@ def test_match_files_have_matches_list():
 
 # Triggers are unique across every match file (the class of bug that let a
 # duplicate or dead trigger silently shadow another one).
-def test_triggers_are_unique_across_files():
+def test_triggers_are_unique_across_files() -> None:
     seen: dict[str, str] = {}
     for path in MATCH_FILES:
         for match in _load(path)["matches"]:
@@ -62,7 +65,7 @@ def test_triggers_are_unique_across_files():
             seen[trigger] = path.name
 
 
-def _shell_commands(path: Path):
+def _shell_commands(path: Path) -> Iterator[tuple[str, str]]:
     for match in _load(path)["matches"]:
         for var in match.get("vars", []):
             if var.get("type") == "shell":
@@ -72,14 +75,14 @@ def _shell_commands(path: Path):
 # Every shell command starts with the quoted CLI placeholder (a path with spaces must
 # work) and holds no other quotes: cmd.exe strips the outer pair of a command line that
 # starts with a quote and contains more than two, breaking the call.
-def test_shell_commands_start_with_quoted_cli():
+def test_shell_commands_start_with_quoted_cli() -> None:
     for trigger, cmd in (cmd for path in MATCH_FILES for cmd in _shell_commands(path)):
         assert cmd.startswith('"__PROMPT_WORKFLOW__" '), f"{trigger} must start with the CLI"
         assert cmd.count('"') == 2, f"{trigger} must quote only the CLI path"
         assert "__REPO_DIR__" not in cmd, f"{trigger} still uses __REPO_DIR__"
 
 
-def _calls_cli(match: dict) -> bool:
+def _calls_cli(match: dict[str, Any]) -> bool:
     """Whether a match runs the CLI, through a shell cmd or script args."""
     for var in match.get("vars", []):
         params = var.get("params", {})
@@ -91,7 +94,7 @@ def _calls_cli(match: dict) -> bool:
 # Every match that runs the CLI, including the commented-out ones, pastes its output via
 # the clipboard. Espanso's default backend would type output shorter than
 # clipboard_threshold (100 chars) key by key instead.
-def test_cli_matches_paste_via_clipboard():
+def test_cli_matches_paste_via_clipboard() -> None:
     matches = [m for path in MATCH_FILES for m in _load(path)["matches"]]
     matches += [m for path in MATCH_FILES for m in _commented_matches(path)]
     cli_matches = [m for m in matches if _calls_cli(m)]
@@ -108,7 +111,7 @@ def test_cli_matches_paste_via_clipboard():
         assert match.get("force_mode") == "clipboard", f"{match['trigger']} must set force_mode"
 
 
-def _cli_commands(match: dict) -> list[str]:
+def _cli_commands(match: dict[str, Any]) -> list[str]:
     return [
         str(var["params"]["cmd"])
         for var in match.get("vars", [])
@@ -120,7 +123,7 @@ def _cli_commands(match: dict) -> list[str]:
 # history with one literal --trigger-id: its own trigger without the dashes, from the CLI's
 # allowlist. Never a {{form}} value or any other variable, and never shared, so two triggers
 # cannot be counted as one.
-def test_cli_matches_pass_their_own_trigger_id():
+def test_cli_matches_pass_their_own_trigger_id() -> None:
     matches = [m for path in MATCH_FILES for m in _load(path)["matches"]]
     matches += [m for path in MATCH_FILES for m in _commented_matches(path)]
     seen = set()
@@ -136,7 +139,7 @@ def test_cli_matches_pass_their_own_trigger_id():
 
 # Every --profile passed to the CLI is a profile prompt_builder.PROFILES actually defines,
 # so deleting or renaming a profile cannot leave a trigger pointing at nothing.
-def test_shell_commands_use_known_profiles():
+def test_shell_commands_use_known_profiles() -> None:
     for trigger, cmd in (cmd for path in MATCH_FILES for cmd in _shell_commands(path)):
         match = re.search(r"--profile\s+(\S+)", cmd)
         if match:
@@ -144,7 +147,7 @@ def test_shell_commands_use_known_profiles():
 
 
 # Every --provider passed to the CLI is a name make_provider() accepts.
-def test_shell_commands_use_known_providers():
+def test_shell_commands_use_known_providers() -> None:
     for trigger, cmd in (cmd for path in MATCH_FILES for cmd in _shell_commands(path)):
         match = re.search(r"--provider\s+(\S+)", cmd)
         if match:
@@ -154,7 +157,7 @@ def test_shell_commands_use_known_providers():
 
 
 # Every --tier passed to the CLI is one Settings.for_tier() accepts.
-def test_shell_commands_use_known_tiers():
+def test_shell_commands_use_known_tiers() -> None:
     for trigger, cmd in (cmd for path in MATCH_FILES for cmd in _shell_commands(path)):
         match = re.search(r"--tier\s+(\S+)", cmd)
         if match:
@@ -163,7 +166,7 @@ def test_shell_commands_use_known_tiers():
 
 # form: blocks must interpolate at least one {{var}} — otherwise Espanso pops an
 # empty dialog instead of expanding text.
-def test_form_blocks_interpolate_a_variable():
+def test_form_blocks_interpolate_a_variable() -> None:
     for path in MATCH_FILES:
         for match in _load(path)["matches"]:
             form = match.get("form")
@@ -177,7 +180,7 @@ TRIGGER_SHAPE = re.compile(r"^-[a-z0-9]+(-[a-z0-9]+)*-$")
 
 
 # Every enabled trigger uses the dash-delimited -name- form, not the old leading-colon form.
-def test_triggers_use_dash_delimited_form():
+def test_triggers_use_dash_delimited_form() -> None:
     for path in MATCH_FILES:
         for match in _load(path)["matches"]:
             trigger = match["trigger"]
@@ -187,7 +190,7 @@ def test_triggers_use_dash_delimited_form():
 # No enabled trigger occurs inside another. With left_word only a prefix could shadow another
 # trigger; the stricter check also holds if a match ever loses left_word, when Espanso
 # matches a trigger wherever it appears in the typed text.
-def test_no_trigger_is_inside_another():
+def test_no_trigger_is_inside_another() -> None:
     triggers = [match["trigger"] for path in MATCH_FILES for match in _load(path)["matches"]]
     for a in triggers:
         for b in triggers:
@@ -199,7 +202,7 @@ def test_no_trigger_is_inside_another():
 # default Espanso expands a trigger anywhere, even inside a word, and code such as
 # `a[n-i-1]` or `only-if-cached` contains them. Espanso reads left_word first and falls back
 # to word, so `left_word: false` with `word: true` does not count.
-def test_triggers_fire_only_at_word_start():
+def test_triggers_fire_only_at_word_start() -> None:
     matches = [m for path in MATCH_FILES for m in _load(path)["matches"]]
     matches += [m for path in MATCH_FILES for m in _commented_matches(path)]
     assert "-ic-" in {m["trigger"] for m in matches}
@@ -207,7 +210,7 @@ def test_triggers_fire_only_at_word_start():
         assert match.get("left_word", match.get("word")) is True, match["trigger"]
 
 
-def _form_vars(path: Path):
+def _form_vars(path: Path) -> Iterator[tuple[dict[str, Any], dict[str, Any]]]:
     for match in _load(path)["matches"]:
         forms = {v["name"]: v["params"] for v in match.get("vars", []) if v.get("type") == "form"}
         if forms:
@@ -216,7 +219,7 @@ def _form_vars(path: Path):
 
 # Every {{formN.field}} a shell command uses is a field that form declares, so a renamed
 # field cannot leave an unexpanded placeholder in the command.
-def test_form_fields_used_in_shell_commands_exist():
+def test_form_fields_used_in_shell_commands_exist() -> None:
     for path in MATCH_FILES:
         for match, forms in _form_vars(path):
             for var in match["vars"]:
@@ -230,8 +233,8 @@ def test_form_fields_used_in_shell_commands_exist():
 # Choice fields interpolated into a command must be fixed lists whose default is one of
 # the values, and each value must be one the CLI accepts, so the popup cannot produce an
 # error marker (or inject shell text: no free-text field ever reaches a command).
-def test_form_choices_are_valid_cli_values():
-    checks = {
+def test_form_choices_are_valid_cli_values() -> None:
+    checks: dict[str, Callable[[str], object]] = {
         "--model": lambda v: (
             v == KEEP or (split_model_spec(v)[0] and re.fullmatch(r"[\w.\-/:@]+", v))
         ),
@@ -254,7 +257,7 @@ def test_form_choices_are_valid_cli_values():
 # Every -if- list starts with, and defaults to, `default` (keep the pro-tier setting), as the
 # comment above the match and README say, so the popup changes nothing unless a value is picked.
 # The timeout list stops at 120 s: Espanso blocks every other trigger while a call runs.
-def test_if_form_lists_default_to_the_tier_setting():
+def test_if_form_lists_default_to_the_tier_setting() -> None:
     (forms,) = [f for path in MATCH_FILES for m, f in _form_vars(path) if m["trigger"] == "-if-"]
     fields = forms["form1"]["fields"]
     assert set(fields) == {"model", "effort", "maxtokens", "timeout"}
@@ -267,7 +270,7 @@ def test_if_form_lists_default_to_the_tier_setting():
 
 # Every match, the commented-out ones included, has its own label: Espanso's search bar shows
 # it instead of the replacement text, which for the CLI triggers is only `{{output}}`.
-def test_every_match_has_a_distinct_label():
+def test_every_match_has_a_distinct_label() -> None:
     matches = [m for path in MATCH_FILES for m in _load(path)["matches"]]
     matches += [m for path in MATCH_FILES for m in _commented_matches(path)]
     labels = [match.get("label") for match in matches]
@@ -279,7 +282,7 @@ def test_every_match_has_a_distinct_label():
 
 # Match files are UTF-8 without a BOM: the installers read and write them as such, and
 # Espanso would treat a BOM as part of the first key.
-def test_match_files_are_utf8_without_bom():
+def test_match_files_are_utf8_without_bom() -> None:
     for path in ESPANSO_ROOT.rglob("*.yml"):
         raw = path.read_bytes()
         assert not raw.startswith(b"\xef\xbb\xbf"), f"{path.name} has a BOM"

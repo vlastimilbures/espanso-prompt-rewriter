@@ -13,13 +13,13 @@ from prompt_workflow.prompt_builder import (
 
 
 # Unknown profile names raise ValueError instead of KeyError.
-def test_unknown_profile():
+def test_unknown_profile() -> None:
     with pytest.raises(ValueError, match="Unknown profile: 'missing'"):
         system_prompt("missing")
 
 
 # default profile emits the golden-template tags plus the [REVIEW: ...] marker.
-def test_default_profile_emits_golden_template():
+def test_default_profile_emits_golden_template() -> None:
     text = system_prompt("default")
     for tag in ["<CONTEXT>", "<GOAL>", "<INSTRUCTIONS>", "<CONSTRAINTS>", "<INPUTS>", "<OUTPUTS>"]:
         assert tag in text
@@ -28,7 +28,7 @@ def test_default_profile_emits_golden_template():
 
 # default profile's system prompt describes both the plan-first/execute-now and
 # independent-review/self-review instruction branches for the model to choose between.
-def test_default_profile_offers_both_branches():
+def test_default_profile_offers_both_branches() -> None:
     text = system_prompt("default")
     assert "Plan the task thoroughly" in text
     assert "Execute, but state assumptions up front." in text
@@ -37,13 +37,13 @@ def test_default_profile_offers_both_branches():
 
 
 # The retired default-pro profile (an old .env's PROMPT_PRO_PROFILE) renders default.
-def test_default_pro_alias():
+def test_default_pro_alias() -> None:
     assert "default-pro" not in PROFILES
     assert system_prompt("default-pro", "I test.") == system_prompt("default", "I test.")
 
 
 # general profile returns a non-empty system prompt distinct from default's golden template.
-def test_general_profile_returns_prompt():
+def test_general_profile_returns_prompt() -> None:
     text = system_prompt("general")
     assert text
     assert "<CONTEXT>" not in text
@@ -53,13 +53,13 @@ PERSONA = "I am working as a Head of Data at Example Corp."
 
 
 # A configured persona is the mandated opening of CONTEXT, overridable by the draft.
-def test_default_profile_uses_configured_persona():
+def test_default_profile_uses_configured_persona() -> None:
     text = system_prompt("default", PERSONA)
     assert f'<context>\nopen with "{PERSONA}" If the draft states a different role' in text
 
 
 # Without a persona the model only uses a role the draft itself states.
-def test_default_profile_without_persona():
+def test_default_profile_without_persona() -> None:
     text = system_prompt("default")
     assert "<context>\nif the draft explicitly states the user's role" in text
     assert "do not state or guess any role" in text
@@ -68,7 +68,7 @@ def test_default_profile_without_persona():
 
 # Both few-shot examples open CONTEXT with the configured persona (#49), and without one
 # exactly as before: the token leaves nothing behind.
-def test_default_examples_open_with_persona():
+def test_default_examples_open_with_persona() -> None:
     with_persona = system_prompt("default", PERSONA)
     plain = system_prompt("default")
     for opening in ("I want a quick summary of my notes", "I need to email Ms Lopez"):
@@ -78,7 +78,7 @@ def test_default_examples_open_with_persona():
 
 
 # The tokens are filled in one pass: a persona holding a token's text is pasted as written.
-def test_persona_holding_a_token_is_not_filled_again():
+def test_persona_holding_a_token_is_not_filled_again() -> None:
     persona = "I am {{PERSONA_RULE}} and {{PERSONA_OPENING}}."
     text = system_prompt("default", persona)
     assert f"<CONTEXT>\n{persona} I want" in text
@@ -87,20 +87,20 @@ def test_persona_holding_a_token_is_not_filled_again():
 
 # No profile ships an unreplaced template token, with or without a persona.
 @pytest.mark.parametrize("persona", ["", PERSONA])
-def test_no_unreplaced_tokens(persona):
+def test_no_unreplaced_tokens(persona: str) -> None:
     for name in PROFILES:
         assert "{{" not in system_prompt(name, persona), name
 
 
 # Profiles without the persona token are unaffected by it.
-def test_general_profile_ignores_persona():
+def test_general_profile_ignores_persona() -> None:
     assert system_prompt("general", PERSONA) == system_prompt("general")
 
 
 # No real persona is hard-coded in shipped prompts or Espanso matches: an "I am working
 # as ..." sentence must be the fill-in placeholder or the fictional Example Corp example.
 # A real one belongs in PROMPT_PERSONA.
-def test_no_hardcoded_persona_in_shipped_files():
+def test_no_hardcoded_persona_in_shipped_files() -> None:
     root = Path(__file__).resolve().parents[1]
     shipped = [*(root / "src").rglob("*.md"), *(root / "src").rglob("*.py")]
     shipped += list((root / "espanso").rglob("*.yml"))
@@ -113,7 +113,7 @@ def test_no_hardcoded_persona_in_shipped_files():
 # Every golden-template profile carries the marker the CLI keys the tag repair on, so an edit
 # that drops it cannot switch the repair off unnoticed.
 @pytest.mark.parametrize("name", list(PROFILES))
-def test_template_marker(name):
+def test_template_marker(name: str) -> None:
     assert (TEMPLATE_MARKER in PROFILES[name]) == ("<CONTEXT>" in PROFILES[name])
     assert (TEMPLATE_MARKER in PROFILES[name]) == name.startswith("default")
 
@@ -125,7 +125,7 @@ FIXED = SLIP.replace("memo.\n</GOAL>", "memo.\n</CONTEXT>", 1)
 
 
 # flash-lite's <CONTEXT>...</GOAL> slip is closed with </CONTEXT>; nothing else changes.
-def test_repair_template_tags():
+def test_repair_template_tags() -> None:
     assert repair_template_tags(SLIP) == FIXED
     assert repair_template_tags("Note.\n" + SLIP) == "Note.\n" + FIXED
     crlf = SLIP.replace("\n", "\r\n")
@@ -134,7 +134,7 @@ def test_repair_template_tags():
 
 # Only the rewrite's own first section is repaired: the same slip in pasted material (a user
 # asking why a rewrite looks broken) is copied as it is.
-def test_repair_leaves_pasted_slip():
+def test_repair_leaves_pasted_slip() -> None:
     inputs = f"<INPUTS>\n{SLIP}\n</INPUTS>"
     assert repair_template_tags(FIXED + "\n" + inputs) == FIXED + "\n" + inputs
     assert repair_template_tags(SLIP + "\n" + inputs) == FIXED + "\n" + inputs
@@ -153,7 +153,7 @@ def test_repair_leaves_pasted_slip():
         SLIP.replace("I want a memo.", "<GOAL>\nI want a memo."),  # another malformation
     ],
 )
-def test_repair_template_tags_leaves_other_text(text):
+def test_repair_template_tags_leaves_other_text(text: str) -> None:
     assert repair_template_tags(text) == text
 
 
@@ -171,7 +171,7 @@ def test_repair_template_tags_leaves_other_text(text):
         "You never carry out the draft yourself.",
     ],
 )
-def test_general_profile_contract(phrase):
+def test_general_profile_contract(phrase: str) -> None:
     assert phrase in system_prompt("general")
 
 
@@ -224,5 +224,5 @@ def test_general_profile_contract(phrase):
         "untagged-inner-block",
     ],
 )
-def test_strip_outer_fence(text, expected):
+def test_strip_outer_fence(text: str, expected: str | None) -> None:
     assert strip_outer_fence(text) == (text if expected is None else expected)

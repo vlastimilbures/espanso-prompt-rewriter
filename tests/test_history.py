@@ -9,10 +9,12 @@ import stat
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -74,25 +76,25 @@ _REAL_BUDGET = (history._BUDGET, history._WRITE_BUDGET)
 
 
 @pytest.fixture(autouse=True)
-def _generous_budget(monkeypatch):
+def _generous_budget(monkeypatch: pytest.MonkeyPatch) -> None:
     # The real ~0.25 s bound drops writes on a loaded CI runner (the first write also creates
     # the database), which made tests that only check what was stored flaky.
     monkeypatch.setattr(history, "_BUDGET", 2.25)
     monkeypatch.setattr(history, "_WRITE_BUDGET", 2.0)
 
 
-def _use_real_budget(monkeypatch):
+def _use_real_budget(monkeypatch: pytest.MonkeyPatch) -> None:
     """For a test that checks a blocked write gives up: call after its set-up writes."""
     monkeypatch.setattr(history, "_BUDGET", _REAL_BUDGET[0])
     monkeypatch.setattr(history, "_WRITE_BUDGET", _REAL_BUDGET[1])
 
 
 @pytest.fixture
-def store(tmp_path):
+def store(tmp_path: Path) -> HistoryStore:
     return HistoryStore(tmp_path / "data" / "prompt-workflow" / history.DB_NAME)
 
 
-def _op(**changes):
+def _op(**changes: Any) -> dict[str, Any]:
     return {
         "id": history.new_operation_id(),
         "origin": "espanso_managed",
@@ -105,7 +107,7 @@ def _op(**changes):
     }
 
 
-def _attempt(**changes):
+def _attempt(**changes: Any) -> dict[str, Any]:
     return {
         "provider": "openrouter",
         "requested_model": "google/gemini-3.5-flash-lite",
@@ -124,26 +126,27 @@ def _attempt(**changes):
     }
 
 
-def _rows(store, table):
+def _rows(store: HistoryStore, table: str) -> list[dict[str, Any]]:
     with contextlib.closing(sqlite3.connect(store.path)) as conn:
         conn.row_factory = sqlite3.Row
         return [dict(r) for r in conn.execute(f"SELECT * FROM {table}")]  # noqa: S608
 
 
-def _lost(store):
-    return json.loads(store.lost_path.read_text("utf-8"))["lost_writes"]
+def _lost(store: HistoryStore) -> int:
+    lost: int = json.loads(store.lost_path.read_text("utf-8"))["lost_writes"]
+    return lost
 
 
 # -- settings and paths --------------------------------------------------------------------
 
 
-def test_history_is_on_by_default_with_a_year_of_retention():
+def test_history_is_on_by_default_with_a_year_of_retention() -> None:
     cfg = Settings.load()
     assert cfg.history is True
     assert cfg.history_retention_days == 365
 
 
-def test_history_settings_parse_strictly(monkeypatch):
+def test_history_settings_parse_strictly(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PROMPT_HISTORY", "off")
     with pytest.raises(ValueError, match="PROMPT_HISTORY must be true or false"):
         Settings.load()
@@ -153,7 +156,7 @@ def test_history_settings_parse_strictly(monkeypatch):
         Settings.load()
 
 
-def test_data_dir_is_per_device(tmp_path):
+def test_data_dir_is_per_device(tmp_path: Path) -> None:
     if os.name == "nt":
         assert user_data_dir({"LOCALAPPDATA": str(tmp_path)}) == tmp_path / "prompt-workflow"
         assert user_data_dir({}).parent.name == "Local"
@@ -162,7 +165,9 @@ def test_data_dir_is_per_device(tmp_path):
         assert user_data_dir({}) == Path.home() / ".local" / "share" / "prompt-workflow"
 
 
-def test_from_settings_uses_the_data_and_config_dirs(tmp_path, monkeypatch):
+def test_from_settings_uses_the_data_and_config_dirs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("PROMPT_HISTORY", "false")
     monkeypatch.setenv("PROMPT_HISTORY_RETENTION_DAYS", "30")
     store = HistoryStore.from_settings(Settings.load())
@@ -171,13 +176,13 @@ def test_from_settings_uses_the_data_and_config_dirs(tmp_path, monkeypatch):
     assert (store.enabled, store.retention_days) == (False, 30)
 
 
-def test_disabled_history_records_nothing(store):
+def test_disabled_history_records_nothing(store: HistoryStore) -> None:
     store.enabled = False
     assert store.record(_op(), [_attempt()]) is True
     assert not store.path.parent.exists()
 
 
-def test_importing_the_cli_or_history_loads_no_sqlite():
+def test_importing_the_cli_or_history_loads_no_sqlite() -> None:
     code = (
         "import sys, prompt_workflow.cli; bad = {'sqlite3', 'prompt_workflow.history'}; "
         "print(sorted(bad & sys.modules.keys()))\n"
@@ -194,7 +199,7 @@ def test_importing_the_cli_or_history_loads_no_sqlite():
 # -- schema and round trip -----------------------------------------------------------------
 
 
-def test_schema_matches_allowlist(store):
+def test_schema_matches_allowlist(store: HistoryStore) -> None:
     assert store.record(_op(), [_attempt()])
     with contextlib.closing(sqlite3.connect(store.path)) as conn:
         tables = {
@@ -210,7 +215,7 @@ def test_schema_matches_allowlist(store):
     assert list(history.ATTEMPT_COLUMNS) == ALLOWED["attempts"]
 
 
-def test_money_round_trips_exactly_with_its_unit(store):
+def test_money_round_trips_exactly_with_its_unit(store: HistoryStore) -> None:
     amount = Decimal("0.000123456789012345678901")
     upstream = Decimal("1E-9")
     assert store.record(
@@ -231,7 +236,7 @@ def test_money_round_trips_exactly_with_its_unit(store):
     assert (attempt["charged_amount"], attempt["charged_unit"]) == (str(amount), "credits")
 
 
-def test_a_reported_zero_stays_zero_and_a_missing_cost_stays_unknown(store):
+def test_a_reported_zero_stays_zero_and_a_missing_cost_stays_unknown(store: HistoryStore) -> None:
     free = _attempt(charged_amount=Decimal(0))
     missing = _attempt(charged_amount=None, charged_unit=None, cost_state="unknown")
     assert store.record(_op(), [free, missing])
@@ -240,7 +245,7 @@ def test_a_reported_zero_stays_zero_and_a_missing_cost_stays_unknown(store):
     assert (rows[1]["charged_amount"], rows[1]["cost_state"]) == (None, "unknown")
 
 
-def test_a_retried_write_never_duplicates(store):
+def test_a_retried_write_never_duplicates(store: HistoryStore) -> None:
     op = _op()
     attempts = [_attempt(), _attempt(attempt=2)]
     assert store.record(op, attempts)
@@ -263,13 +268,17 @@ def test_a_retried_write_never_duplicates(store):
         {"occurred_at_utc": datetime(2026, 10, 4)},  # naive on purpose
     ],
 )
-def test_an_invalid_record_is_dropped_and_counted(store, change):
+def test_an_invalid_record_is_dropped_and_counted(
+    store: HistoryStore, change: dict[str, object]
+) -> None:
     assert store.record(_op(**change)) is False
     assert _lost(store) == 1
 
 
 @pytest.mark.parametrize("change", [{"endpoint": "cloud"}, {"provider": "open router"}])
-def test_an_invalid_attempt_drops_the_whole_record(store, change):
+def test_an_invalid_attempt_drops_the_whole_record(
+    store: HistoryStore, change: dict[str, str]
+) -> None:
     assert store.record(_op(), [_attempt(), _attempt(**change)]) is False
     assert not store.path.exists() or _rows(store, "operations") == []
 
@@ -285,7 +294,9 @@ def test_an_invalid_attempt_drops_the_whole_record(store, change):
         {"charged_amount": [1]},
     ],
 )
-def test_a_bad_cost_is_unknown_and_the_record_is_kept(store, change):
+def test_a_bad_cost_is_unknown_and_the_record_is_kept(
+    store: HistoryStore, change: dict[str, object]
+) -> None:
     assert store.record(_op(), [_attempt(**change)])
     row = _rows(store, "attempts")[0]
     assert (row["charged_amount"], row["charged_unit"], row["cost_state"]) == (
@@ -296,13 +307,13 @@ def test_a_bad_cost_is_unknown_and_the_record_is_kept(store, change):
     assert row["output"] == 300
 
 
-def test_a_negative_zero_is_stored_as_zero(store):
+def test_a_negative_zero_is_stored_as_zero(store: HistoryStore) -> None:
     assert store.record(_op(), [_attempt(charged_amount=Decimal("-0.000"))])
     row = _rows(store, "attempts")[0]
     assert (row["charged_amount"], row["cost_state"]) == ("0.000", "reported")
 
 
-def test_error_kinds_match_what_post_json_records():
+def test_error_kinds_match_what_post_json_records() -> None:
     base = (SRC / "prompt_workflow" / "providers" / "base.py").read_text("utf-8")
     recorded = set(re.findall(r'error_kind(?: or)? = .*?"([a-z_0-9]+)"', base))
     assert recorded == set(history.ERROR_KINDS)
@@ -336,7 +347,7 @@ ATTEMPT_IDENTS = (
 REQUIRED = {"provider", "requested_model"}
 
 
-def _assert_nothing_leaked(store, *needles):
+def _assert_nothing_leaked(store: HistoryStore, *needles: Any) -> None:
     stored = b"".join(p.read_bytes() for p in store.path.parent.iterdir() if p.is_file())
     as_json, as_csv = io.StringIO(), io.StringIO()
     store.export(as_json, "json")
@@ -347,7 +358,7 @@ def _assert_nothing_leaked(store, *needles):
         assert all(needle not in text for text in texts)
 
 
-def test_sentinels_never_reach_any_column_exports_or_health(store):
+def test_sentinels_never_reach_any_column_exports_or_health(store: HistoryStore) -> None:
     unlisted = {
         "prompt": "SENTINEL draft",
         "output": "SENTINEL rewrite",
@@ -369,7 +380,7 @@ def test_sentinels_never_reach_any_column_exports_or_health(store):
         assert {row["trigger_id"], row["profile_id"]} <= {"-i-", "default", None}
 
 
-def test_extra_patterns_keep_a_slug_shaped_sentinel_out(store):
+def test_extra_patterns_keep_a_slug_shaped_sentinel_out(store: HistoryStore) -> None:
     # A slug is indistinguishable from a model or provider name by shape; the user's own
     # PROMPT_EXTRA_PATTERNS catch it, and an invalid pattern drops the write instead.
     store.extra_patterns = "sentinel"
@@ -382,7 +393,7 @@ def test_extra_patterns_keep_a_slug_shaped_sentinel_out(store):
     assert store.record(_op(), [_attempt()]) is False
 
 
-def test_real_identifiers_are_kept(store):
+def test_real_identifiers_are_kept(store: HistoryStore) -> None:
     models = [
         "google/gemini-3.5-flash-lite",
         "meta-llama/Llama-3.3-70B-Instruct:free",
@@ -417,7 +428,9 @@ def test_real_identifiers_are_kept(store):
 # -- fail-open writer ----------------------------------------------------------------------
 
 
-def test_a_locked_database_drops_the_write_within_the_budget(store, monkeypatch):
+def test_a_locked_database_drops_the_write_within_the_budget(
+    store: HistoryStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
     assert store.record(_op())
     with contextlib.closing(sqlite3.connect(store.path, isolation_level=None)) as other:
         other.execute("BEGIN EXCLUSIVE")
@@ -434,7 +447,7 @@ def test_a_locked_database_drops_the_write_within_the_budget(store, monkeypatch)
 
 
 @pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0, reason="root ignores modes")
-def test_a_read_only_database_never_raises(store):
+def test_a_read_only_database_never_raises(store: HistoryStore) -> None:
     assert store.record(_op())
     store.path.chmod(stat.S_IREAD)
     try:
@@ -444,7 +457,7 @@ def test_a_read_only_database_never_raises(store):
     assert _lost(store) == 1
 
 
-def test_a_corrupt_database_never_raises_and_reset_recovers(store):
+def test_a_corrupt_database_never_raises_and_reset_recovers(store: HistoryStore) -> None:
     store.path.parent.mkdir(parents=True)
     store.path.write_bytes(b"this is not an sqlite database, just junk " * 200)
     assert store.record(_op()) is False
@@ -459,7 +472,7 @@ def test_a_corrupt_database_never_raises_and_reset_recovers(store):
     assert store.health().operations == 1
 
 
-def test_when_database_and_sidecar_both_fail_nothing_raises(tmp_path):
+def test_when_database_and_sidecar_both_fail_nothing_raises(tmp_path: Path) -> None:
     blocker = tmp_path / "file"
     blocker.write_text("x")
     store = HistoryStore(blocker / "prompt-workflow" / history.DB_NAME)
@@ -469,7 +482,7 @@ def test_when_database_and_sidecar_both_fail_nothing_raises(tmp_path):
     assert (health.exists, health.tracking_incomplete) == (False, True)
 
 
-def test_a_database_from_a_newer_version_is_never_written(store):
+def test_a_database_from_a_newer_version_is_never_written(store: HistoryStore) -> None:
     assert store.record(_op())
     with contextlib.closing(sqlite3.connect(store.path)) as conn:
         conn.execute("PRAGMA user_version = 99")
@@ -480,7 +493,7 @@ def test_a_database_from_a_newer_version_is_never_written(store):
     assert store.health().schema_version == 99
 
 
-def test_migrations_run_forward(store, monkeypatch):
+def test_migrations_run_forward(store: HistoryStore, monkeypatch: pytest.MonkeyPatch) -> None:
     assert store.record(_op())
     step = ("CREATE INDEX attempts_model ON attempts (requested_model)",)
     monkeypatch.setattr(history, "_MIGRATIONS", (*history._MIGRATIONS, step))
@@ -493,7 +506,7 @@ def test_migrations_run_forward(store, monkeypatch):
     assert len(_rows(store, "operations")) == 2
 
 
-def test_health_reports_without_creating_the_database(store):
+def test_health_reports_without_creating_the_database(store: HistoryStore) -> None:
     health = store.health()
     assert health.sqlite_version == sqlite3.sqlite_version
     assert (health.exists, health.schema_version, health.operations) == (False, None, None)
@@ -506,7 +519,7 @@ def test_health_reports_without_creating_the_database(store):
     assert health.tracking_incomplete is False
 
 
-def test_an_unreadable_sidecar_marks_tracking_incomplete(store):
+def test_an_unreadable_sidecar_marks_tracking_incomplete(store: HistoryStore) -> None:
     store.lost_path.parent.mkdir(parents=True)
     store.lost_path.write_text("{half a file", "utf-8")
     assert store.health().tracking_incomplete is True
@@ -533,7 +546,9 @@ print(json.dumps(stored))
 """
 
 
-def _run_workers(tmp_path, script, args_for, workers=4):
+def _run_workers(
+    tmp_path: Path, script: str, args_for: Callable[[int], list[str]], workers: int = 4
+) -> list[Any]:
     env = {**os.environ, "PYTHONPATH": str(SRC)}
     procs = [
         subprocess.Popen(
@@ -553,7 +568,9 @@ def _run_workers(tmp_path, script, args_for, workers=4):
     return outputs
 
 
-def test_concurrent_writers_complete_or_drop_without_duplicates(store, tmp_path):
+def test_concurrent_writers_complete_or_drop_without_duplicates(
+    store: HistoryStore, tmp_path: Path
+) -> None:
     count = 15
     outputs = _run_workers(
         tmp_path,
@@ -583,7 +600,7 @@ print(sum(store._mark_lost() for _ in range(25)))
 """
 
 
-def test_the_sidecar_marker_is_updated_atomically(store, tmp_path):
+def test_the_sidecar_marker_is_updated_atomically(store: HistoryStore, tmp_path: Path) -> None:
     store.path.parent.mkdir(parents=True)
     outputs = _run_workers(tmp_path, _MARKER, lambda worker: [str(store.path)])
     # Every successful update is counted (no lost update), and the file is whole JSON.
@@ -594,7 +611,7 @@ def test_the_sidecar_marker_is_updated_atomically(store, tmp_path):
 # -- services ------------------------------------------------------------------------------
 
 
-def _seed(store):
+def _seed(store: HistoryStore) -> None:
     day1 = datetime(2026, 10, 1, 9, tzinfo=UTC)
     day2 = datetime(2026, 10, 2, 9, tzinfo=UTC)
     store.prices_path = None
@@ -625,7 +642,7 @@ def _seed(store):
     assert store.record(_op(occurred_at_utc=day2, trigger_id="-p-", kind="persona"))
 
 
-def test_stats_by_trigger_keep_costs_apart(store):
+def test_stats_by_trigger_keep_costs_apart(store: HistoryStore) -> None:
     _seed(store)
     rows = {row.key: row for row in store.stats("trigger")}
     i = rows["-i-"]
@@ -645,7 +662,7 @@ def test_stats_by_trigger_keep_costs_apart(store):
     assert (p.operations, p.attempts, p.tokens["output"]) == (1, 0, None)
 
 
-def test_stats_by_provider_model_and_day(store):
+def test_stats_by_provider_model_and_day(store: HistoryStore) -> None:
     _seed(store)
     providers = {row.key: row for row in store.stats("provider")}
     assert set(providers) == {"openrouter", "anthropic"}  # persona made no request
@@ -660,7 +677,7 @@ def test_stats_by_provider_model_and_day(store):
         store.stats("profile")
 
 
-def test_stats_and_export_of_no_history_are_empty(store):
+def test_stats_and_export_of_no_history_are_empty(store: HistoryStore) -> None:
     assert store.stats() == []
     out = io.StringIO()
     assert store.export(out, "json") == 0
@@ -669,7 +686,7 @@ def test_stats_and_export_of_no_history_are_empty(store):
     assert not store.path.exists()
 
 
-def test_export_csv_is_one_row_per_attempt(store):
+def test_export_csv_is_one_row_per_attempt(store: HistoryStore) -> None:
     _seed(store)
     out = io.StringIO()
     assert store.export(out, "csv") == 4
@@ -688,7 +705,7 @@ def test_export_csv_is_one_row_per_attempt(store):
         store.export(io.StringIO(), "xml")  # type: ignore[arg-type]
 
 
-def test_prune_deletes_old_operations_and_their_attempts(store):
+def test_prune_deletes_old_operations_and_their_attempts(store: HistoryStore) -> None:
     now = datetime.now(UTC)
     old = _op(occurred_at_utc=now - timedelta(days=400))
     assert store.record(old, [_attempt()])
@@ -704,7 +721,7 @@ def test_prune_deletes_old_operations_and_their_attempts(store):
 
 # record(prune=True), the trigger recorder's write, also deletes a batch of old operations,
 # oldest first; a plain record() never prunes.
-def test_record_can_prune_a_batch(store, monkeypatch):
+def test_record_can_prune_a_batch(store: HistoryStore, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(history, "_PRUNE_BATCH", 2)
     now = datetime.now(UTC)
     old = [_op(occurred_at_utc=now - timedelta(days=400 + n)) for n in range(3)]
@@ -719,7 +736,7 @@ def test_record_can_prune_a_batch(store, monkeypatch):
 
 
 # A prune that fails is rolled back on its own: the record it rode along with is kept.
-def test_failed_prune_keeps_the_record(store):
+def test_failed_prune_keeps_the_record(store: HistoryStore) -> None:
     old = _op(occurred_at_utc=datetime.now(UTC) - timedelta(days=400))
     assert store.record(old)
     with contextlib.closing(sqlite3.connect(store.path)) as conn:
@@ -737,14 +754,16 @@ def test_failed_prune_keeps_the_record(store):
 # A prune the time budget interrupts is rolled back (SQLite rolls back its whole transaction
 # on an interrupt), and the record, already committed, stays. No clock: the prune is handed a
 # deadline already past and checks it at every VM step.
-def test_interrupted_prune_keeps_the_record(store, monkeypatch):
+def test_interrupted_prune_keeps_the_record(
+    store: HistoryStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
     old = [_op(occurred_at_utc=datetime.now(UTC) - timedelta(days=400)) for _ in range(5)]
     for op in old:
         assert store.record(op, [_attempt()])
     real_prune = history._prune_batch
-    calls = []
+    calls: list[str] = []
 
-    def past_deadline(conn, cutoff, deadline):
+    def past_deadline(conn: sqlite3.Connection, cutoff: str, deadline: float) -> None:
         calls.append(cutoff)
         real_prune(conn, cutoff, float("-inf"))
 
@@ -764,11 +783,19 @@ def test_interrupted_prune_keeps_the_record(store, monkeypatch):
 
 
 # The write that creates the database gets _CREATE_EXTRA on top of the budget; later ones not.
-def test_creating_write_gets_extra_time(store, monkeypatch):
-    deadlines = []
+def test_creating_write_gets_extra_time(
+    store: HistoryStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    deadlines: list[float] = []
     real_write = HistoryStore._write
 
-    def spy(self, op, rows, deadline, prune_before=None):
+    def spy(
+        self: HistoryStore,
+        op: tuple[object, ...],
+        rows: list[tuple[object, ...]],
+        deadline: float,
+        prune_before: str | None = None,
+    ) -> None:
         deadlines.append(deadline)
         return real_write(self, op, rows, deadline, prune_before)
 
@@ -785,7 +812,7 @@ def test_creating_write_gets_extra_time(store, monkeypatch):
     ]
 
 
-def test_reset_deletes_every_record_and_the_marker(store):
+def test_reset_deletes_every_record_and_the_marker(store: HistoryStore) -> None:
     _seed(store)
     store._mark_lost()
     store.reset()
@@ -810,7 +837,7 @@ output = 15
 """
 
 
-def test_estimates_come_only_from_a_price_table(store, tmp_path):
+def test_estimates_come_only_from_a_price_table(store: HistoryStore, tmp_path: Path) -> None:
     unknown = {"charged_amount": None, "charged_unit": None, "cost_state": "unknown"}
     sonnet = _attempt(
         provider="anthropic",
@@ -850,10 +877,11 @@ def test_estimates_come_only_from_a_price_table(store, tmp_path):
     assert row.reported == {"credits": _attempt()["charged_amount"]}
 
 
-def test_a_count_without_a_price_gets_no_estimate(tmp_path):
+def test_a_count_without_a_price_gets_no_estimate(tmp_path: Path) -> None:
     path = tmp_path / "prices.toml"
     path.write_text(PRICES.replace("cache_write = 3.75\n", ""), "utf-8")
     table = load_price_table(path)
+    assert table is not None
     assert table.estimate("claude-sonnet-5", {"input_uncached": 1, "cache_write": 1}) is None
     assert table.estimate("claude-sonnet-5", {"output": None}) is None
     assert table.estimate("claude-sonnet-5", {"output": 1_000_000}) == ("15", "USD", "2026-10-01")
@@ -872,14 +900,14 @@ def test_a_count_without_a_price_gets_no_estimate(tmp_path):
         ('version = "1"\nunit = "USD"\nmodels = {m = 1}', "must be a table"),
     ],
 )
-def test_a_malformed_price_table_is_reported(tmp_path, text, error):
+def test_a_malformed_price_table_is_reported(tmp_path: Path, text: str, error: str) -> None:
     path = tmp_path / "prices.toml"
     path.write_text(text, "utf-8")
     with pytest.raises(ValueError, match=error):
         load_price_table(path)
 
 
-def test_a_broken_price_table_never_stops_a_write(store, tmp_path):
+def test_a_broken_price_table_never_stops_a_write(store: HistoryStore, tmp_path: Path) -> None:
     assert load_price_table(tmp_path / "missing.toml") is None
     store.prices_path = tmp_path / "prices.toml"
     store.prices_path.write_text("version = ", "utf-8")
@@ -888,7 +916,9 @@ def test_a_broken_price_table_never_stops_a_write(store, tmp_path):
     assert _rows(store, "attempts")[0]["cost_state"] == "unknown"
 
 
-def test_a_stale_sidecar_lock_is_broken_and_a_held_one_times_out(store, monkeypatch):
+def test_a_stale_sidecar_lock_is_broken_and_a_held_one_times_out(
+    store: HistoryStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
     store.path.parent.mkdir(parents=True)
     lock = store.lost_path.with_name(f"{history.LOST_NAME}.lock")
     lock.touch()
@@ -902,7 +932,7 @@ def test_a_stale_sidecar_lock_is_broken_and_a_held_one_times_out(store, monkeypa
     lock.unlink()
 
 
-def test_a_service_migrates_an_empty_database(store):
+def test_a_service_migrates_an_empty_database(store: HistoryStore) -> None:
     store.path.parent.mkdir(parents=True)
     with contextlib.closing(sqlite3.connect(store.path)) as conn:
         conn.execute("PRAGMA user_version = 0")
@@ -920,11 +950,13 @@ def test_a_service_migrates_an_empty_database(store):
         ("disk I/O error", "unreadable"),
     ],
 )
-def test_database_errors_become_fixed_words(message, kind):
+def test_database_errors_become_fixed_words(message: str, kind: str) -> None:
     assert history._error_kind(sqlite3.DatabaseError(message)) == kind
 
 
-def test_reset_never_deletes_a_database_that_is_only_locked(store, monkeypatch):
+def test_reset_never_deletes_a_database_that_is_only_locked(
+    store: HistoryStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(history, "_SERVICE_TIMEOUT", 0.05)
     assert store.record(_op())
     with contextlib.closing(sqlite3.connect(store.path, isolation_level=None)) as other:
@@ -938,7 +970,9 @@ def test_reset_never_deletes_a_database_that_is_only_locked(store, monkeypatch):
 
 
 @pytest.mark.parametrize("text", ["[]", "5", '"x"', '{"lost_writes": true}', "\xff"])
-def test_a_malformed_sidecar_never_breaks_health_and_is_rewritten(store, text):
+def test_a_malformed_sidecar_never_breaks_health_and_is_rewritten(
+    store: HistoryStore, text: str
+) -> None:
     store.lost_path.parent.mkdir(parents=True)
     store.lost_path.write_text(text, "latin-1")
     assert store.health().tracking_incomplete is True
@@ -950,7 +984,7 @@ def test_a_malformed_sidecar_never_breaks_health_and_is_rewritten(store, text):
     os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
     reason="needs POSIX directory modes, which root ignores",
 )
-def test_health_shows_a_store_that_cannot_be_written(store):
+def test_health_shows_a_store_that_cannot_be_written(store: HistoryStore) -> None:
     assert store.record(_op())
     assert store.health().writable is True
     store.path.chmod(stat.S_IREAD)
@@ -966,7 +1000,7 @@ def test_health_shows_a_store_that_cannot_be_written(store):
 
 
 @pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0, reason="root ignores modes")
-def test_health_shows_a_read_only_database(store):
+def test_health_shows_a_read_only_database(store: HistoryStore) -> None:
     assert store.record(_op())
     store.path.chmod(stat.S_IREAD)
     try:
@@ -976,7 +1010,9 @@ def test_health_shows_a_read_only_database(store):
     assert (health.writable, health.tracking_incomplete) == (False, True)
 
 
-def test_retention_is_capped_and_prune_never_overflows(store, monkeypatch):
+def test_retention_is_capped_and_prune_never_overflows(
+    store: HistoryStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("PROMPT_HISTORY_RETENTION_DAYS", "36501")
     with pytest.raises(ValueError, match="PROMPT_HISTORY_RETENTION_DAYS must be a whole number"):
         Settings.load()
@@ -988,7 +1024,7 @@ def test_retention_is_capped_and_prune_never_overflows(store, monkeypatch):
     assert store.prune() == 0
 
 
-def test_a_fresh_lock_is_never_broken_and_only_the_holder_removes_it(store):
+def test_a_fresh_lock_is_never_broken_and_only_the_holder_removes_it(store: HistoryStore) -> None:
     store.path.parent.mkdir(parents=True)
     lock = store.lost_path.with_name(f"{history.LOST_NAME}.lock")
     lock.write_text("someone else", "ascii")
@@ -1002,7 +1038,9 @@ def test_a_fresh_lock_is_never_broken_and_only_the_holder_removes_it(store):
     lock.unlink()
 
 
-def test_a_write_blocked_everywhere_gives_up(store, monkeypatch):
+def test_a_write_blocked_everywhere_gives_up(
+    store: HistoryStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
     assert store.record(_op())
     lock = store.lost_path.with_name(f"{history.LOST_NAME}.lock")
     lock.write_text("held", "ascii")

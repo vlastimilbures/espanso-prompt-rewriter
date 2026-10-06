@@ -8,7 +8,7 @@ from prompt_workflow.config import ConfigLayers, Finding, Settings, env_names, s
 
 
 # Settings() reads env vars at instantiation, not at import time.
-def test_settings_read_at_instantiation(monkeypatch):
+def test_settings_read_at_instantiation(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PROMPT_PROVIDER", "lmstudio")
     monkeypatch.setenv("PROMPT_TIMEOUT_SECONDS", "12")
     settings = Settings()
@@ -17,7 +17,7 @@ def test_settings_read_at_instantiation(monkeypatch):
 
 
 # Default values apply when the relevant env vars are unset.
-def test_defaults():
+def test_defaults() -> None:
     settings = Settings()
     assert settings.provider == "openrouter"
     assert settings.profile == "default"
@@ -49,7 +49,7 @@ def test_defaults():
 
 # for_tier("pro") swaps in the pro model, endpoint, effort, timeout and profile; standard is
 # a no-op.
-def test_for_tier(monkeypatch):
+def test_for_tier(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENROUTER_PRO_MODEL", "x/pro")
     settings = Settings()
     assert settings.for_tier("standard") is settings
@@ -66,7 +66,7 @@ def test_for_tier(monkeypatch):
 
 
 # for_call: the tier, then the overrides; a pro call on another model loses the pro profile.
-def test_for_call(monkeypatch):
+def test_for_call(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PROMPT_PROFILE", "general")
     settings = Settings()
     assert settings.for_call("standard") == settings
@@ -86,7 +86,9 @@ def test_for_call(monkeypatch):
 # Only OpenRouter has a pro tier: for any other provider for_call("pro") keeps the standard
 # profile and timeout, even with PROMPT_PRO_PROFILE set (#31).
 @pytest.mark.parametrize("provider", ["ollama", "lmstudio", "anthropic"])
-def test_for_call_pro_tier_is_openrouter_only(monkeypatch, provider):
+def test_for_call_pro_tier_is_openrouter_only(
+    monkeypatch: pytest.MonkeyPatch, provider: str
+) -> None:
     monkeypatch.setenv("PROMPT_PRO_PROFILE", "general")
     settings = Settings()
     call = settings.for_call("pro", provider=provider)
@@ -99,7 +101,7 @@ def test_for_call_pro_tier_is_openrouter_only(monkeypatch, provider):
 
 
 # --tier pro and --effort name OpenRouter-only settings; the neutral values pass anywhere.
-def test_openrouter_only_options():
+def test_openrouter_only_options() -> None:
     config.openrouter_only("openrouter", "pro", "high")
     for neutral in ((("standard", None)), ("standard", "default")):
         config.openrouter_only("ollama", *neutral)
@@ -112,7 +114,7 @@ def test_openrouter_only_options():
 
 
 # --max-tokens is kept for the local providers too, which have no cap setting of their own.
-def test_with_overrides_call_max_tokens():
+def test_with_overrides_call_max_tokens() -> None:
     settings = Settings()
     assert settings.call_max_tokens is None
     assert settings.with_overrides(max_tokens="300").call_max_tokens == 300
@@ -121,7 +123,7 @@ def test_with_overrides_call_max_tokens():
 
 # OPENROUTER_PRO_MAX_TOKENS: empty (the default) inherits OPENROUTER_MAX_TOKENS for the pro
 # tier; set, it caps the pro tier only (#31).
-def test_pro_max_tokens(monkeypatch):
+def test_pro_max_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENROUTER_MAX_TOKENS", "1000")
     settings = Settings()
     assert settings.openrouter_pro_max_tokens is None
@@ -146,7 +148,7 @@ def test_pro_max_tokens(monkeypatch):
 
 
 @pytest.mark.parametrize("raw", ["0", "-1", "lots", "inf", " "])
-def test_bad_pro_max_tokens(monkeypatch, raw):
+def test_bad_pro_max_tokens(monkeypatch: pytest.MonkeyPatch, raw: str) -> None:
     monkeypatch.setenv("OPENROUTER_PRO_MAX_TOKENS", raw)
     with pytest.raises(
         ValueError,
@@ -156,7 +158,7 @@ def test_bad_pro_max_tokens(monkeypatch, raw):
 
 
 # An empty PROMPT_TEMPERATURE means "send no temperature"; unset keeps the default.
-def test_empty_temperature(monkeypatch):
+def test_empty_temperature(monkeypatch: pytest.MonkeyPatch) -> None:
     assert Settings().temperature == 0.2
     monkeypatch.setenv("PROMPT_TEMPERATURE", "")
     assert Settings().temperature is None
@@ -167,7 +169,7 @@ def test_empty_temperature(monkeypatch):
 
 
 # split_model_spec: a bare slug has no pin, slug@endpoint pins it, @auto unpins.
-def test_split_model_spec():
+def test_split_model_spec() -> None:
     assert split_model_spec(None) == (None, None)
     assert split_model_spec("x/m") == ("x/m", None)
     assert split_model_spec("x/m@openai/flex") == ("x/m", "openai/flex")
@@ -178,7 +180,7 @@ def test_split_model_spec():
 
 
 # with_overrides: None and `default` keep the settings; real values replace them.
-def test_with_overrides():
+def test_with_overrides() -> None:
     settings = Settings()
     assert settings.with_overrides() is settings
     assert settings.with_overrides(effort="default", max_tokens="default") is settings
@@ -192,7 +194,7 @@ def test_with_overrides():
 
 # --model sets every provider's model, so it applies to whichever one runs; its @endpoint
 # part pins OpenRouter (@auto: no pin), and a bare slug keeps the configured pin.
-def test_with_overrides_model():
+def test_with_overrides_model() -> None:
     settings = Settings()
     pinned = settings.with_overrides(model="x/m@auto")
     models = (
@@ -218,7 +220,7 @@ def test_with_overrides_model():
         ({"timeout": "-5"}, "--timeout must be a number above 0"),
     ],
 )
-def test_with_overrides_rejects_bad_values(kwargs, message):
+def test_with_overrides_rejects_bad_values(kwargs: dict[str, str], message: str) -> None:
     with pytest.raises(ValueError, match=message):
         Settings().with_overrides(**kwargs)
 
@@ -237,14 +239,16 @@ def test_with_overrides_rejects_bad_values(kwargs, message):
     ],
 )
 @pytest.mark.parametrize("raw", ["not-a-number", "inf", "nan", "-1"])
-def test_bad_numeric_env_var_raises(monkeypatch, env_name, expected, raw):
+def test_bad_numeric_env_var_raises(
+    monkeypatch: pytest.MonkeyPatch, env_name: str, expected: str, raw: str
+) -> None:
     monkeypatch.setenv(env_name, raw)
     with pytest.raises(ValueError, match=f"^{env_name} must be {expected}, got '{raw}'$"):
         Settings()
 
 
 # Zero is refused where it makes no sense, and allowed for temperature.
-def test_zero_values(monkeypatch):
+def test_zero_values(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PROMPT_TEMPERATURE", "0")
     assert Settings().temperature == 0.0
     monkeypatch.setenv("OPENROUTER_MAX_TOKENS", "0")
@@ -253,7 +257,7 @@ def test_zero_values(monkeypatch):
 
 
 # API keys never appear in repr(), so a traceback or a failing assertion cannot print them.
-def test_repr_hides_api_keys(monkeypatch):
+def test_repr_hides_api_keys(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENROUTER_API_KEY", "or-secret-value")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "ant-secret-value")
     text = repr(Settings())
@@ -262,7 +266,9 @@ def test_repr_hides_api_keys(monkeypatch):
 
 
 # PROMPT_WORKFLOW_ENV names the .env to load; real env vars still win over it.
-def test_load_dotenv_explicit_path_does_not_override(tmp_path, monkeypatch):
+def test_load_dotenv_explicit_path_does_not_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     env_file = tmp_path / "custom.env"
     env_file.write_text("PROMPT_PROVIDER=ollama\nOLLAMA_MODEL=from-file\n")
     monkeypatch.setenv("PROMPT_WORKFLOW_ENV", str(env_file))
@@ -276,7 +282,9 @@ def test_load_dotenv_explicit_path_does_not_override(tmp_path, monkeypatch):
 
 # .env only sets the settings this package reads: a proxy or CA bundle variable there would
 # change how httpx connects, so it is ignored, while real environment variables still apply.
-def test_load_dotenv_exports_only_known_settings(tmp_path, monkeypatch):
+def test_load_dotenv_exports_only_known_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     others = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "SSL_CERT_FILE", "FOO")
     for name in others:
         monkeypatch.setenv(name, "x")  # so monkeypatch restores the original state afterwards
@@ -292,7 +300,9 @@ def test_load_dotenv_exports_only_known_settings(tmp_path, monkeypatch):
     assert set(layers.entries) == set(env_names())
 
 
-def _no_explicit_env(tmp_path, monkeypatch, project: Path, user: Path) -> None:
+def _no_explicit_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, project: Path, user: Path
+) -> None:
     monkeypatch.delenv("PROMPT_WORKFLOW_ENV")
     monkeypatch.setattr(config, "_PROJECT_ROOT", project)
     monkeypatch.setattr(config, "_user_config_dir", lambda _environ: user)
@@ -300,7 +310,9 @@ def _no_explicit_env(tmp_path, monkeypatch, project: Path, user: Path) -> None:
 
 # A .env in the current directory or its parents is never loaded: a planted file in an
 # untrusted checkout must not redirect the base URL or enable ALLOW_CLOUD_OVERRIDE.
-def test_load_dotenv_ignores_cwd_and_parents(tmp_path, monkeypatch):
+def test_load_dotenv_ignores_cwd_and_parents(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     nested = tmp_path / "a" / "b"
     nested.mkdir(parents=True)
     (tmp_path / ".env").write_text("ALLOW_CLOUD_OVERRIDE=true\n")
@@ -316,7 +328,7 @@ def test_load_dotenv_ignores_cwd_and_parents(tmp_path, monkeypatch):
 
 
 # The repo .env (editable install) wins over the user config dir .env.
-def test_load_dotenv_prefers_project_root(tmp_path, monkeypatch):
+def test_load_dotenv_prefers_project_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     project, user = tmp_path / "repo", tmp_path / "cfg"
     project.mkdir()
     user.mkdir()
@@ -332,7 +344,9 @@ def test_load_dotenv_prefers_project_root(tmp_path, monkeypatch):
 
 
 # Without a project checkout (no pyproject.toml), the user config dir .env is used.
-def test_load_dotenv_falls_back_to_user_config(tmp_path, monkeypatch):
+def test_load_dotenv_falls_back_to_user_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     project, user = tmp_path / "site-packages", tmp_path / "cfg"
     project.mkdir()
     user.mkdir()
@@ -348,7 +362,7 @@ def test_load_dotenv_falls_back_to_user_config(tmp_path, monkeypatch):
 
 # Comment lines, blank lines, and lines without '=' are skipped; '=' inside a
 # value is preserved via partition(); surrounding quotes are stripped.
-def test_load_dotenv_parses_lines(tmp_path, monkeypatch):
+def test_load_dotenv_parses_lines(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (tmp_path / ".env").write_text(
         "# a comment\n"
         "\n"
@@ -368,7 +382,7 @@ def test_load_dotenv_parses_lines(tmp_path, monkeypatch):
 
 # Booleans are "true" or "false" in any case.
 @pytest.mark.parametrize(("raw", "expected"), [("TRUE", True), ("true", True), ("False", False)])
-def test_bool_parsing(monkeypatch, raw, expected):
+def test_bool_parsing(monkeypatch: pytest.MonkeyPatch, raw: str, expected: bool) -> None:
     monkeypatch.setenv("ALLOW_CLOUD_OVERRIDE", raw)
     monkeypatch.setenv("OLLAMA_THINK", raw)
     monkeypatch.setenv("OPENROUTER_ALLOW_FALLBACKS", raw)
@@ -386,21 +400,21 @@ def test_bool_parsing(monkeypatch, raw, expected):
 @pytest.mark.parametrize(
     ("raw", "expected"), [("", ""), ("deny", "deny"), ("DENY", "deny"), ("Allow", "allow")]
 )
-def test_data_collection_parsing(monkeypatch, raw, expected):
+def test_data_collection_parsing(monkeypatch: pytest.MonkeyPatch, raw: str, expected: str) -> None:
     monkeypatch.setenv("OPENROUTER_DATA_COLLECTION", raw)
     settings = Settings()
     assert settings.openrouter_data_collection == expected
     assert settings.for_tier("pro").openrouter_data_collection == expected
 
 
-def test_data_collection_default(monkeypatch):
+def test_data_collection_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("OPENROUTER_DATA_COLLECTION", raising=False)
     assert Settings().openrouter_data_collection == ""
 
 
 # A typo is reported naming the variable, never silently sent (OpenRouter would 400).
 @pytest.mark.parametrize("raw", ["no", "true", "denied"])
-def test_data_collection_rejects_other_values(monkeypatch, raw):
+def test_data_collection_rejects_other_values(monkeypatch: pytest.MonkeyPatch, raw: str) -> None:
     monkeypatch.setenv("OPENROUTER_DATA_COLLECTION", raw)
     with pytest.raises(
         ValueError,
@@ -412,7 +426,9 @@ def test_data_collection_rejects_other_values(monkeypatch, raw):
 # Anything else is an error, not a silent false: OLLAMA_THINK=1 must not mean "off".
 @pytest.mark.parametrize("raw", ["1", "yes", ""])
 @pytest.mark.parametrize("name", ["OLLAMA_THINK", "PROMPT_GATE_LOCAL"])
-def test_bool_parsing_rejects_other_values(monkeypatch, raw, name):
+def test_bool_parsing_rejects_other_values(
+    monkeypatch: pytest.MonkeyPatch, raw: str, name: str
+) -> None:
     monkeypatch.setenv(name, raw)
     with pytest.raises(ValueError, match=f"^{name} must be true or false, got '{raw}'$"):
         Settings()
@@ -423,7 +439,9 @@ def test_bool_parsing_rejects_other_values(monkeypatch, raw, name):
     "env_name", ["OPENROUTER_REASONING_EFFORT", "OPENROUTER_PRO_REASONING_EFFORT"]
 )
 @pytest.mark.parametrize(("raw", "expected"), [("", ""), ("low", "low"), ("HIGH", "high")])
-def test_effort_parsing(monkeypatch, env_name, raw, expected):
+def test_effort_parsing(
+    monkeypatch: pytest.MonkeyPatch, env_name: str, raw: str, expected: str
+) -> None:
     monkeypatch.setenv(env_name, raw)
     assert getattr(Settings(), env_name.lower()) == expected
 
@@ -432,7 +450,7 @@ def test_effort_parsing(monkeypatch, env_name, raw, expected):
 @pytest.mark.parametrize(
     "env_name", ["OPENROUTER_REASONING_EFFORT", "OPENROUTER_PRO_REASONING_EFFORT"]
 )
-def test_effort_typo_is_rejected(monkeypatch, env_name):
+def test_effort_typo_is_rejected(monkeypatch: pytest.MonkeyPatch, env_name: str) -> None:
     monkeypatch.setenv(env_name, "hihg")
     with pytest.raises(
         ValueError,
@@ -455,7 +473,9 @@ FAKE_KEY = "sk-or-v1-" + "cd" * 32
     ],
     ids=["merged-line", "key", "long"],
 )
-def test_parse_error_never_echoes_secret_like_values(monkeypatch, raw):
+def test_parse_error_never_echoes_secret_like_values(
+    monkeypatch: pytest.MonkeyPatch, raw: str
+) -> None:
     monkeypatch.setenv("OPENROUTER_MAX_TOKENS", raw)
     with pytest.raises(ValueError, match=r"^OPENROUTER_MAX_TOKENS must be") as caught:
         Settings()
@@ -467,7 +487,7 @@ def test_parse_error_never_echoes_secret_like_values(monkeypatch, raw):
 
 
 # Per-call overrides follow the same rule.
-def test_override_error_never_echoes_secret_like_values():
+def test_override_error_never_echoes_secret_like_values() -> None:
     with pytest.raises(ValueError, match="redacted") as caught:
         Settings().with_overrides(max_tokens=FAKE_KEY)
     assert "cdcd" not in str(caught.value)
@@ -486,7 +506,7 @@ def test_override_error_never_echoes_secret_like_values():
     ],
     ids=["number", "persona", "spaced", "lowercase", "other-name"],
 )
-def test_load_rejects_merged_env_lines(tmp_path, first, second):
+def test_load_rejects_merged_env_lines(tmp_path: Path, first: str, second: str) -> None:
     (tmp_path / ".env").write_text(f"{first}{second}{FAKE_KEY}\n")
     key = first.partition("=")[0]
     with pytest.raises(ValueError, match=f"^{key} in .env runs into the next line") as caught:
@@ -496,7 +516,7 @@ def test_load_rejects_merged_env_lines(tmp_path, first, second):
 
 # The error names an unknown key only through safe_repr: a key line merged in front of it
 # would otherwise be repeated.
-def test_load_merged_line_error_redacts_unknown_key(tmp_path):
+def test_load_merged_line_error_redacts_unknown_key(tmp_path: Path) -> None:
     (tmp_path / ".env").write_text(f"{FAKE_KEY}PROMPT_PERSONA=x OPENROUTER_MODEL=y\n")
     with pytest.raises(ValueError, match=r"^<redacted, ") as caught:
         Settings.load()
@@ -504,7 +524,7 @@ def test_load_merged_line_error_redacts_unknown_key(tmp_path):
 
 
 # User regexes may match assignment-like text, so PROMPT_EXTRA_PATTERNS is not checked.
-def test_load_allows_assignments_in_extra_patterns(tmp_path):
+def test_load_allows_assignments_in_extra_patterns(tmp_path: Path) -> None:
     (tmp_path / ".env").write_text("PROMPT_EXTRA_PATTERNS=OPENROUTER_API_KEY=\\S+;DB_PASS\n")
     assert Settings.load().extra_patterns == "OPENROUTER_API_KEY=\\S+;DB_PASS"
 
@@ -523,7 +543,9 @@ _TOO_DEEP = "(" * 2_000 + "a" + ")" * 2_000
     [("(", 1), ("falcon;secret[", 2), ("a;;(?P<x", 2), (f"ok;{_TOO_BIG}", 2), (_TOO_DEEP, 1)],
     ids=["paren", "bracket", "group", "overflow", "recursion"],
 )
-def test_invalid_extra_pattern_is_rejected(monkeypatch, raw, entry):
+def test_invalid_extra_pattern_is_rejected(
+    monkeypatch: pytest.MonkeyPatch, raw: str, entry: int
+) -> None:
     monkeypatch.setenv("PROMPT_EXTRA_PATTERNS", raw)
     with pytest.raises(ValueError, match=r"^PROMPT_EXTRA_PATTERNS must be") as caught:
         Settings()
@@ -537,7 +559,7 @@ def test_invalid_extra_pattern_is_rejected(monkeypatch, raw, entry):
 @pytest.mark.parametrize(
     "raw", ["ok;(", f"ok;{_TOO_BIG}", _TOO_DEEP], ids=["paren", "overflow", "recursion"]
 )
-def test_invalid_extra_pattern_is_a_repair_finding(tmp_path, raw):
+def test_invalid_extra_pattern_is_a_repair_finding(tmp_path: Path, raw: str) -> None:
     (tmp_path / ".env").write_text(f"PROMPT_EXTRA_PATTERNS={raw}\n")
     layers = ConfigLayers.resolve(strict=False)
     assert any("PROMPT_EXTRA_PATTERNS must be" in f.message for f in layers.findings)
@@ -545,7 +567,7 @@ def test_invalid_extra_pattern_is_a_repair_finding(tmp_path, raw):
 
 
 # A space pasted along with an API key is dropped.
-def test_api_keys_are_stripped(monkeypatch):
+def test_api_keys_are_stripped(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENROUTER_API_KEY", f" {FAKE_KEY} ")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "ant-key\t")
     settings = Settings()
@@ -553,20 +575,20 @@ def test_api_keys_are_stripped(monkeypatch):
 
 
 # An empty key in .env (as in .env.example) counts as unset for the provider check.
-def test_empty_api_key_is_kept_as_empty(monkeypatch):
+def test_empty_api_key_is_kept_as_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENROUTER_API_KEY", "")
     assert not Settings().openrouter_api_key
 
 
 # Shell-style `export KEY=value` lines are accepted, since .env files are often sourced too.
-def test_load_dotenv_accepts_export_prefix(tmp_path, monkeypatch):
+def test_load_dotenv_accepts_export_prefix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (tmp_path / ".env").write_text("export OLLAMA_MODEL=exported\n")
     monkeypatch.chdir(tmp_path)
     assert Settings.load().ollama_model == "exported"
 
 
 # Only a matching pair of surrounding quotes is removed; inner or lone quotes survive.
-def test_load_dotenv_quote_handling(tmp_path, monkeypatch):
+def test_load_dotenv_quote_handling(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (tmp_path / ".env").write_text(
         'OLLAMA_MODEL="it\'s"\nLMSTUDIO_MODEL=\'a"\nPROMPT_PROFILE="general"  \n'
     )
@@ -579,7 +601,9 @@ def test_load_dotenv_quote_handling(tmp_path, monkeypatch):
 
 # An inline ` # comment` after an unquoted value is not part of the value; a quoted value
 # keeps its '#', and a '#' without whitespace before it is data.
-def test_load_dotenv_strips_inline_comments(tmp_path, monkeypatch):
+def test_load_dotenv_strips_inline_comments(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     (tmp_path / ".env").write_text(
         "OPENROUTER_PROVIDER=openai  # pinned for the pro tier\n"
         'PROMPT_PERSONA="I am #1 here" # note\n'
@@ -595,7 +619,7 @@ def test_load_dotenv_strips_inline_comments(tmp_path, monkeypatch):
 
 
 # PROMPT_PERSONA is empty unless configured.
-def test_persona_default_and_override(monkeypatch):
+def test_persona_default_and_override(monkeypatch: pytest.MonkeyPatch) -> None:
     assert Settings().persona == ""
     monkeypatch.setenv("PROMPT_PERSONA", "I am a tester.")
     assert Settings().persona == "I am a tester."
@@ -603,7 +627,7 @@ def test_persona_default_and_override(monkeypatch):
 
 # Loading reads the .env again each time: an edit shows up in the same process, which the
 # old os.environ.setdefault() loader hid behind the first load's values.
-def test_load_sees_an_edited_env_file(tmp_path):
+def test_load_sees_an_edited_env_file(tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text("OLLAMA_MODEL=first\n")
     assert Settings.load().ollama_model == "first"
@@ -613,7 +637,7 @@ def test_load_sees_an_edited_env_file(tmp_path):
 
 
 # Loading never writes the process environment, so child processes inherit nothing from .env.
-def test_load_leaves_os_environ_unchanged(tmp_path):
+def test_load_leaves_os_environ_unchanged(tmp_path: Path) -> None:
     lines = [f"{name}=x" for name in ("OLLAMA_MODEL", "LMSTUDIO_MODEL", "PROMPT_PERSONA", "FOO")]
     (tmp_path / ".env").write_text("\n".join([*lines, "OLLAMA_THINK=true", ""]))
     before = dict(os.environ)
@@ -623,7 +647,7 @@ def test_load_leaves_os_environ_unchanged(tmp_path):
 
 
 # Each key reports where its value came from; a real env var shadowing a .env value says so.
-def test_provenance(tmp_path, monkeypatch):
+def test_provenance(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text("OLLAMA_MODEL=from-file\nPROMPT_PROVIDER=ollama\n")
     monkeypatch.setenv("PROMPT_PROVIDER", "lmstudio")
@@ -652,7 +676,7 @@ def test_provenance(tmp_path, monkeypatch):
 
 
 # Entries and layers never print a value, which may be an API key.
-def test_provenance_repr_hides_values(monkeypatch):
+def test_provenance_repr_hides_values(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENROUTER_API_KEY", FAKE_KEY)
     layers = ConfigLayers.resolve()
     assert "cdcd" not in repr(layers)
@@ -661,7 +685,7 @@ def test_provenance_repr_hides_values(monkeypatch):
 
 # A broken .env: strict mode raises today's exact error; repair mode returns the same text as
 # findings and falls back to the next lower layer, so management commands can still run.
-def test_repair_mode_returns_findings(tmp_path, monkeypatch):
+def test_repair_mode_returns_findings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text(
         f"PROMPT_PERSONA=I am a tester.OPENROUTER_API_KEY={FAKE_KEY}\n"
@@ -691,7 +715,7 @@ def test_repair_mode_returns_findings(tmp_path, monkeypatch):
 
 
 # Strict mode reports a bad number with today's message, from the .env as from the env.
-def test_strict_bad_number_in_env_file(tmp_path):
+def test_strict_bad_number_in_env_file(tmp_path: Path) -> None:
     (tmp_path / ".env").write_text("OPENROUTER_MAX_TOKENS=lots\n")
     message = "^OPENROUTER_MAX_TOKENS must be a whole number above 0, got 'lots'$"
     with pytest.raises(ValueError, match=message):
@@ -699,7 +723,9 @@ def test_strict_bad_number_in_env_file(tmp_path):
 
 
 # Repair mode falls back past a bad env value to a valid .env value, not to the default.
-def test_repair_mode_falls_back_to_next_layer(tmp_path, monkeypatch):
+def test_repair_mode_falls_back_to_next_layer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text("PROMPT_TIMEOUT_SECONDS=12\n")
     monkeypatch.setenv("PROMPT_TIMEOUT_SECONDS", "soon")
@@ -712,7 +738,7 @@ def test_repair_mode_falls_back_to_next_layer(tmp_path, monkeypatch):
 
 
 # resolve() takes the environment as a mapping, so a caller can resolve another one.
-def test_resolve_takes_an_environment_mapping(tmp_path):
+def test_resolve_takes_an_environment_mapping(tmp_path: Path) -> None:
     env_file = tmp_path / "other.env"
     env_file.write_text("OLLAMA_MODEL=from-file\n")
     environ = {"PROMPT_WORKFLOW_ENV": str(env_file), "PROMPT_PROVIDER": "ollama"}
@@ -721,7 +747,7 @@ def test_resolve_takes_an_environment_mapping(tmp_path):
 
 
 # Repair mode reports a line without '=' by number (never its text); strict mode skips it.
-def test_repair_mode_reports_lines_without_equals(tmp_path):
+def test_repair_mode_reports_lines_without_equals(tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text(f"# note\n\nOLLAMA_MODEL=m\n{FAKE_KEY}\nexport\n")
     assert Settings.load().ollama_model == "m"
@@ -738,7 +764,9 @@ def test_repair_mode_reports_lines_without_equals(tmp_path):
 # A .env candidate that exists but is not UTF-8 is a finding in repair mode, which goes on to
 # the next one (strict mode refuses it, see test_strict_mode_refuses_undecodable_env); a
 # missing candidate is no finding.
-def test_repair_mode_reports_undecodable_env_file(tmp_path, monkeypatch):
+def test_repair_mode_reports_undecodable_env_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     project, user = tmp_path / "repo", tmp_path / "cfg"
     project.mkdir()
     user.mkdir()
@@ -761,7 +789,7 @@ def test_repair_mode_reports_undecodable_env_file(tmp_path, monkeypatch):
 
 
 # A .env saved with a UTF-8 byte order mark (Windows Notepad) keeps its first key (#32).
-def test_env_with_byte_order_mark(tmp_path):
+def test_env_with_byte_order_mark(tmp_path: Path) -> None:
     path = tmp_path / ".env"
     path.write_bytes(b"\xef\xbb\xbfPROMPT_EXTRA_PATTERNS=CUST-\\d{6}\nOLLAMA_MODEL=m\n")
     assert Settings.load().extra_patterns == r"CUST-\d{6}"
@@ -774,7 +802,9 @@ def test_env_with_byte_order_mark(tmp_path):
 
 # A .env that is not UTF-8 stops strict mode with an error naming the problem, not a value,
 # instead of falling through to the next candidate (#32).
-def test_strict_mode_refuses_undecodable_env(tmp_path, monkeypatch):
+def test_strict_mode_refuses_undecodable_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     project, user = tmp_path / "repo", tmp_path / "cfg"
     project.mkdir()
     user.mkdir()
@@ -795,7 +825,7 @@ def test_strict_mode_refuses_undecodable_env(tmp_path, monkeypatch):
 # An unquoted value cut at ` #` keeps dotenv's comment meaning. Repair mode reports the cut
 # only for the free-text settings where '#' may be data (a regex, the persona), naming the
 # setting only; elsewhere ` # note` is an ordinary comment (#32).
-def test_repair_mode_reports_a_value_cut_at_a_comment(tmp_path):
+def test_repair_mode_reports_a_value_cut_at_a_comment(tmp_path: Path) -> None:
     (tmp_path / ".env").write_text(
         "PROMPT_EXTRA_PATTERNS=ticket #\\d{5};CUST-\\d{6}\n"
         'OPENROUTER_PROVIDER="openai" # quoted, so not cut\n'
@@ -822,7 +852,9 @@ def test_repair_mode_reports_a_value_cut_at_a_comment(tmp_path):
 
 # A rejected value that matches one of the user's PROMPT_EXTRA_PATTERNS is never quoted, even
 # in the error raised while the settings load (#32).
-def test_rejected_value_matching_a_user_pattern_is_redacted(monkeypatch):
+def test_rejected_value_matching_a_user_pattern_is_redacted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("PROMPT_EXTRA_PATTERNS", "falcon")
     monkeypatch.setenv("PROMPT_TIMEOUT_SECONDS", "falcon")
     with pytest.raises(ValueError, match="PROMPT_TIMEOUT_SECONDS must be") as exc:
