@@ -1098,7 +1098,9 @@ def test_files_under_home_show_as_tilde(
 ) -> None:
     # #174: display only, so the From column keeps the file name on a narrow terminal.
     monkeypatch.delenv("PROMPT_WORKFLOW_ENV")
+    # The config dir is $XDG_CONFIG_HOME on POSIX and %APPDATA% on Windows.
     monkeypatch.setenv("XDG_CONFIG_HOME", str(Path.home() / ".config"))
+    monkeypatch.setenv("APPDATA", str(Path.home() / ".config"))
     config_store.save_secret("OPENROUTER_API_KEY", KEY)
     folder = config_store.config_dir()
     (folder / "config.toml").write_text('PROMPT_PROFILE = "general"\n', encoding="utf-8")
