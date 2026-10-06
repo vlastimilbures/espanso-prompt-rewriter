@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Added
+- The interface's Home tab has a command line (#111): press `c` from any tab and type a
+  `promptmend` command. It completes commands, options, setting names (after `config set`,
+  `get` and `unset`; never a key name there), key names (only after `secrets set` and
+  `secrets remove`) and profile names, and shows the command's usage and help as you type, or
+  the usage error the CLI would print. Enter shows the command as you would run it in a
+  terminal but runs nothing yet (that comes in a later version); Up and Down go back through
+  this session's lines; Escape leaves it. A line that looks like it holds a key is never
+  shown back or kept in that history. The footer shows `c Command`.
+
 ## 0.19.0 - 2026-10-06
 
 ### Breaking

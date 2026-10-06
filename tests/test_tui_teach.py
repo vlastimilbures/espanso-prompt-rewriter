@@ -5,10 +5,9 @@ argument fails here instead of teaching a command that no longer works."""
 from __future__ import annotations
 
 import pytest
-import typer
+from typer.core import TyperGroup
 
-from promptmend import cli
-from promptmend.tui import teach
+from promptmend.tui import console, teach
 
 # What a placeholder stands for, so the command can be parsed.
 EXAMPLES = {
@@ -22,17 +21,10 @@ EXAMPLES = {
 
 def parse(argv: tuple[str, ...]) -> None:
     """Resolve ``argv`` down the Click tree and parse the leaf's arguments and options, as
-    the CLI would before running it; raises on an unknown command, option or argument."""
-    root = typer.main.get_command(cli.app)
-    ctx = root.make_context(teach.PROGRAM, ["--help"], resilient_parsing=True)
-    command, words = root, [EXAMPLES.get(word, word) for word in argv]
-    while isinstance(command, typer.core.TyperGroup):
-        assert words, f"{argv}: names a group, not a command"
-        sub = command.get_command(ctx, words[0])
-        assert sub is not None, f"{argv}: no command {words[0]!r}"
-        command, words = sub, words[1:]
-    leaf = command.make_context(command.name or "", list(words))
-    assert not leaf.args, f"{argv}: left over {leaf.args}"
+    the CLI would before running it (console.resolve(), which the command line on Home uses
+    too); raises on an unknown command, option or argument."""
+    found = console.resolve([EXAMPLES.get(word, word) for word in argv])
+    assert not isinstance(found.command, TyperGroup), f"{argv}: names a group, not a command"
 
 
 ALL = sorted(

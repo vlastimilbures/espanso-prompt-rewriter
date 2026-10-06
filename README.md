@@ -219,12 +219,21 @@ Every button's tooltip shows the command that does the same in a terminal, every
 starts with that command (`$ promptmend config set …`), and Home lists this session's
 commands, or a few useful ones before you have done anything.
 
+Home also has a command line: press `c` (from any tab) and type a command, such as
+`espanso status --diff`. It completes the word you are typing (Tab or the Right arrow takes
+the suggestion: commands, options, setting names after `config set`, key names only after
+`secrets set` or `secrets remove`, profile names) and shows the command's usage and help
+below, or the error the CLI would print. Enter shows the command as you would run it in a
+terminal (`$ promptmend …`), but runs nothing yet; Up and Down go back through what you
+entered. A line that looks like it holds a key is never shown back or kept: it is cleared,
+and keys go in Providers & keys. Escape leaves the line, so the tab keys work again.
+
 It opens with a short intro that stays until you press Enter (or any other key, or click);
 that key does nothing else. Its last line says how to turn it off for good:
 `promptmend config set PROMPT_UI_INTRO false`. `promptmend ui --no-intro` skips it
 once.
 
-`1`-`6` switch tabs, `a` shows the version, install channel, folders and licence, `r` reloads,
+`1`-`6` switch tabs, `c` opens Home's command line, `a` shows the version, install channel, folders and licence, `r` reloads,
 `t` switches to a high-contrast theme and `q` quits; `NO_COLOR` turns colour off. Scripts and screen readers can use the headless commands instead.
 Without a terminal, a bare `promptmend` prints the help.
 
