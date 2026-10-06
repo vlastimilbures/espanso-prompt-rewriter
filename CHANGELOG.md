@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Added
+- `OPENROUTER_DATA_COLLECTION` (`allow` or `deny`, empty by default) sets OpenRouter's
+  `provider.data_collection` routing field on every OpenRouter call, both tiers (#29). `deny`
+  routes only to endpoints that do not store or train on requests; empty, the default, leaves
+  the request body unchanged. The default `google-ai-studio/flex` pin served a `deny` call
+  when checked; if a pinned endpoint does not qualify, OpenRouter falls back to one that does
+  while `OPENROUTER_ALLOW_FALLBACKS=true`, and otherwise the trigger pastes an HTTP error
+  marker. README "What is sent, and to whom" and the Configuration table describe it.
+
 ### Changed
 - README "CLI" documents the `[prompt-workflow: …]` marker as the stable way for a script to
   tell a failed `improve` run from a rewrite, since the exit code is always 0 (#32).

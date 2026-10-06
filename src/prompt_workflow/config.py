@@ -407,6 +407,17 @@ def _effort(raw: str) -> str:
     return raw.lower()
 
 
+# OpenRouter `provider.data_collection` values: `deny` routes only to endpoints that do not
+# store or train on requests; empty sends no field (OpenRouter's account setting applies).
+DATA_COLLECTION = ("allow", "deny")
+
+
+def _data_collection(raw: str) -> str:
+    if raw.lower() not in ("", *DATA_COLLECTION):
+        raise ValueError(f"empty or one of {', '.join(DATA_COLLECTION)}")
+    return raw.lower()
+
+
 # Option value meaning "keep the configured setting"; the -if- popup's choice lists
 # cannot express "unset", so each one offers this word instead.
 KEEP = "default"
@@ -491,6 +502,10 @@ class Settings:
     # Preference, not constraint: a pinned endpoint can be down, and in Espanso that
     # surfaces as an error marker pasted into the editor. Set false for a hard pin.
     openrouter_allow_fallbacks: bool = _env("OPENROUTER_ALLOW_FALLBACKS", "true", _bool)
+    # OpenRouter `provider.data_collection` for every OpenRouter call, both tiers: `deny`
+    # routes only to endpoints that do not store or train on requests (a pin that does not
+    # qualify then fails). Empty (the default) sends no field, so the body is unchanged.
+    openrouter_data_collection: str = _env("OPENROUTER_DATA_COLLECTION", "", _data_collection)
     # The `pro` tier (-ip-): a reasoning model for hard, multi-part drafts. It
     # swaps in these OpenRouter settings; everything else is shared with the default tier.
     openrouter_pro_model: str = _env("OPENROUTER_PRO_MODEL", "openai/gpt-6-luna")
