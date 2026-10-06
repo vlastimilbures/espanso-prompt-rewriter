@@ -147,15 +147,32 @@ and `secrets.toml` (see [Configuration](#configuration)).
   the clipboard needs `xclip` or `xsel` (X11) or `wl-clipboard` (Wayland); without one, a
   trigger pastes `[prompt-workflow: Clipboard unavailable: Pyperclip could not find a copy/paste
   mechanism …]` instead of a rewrite.
-- Python 3.12+ and [uv](https://docs.astral.sh/uv/getting-started/installation/)
+- Python 3.12+ and [uv](https://docs.astral.sh/uv/getting-started/installation/), or (macOS
+  and Linux, from 0.19.0) [Homebrew](https://brew.sh), which brings its own Python
 - For the default `-i-` trigger: an [OpenRouter API key](https://openrouter.ai/keys).
   For fully local use instead: [Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai).
 
 ## Install
 
-Each [GitHub Release](https://github.com/vlastimilbures/espanso-prompt-rewriter/releases) from
-0.16 on carries the wheel and `constraints.txt`, the exact dependency versions from `uv.lock`
-(a plain `uv tool install` would resolve the version ranges afresh). Install a release with:
+Pick one channel; each installs the CLI only, and [First run](#first-run) then sets it up and
+writes the Espanso match files. All of them install the same release files: the sdist and the
+wheel built and tested by the release workflow, with the exact dependency versions from
+`uv.lock`. To run from a checkout instead, see [Development](#development).
+
+**From PyPI with uv (from 0.19.0).** The package is
+[`espanso-prompt-rewriter`](https://pypi.org/project/espanso-prompt-rewriter/), uploaded by the
+release workflow through PyPI's trusted publishing (no stored token). Pass the release's
+`constraints.txt`, the exact dependency versions from `uv.lock`; a plain `uv tool install`
+would resolve the version ranges afresh:
+
+```bash
+uv tool install espanso-prompt-rewriter==<version> \
+  -c https://github.com/vlastimilbures/espanso-prompt-rewriter/releases/download/v<version>/constraints.txt
+```
+
+**From a GitHub Release with uv.** Each
+[GitHub Release](https://github.com/vlastimilbures/espanso-prompt-rewriter/releases) from 0.16
+on carries the wheel and `constraints.txt`:
 
 ```bash
 uv tool install \
@@ -166,9 +183,22 @@ uv tool install \
 To check the files first, download them (`gh release download v<version> -R
 vlastimilbures/espanso-prompt-rewriter`), run `gh attestation verify <file> -R
 vlastimilbures/espanso-prompt-rewriter` on each, and install the local wheel with
-`-c constraints.txt`. This installs the CLI only; [First run](#first-run) sets it up and writes
-the Espanso match files. Homebrew, Scoop and WinGet packages are planned (#95). To run from a
-checkout instead, see [Development](#development).
+`-c constraints.txt`.
+
+**With Homebrew (macOS and Linux, from 0.19.0).** The formula lives in the project's own tap,
+[vlastimilbures/homebrew-tap](https://github.com/vlastimilbures/homebrew-tap), not in
+homebrew/core:
+
+```bash
+brew install vlastimilbures/tap/prompt-workflow
+```
+
+A tap is a third-party repository: Homebrew runs its formulas with your user's rights and
+updates them on every `brew update`, so only add a tap you trust (`brew untap
+vlastimilbures/tap` removes it). The formula installs the sdist attached to the GitHub Release
+and every dependency from PyPI, each pinned by SHA-256 to what the release's `uv.lock` records,
+into a virtual environment on Homebrew's Python. There is no Scoop or WinGet package; on
+Windows, use uv.
 
 ## First run
 
@@ -219,9 +249,8 @@ ours side by side as `<file>.prompt-workflow-new`, which Espanso does not load. 
 keeps yours unless you pass `--on-conflict ours|side`, and ends with a `WARNING` naming each file
 it kept. A file an older release's installer wrote, unedited, is recognised as ours and updated. `detach` likewise removes only files whose
 content is still what we wrote, and reports any you edited. The launcher written into the
-matches is the install channel's stable entry point (uv's tool bin, Homebrew's `bin/`, Scoop's
-shim), never a versioned path an upgrade would remove; `--launcher PATH` overrides it. A manifest
-entry for a file that no longer exists (its folder was deleted, or Espanso now uses another
+matches is the install channel's stable entry point (uv's tool bin, Homebrew's `bin/`), never
+a versioned path an upgrade would remove; `--launcher PATH` overrides it. A manifest for a file that no longer exists (its folder was deleted, or Espanso now uses another
 config folder) is forgotten by the next `deploy`; until then `doctor` mentions it but does not
 judge its launcher.
 
@@ -250,8 +279,18 @@ Or keep a `.env`: move it to the config folder (`~/.config/prompt-workflow/.env`
 `%APPDATA%\prompt-workflow\.env` on Windows), where the wheel reads it too, or point
 `PROMPT_WORKFLOW_ENV` at it (set for GUI apps, since Espanso does not inherit your shell).
 
-Install the new release's wheel with its own `constraints.txt`. `--force` makes uv install over
-the tool already there (the install scripts pass it too). Then check the result:
+Update through the channel you installed with, then check the result with
+`prompt-workflow doctor`. With uv, install the new release over the old one with its own
+`constraints.txt`: `--force` makes uv replace the tool already there (the install scripts pass
+it too). From PyPI (from 0.19.0):
+
+```bash
+uv tool install --force espanso-prompt-rewriter==<version> \
+  -c https://github.com/vlastimilbures/espanso-prompt-rewriter/releases/download/v<version>/constraints.txt
+prompt-workflow doctor
+```
+
+From a GitHub Release:
 
 ```bash
 uv tool install --force \
@@ -259,6 +298,15 @@ uv tool install --force \
   -c https://github.com/vlastimilbures/espanso-prompt-rewriter/releases/download/v<version>/constraints.txt
 prompt-workflow doctor
 ```
+
+With Homebrew (from 0.19.0), `brew update` then `brew upgrade prompt-workflow`. The tap's
+formula is updated by hand after each release, so it can trail the GitHub Release by a while.
+
+Switching channels (say from uv to Homebrew): install the new one, run
+`prompt-workflow espanso deploy` from it so the match files call its launcher, then uninstall
+the old one (step 4 of [Uninstall](#uninstall)). Run from the new install, `doctor` warns while
+the matches still call the old launcher, or while the old `prompt-workflow` comes first on
+`PATH`.
 
 Upgrading the CLI does not touch the match files Espanso holds. If `doctor` reports one as
 `stale` (for example `prompts-template.yml: stale`), run `prompt-workflow espanso deploy` to
@@ -287,7 +335,9 @@ Espanso's rendering error.
    usage history, and `prompt-workflow secrets remove OPENROUTER_API_KEY` (or
    `ANTHROPIC_API_KEY`) deletes a saved key. The config folder (`config.toml`, `profiles/`,
    `backups/`) and the data folder stay until you delete them.
-4. `uv tool uninstall espanso-prompt-rewriter`.
+4. Uninstall through the channel you installed with: `uv tool uninstall
+   espanso-prompt-rewriter`, or with Homebrew `brew uninstall prompt-workflow` (and
+   `brew untap vlastimilbures/tap` if nothing else of it is installed).
 
 If the CLI is already broken or gone, install it again (see [Install](#install)), then detach.
 Or clean up by hand: `espanso-manifest.json` in the data folder lists each deployed file as

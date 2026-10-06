@@ -106,11 +106,43 @@ Releases are cut by `.github/workflows/release.yml`, never by hand-made tags.
 3. Check the result: `gh release download vX.Y.Z` and `gh attestation verify <file> -R
    vlastimilbures/espanso-prompt-rewriter` for each file. The first real release is also the
    first check that attestation works end to end.
+4. PyPI: while the repository variable `PYPI_PUBLISH` is `true`, the workflow's `pypi` job
+   uploads the same sdist and wheel to [PyPI](https://pypi.org/project/espanso-prompt-rewriter/)
+   right after the Release is published (trusted publishing from the GitHub environment `pypi`,
+   no API token; `pypa/gh-action-pypi-publish` also uploads PEP 740 attestations). Check that
+   `https://pypi.org/project/espanso-prompt-rewriter/X.Y.Z/` lists both files. If the job
+   failed, use *Re-run failed jobs* on that run: it uploads the same artifact again and skips
+   any file PyPI already has. A new run for a version whose Release is published stops at
+   `plan`, so it cannot upload; and PyPI never accepts a changed file under a version it has.
+5. Homebrew: update the formula in
+   [vlastimilbures/homebrew-tap](https://github.com/vlastimilbures/homebrew-tap) by hand, from a
+   checkout of the tag (the script reads that commit's `uv.lock` and `pyproject.toml`):
+
+   ```bash
+   git switch --detach vX.Y.Z
+   gh release download vX.Y.Z -R vlastimilbures/espanso-prompt-rewriter \
+     -p 'espanso_prompt_rewriter-X.Y.Z.tar.gz' -D /tmp/epr-X.Y.Z
+   gh attestation verify /tmp/epr-X.Y.Z/espanso_prompt_rewriter-X.Y.Z.tar.gz \
+     -R vlastimilbures/espanso-prompt-rewriter
+   python3 scripts/brew_formula.py --sdist /tmp/epr-X.Y.Z/espanso_prompt_rewriter-X.Y.Z.tar.gz \
+     -o ../homebrew-tap/Formula/prompt-workflow.rb
+   ```
+
+   The formula installs the Release's sdist into a `Language::Python::Virtualenv` on
+   `python@3.14` (`--python` changes it), with one `resource` per runtime dependency, each the
+   exact sdist URL and SHA-256 `uv.lock` records (Windows-only ones such as colorama are left
+   out; a marker the script cannot evaluate stops it). In the tap, check it with
+   `brew install --build-from-source ./Formula/prompt-workflow.rb`, `brew test prompt-workflow`
+   and `brew audit --strict prompt-workflow`, then commit and push. Automating this (a
+   workflow job opening a pull request in the tap) would need a token with write access to the
+   tap; it is left for later.
 
 With the repository variable `RELEASE_ON_PUSH` set to `true`, step 2 also happens on every push
 to `main` whose version has no published Release yet. It is off by default, so merging a branch
-never releases by surprise. Only the workflow's last job can write (`contents`, `id-token`,
-`attestations`). Release builds use the build backend pinned by `build-constraint-dependencies`
+never releases by surprise. Only the `release` job can write to the repository (`contents`,
+`id-token`, `attestations`); the `pypi` job after it holds only `id-token`, which PyPI
+exchanges for a short-lived upload token, and runs only while `PYPI_PUBLISH` is `true`, so a
+release works the same before PyPI is set up. Release builds use the build backend pinned by `build-constraint-dependencies`
 in `pyproject.toml`; bump that pin by hand.
 The Release is created as a draft and published once every file is attached, so with
 [immutable releases](https://docs.github.com/en/code-security/supply-chain-security/understanding-your-software-supply-chain/immutable-releases)
@@ -218,6 +250,7 @@ espanso-prompt-rewriter/
 │   ├── update_match_history.py   regenerate match_history.py from the release tags
 │   ├── bench_models.py           score models on template fidelity, latency, cost
 │   ├── check_wheel.py            CI: what an installed wheel really contains
+│   ├── brew_formula.py           release: the tap's Homebrew formula from uv.lock
 │   └── release_notes.py          release: the version and its CHANGELOG notes
 ├── tests/                        unit tests, no network (fake_http in conftest.py)
 │   ├── test_live.py              opt-in real OpenRouter calls (pytest -m live)

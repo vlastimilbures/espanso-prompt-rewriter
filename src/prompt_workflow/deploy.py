@@ -239,11 +239,17 @@ def resolve_launcher(
         if bin_dir and (Path(bin_dir.strip()) / exe).is_file():
             return Launcher(Path(bin_dir.strip()) / exe, "uv")
 
-    if "Cellar" in prefix.parts:
+    # A formula's virtualenv is `<Cellar>/<formula>/<version>/libexec`, reached either by that
+    # path or through the `<brew prefix>/opt/<formula>` link to it.
+    if "Cellar" in prefix.parts or "opt" in prefix.parts:
         brew = output(runner(["brew", "--prefix"]))
-        if brew:
+        root = Path(brew.strip()) if brew and brew.strip() else None
+        formula = None
+        if root is not None and "Cellar" in prefix.parts[:-1]:
             formula = prefix.parts[prefix.parts.index("Cellar") + 1]
-            root = Path(brew.strip())
+        elif root is not None and prefix.is_relative_to(root / "opt") and prefix != root / "opt":
+            formula = prefix.relative_to(root / "opt").parts[0]
+        if root is not None and formula is not None:
             for candidate in (root / "bin" / exe, root / "opt" / formula / "bin" / exe):
                 if candidate.is_file():
                     return Launcher(candidate, "homebrew")
@@ -260,8 +266,8 @@ def resolve_launcher(
                 return Launcher(candidate, "script")
             break
     raise DeployError(
-        "Could not find a stable prompt-workflow launcher (install it with `uv tool install`, "
-        "Homebrew or Scoop, or pass --launcher)"
+        "Could not find a stable prompt-workflow launcher (install it with `uv tool install` "
+        "or Homebrew, or pass --launcher)"
     )
 
 

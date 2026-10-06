@@ -471,6 +471,8 @@ def _exe(path: Path, body: str = "") -> Path:
     return path
 
 
+# The same for every uv channel: a wheel URL, a local wheel and PyPI
+# (`uv tool install espanso-prompt-rewriter`) all install into `<uv tool dir>/<project name>`.
 def test_resolve_uv(tmp_path):
     tools, bin_dir = tmp_path / "uv" / "tools", tmp_path / "bin"
     launcher = _exe(bin_dir / "prompt-workflow")
@@ -518,6 +520,41 @@ def test_resolve_homebrew_opt(tmp_path):
         windows=False,
     )
     assert found.path == launcher
+
+
+# The tap's formula (scripts/brew_formula.py): Language::Python::Virtualenv builds the venv in
+# `<Cellar>/prompt-workflow/<version>/libexec` and links `<prefix>/bin/prompt-workflow` to its
+# console script. Python may report the venv through the Cellar path or the `opt` link.
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need a privilege on Windows")
+@pytest.mark.parametrize("via", ["cellar", "opt"])
+def test_resolve_the_tap_formula(tmp_path, via):
+    brew = tmp_path / "homebrew"
+    libexec = brew / "Cellar" / "prompt-workflow" / "0.19.0" / "libexec"
+    script = _exe(libexec / "bin" / "prompt-workflow")
+    (brew / "bin").mkdir(parents=True)
+    (brew / "bin" / "prompt-workflow").symlink_to(script)
+    (brew / "opt").mkdir()
+    (brew / "opt" / "prompt-workflow").symlink_to(libexec.parent)
+    prefix = libexec if via == "cellar" else brew / "opt" / "prompt-workflow" / "libexec"
+    fake = FakeRunner({"brew --prefix": f"{brew}\n"})
+    found = deploy.resolve_launcher(
+        runner=fake, prefix=prefix, script=brew / "bin" / "prompt-workflow", windows=False
+    )
+    assert found == deploy.Launcher(brew / "bin" / "prompt-workflow", "homebrew")
+    assert "Cellar" not in deploy.launcher_text(found.path, windows=False)
+
+
+# A venv under some other `opt` folder (or no brew at all) is not Homebrew's.
+def test_resolve_an_opt_prefix_outside_homebrew(tmp_path):
+    script = _exe(tmp_path / "opt" / "tools" / "bin" / "prompt-workflow")
+    for answer in ({"brew --prefix": str(tmp_path / "homebrew")}, {}):
+        found = deploy.resolve_launcher(
+            runner=FakeRunner(answer),
+            prefix=tmp_path / "opt" / "tools",
+            script=script,
+            windows=False,
+        )
+        assert found == deploy.Launcher(script, "script")
 
 
 def test_resolve_scoop_shim(tmp_path):

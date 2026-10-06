@@ -1,7 +1,9 @@
 name: release
 # Builds the sdist, the wheel and constraints.txt (the runtime pins from uv.lock), installs the
 # wheel with those pins into a clean venv on every OS, then attests the files and creates the
-# annotated tag v<version> and a GitHub Release with that version's CHANGELOG notes.
+# annotated tag v<version> and a GitHub Release with that version's CHANGELOG notes. While the
+# repository variable PYPI_PUBLISH is "true", the same sdist and wheel then go to PyPI through
+# trusted publishing (the pypi job, in the GitHub environment "pypi").
 #
 # A release happens only for the current head of main, when its pyproject version has no
 # published Release yet:
@@ -162,7 +164,7 @@ jobs:
     concurrency:
       group: release
       cancel-in-progress: false
-    # The only job that can write: the tag, the Release and the attestations.
+    # The only job that can write to the repository: the tag, the Release and the attestations.
     permissions:
       contents: write
       id-token: write
@@ -240,3 +242,46 @@ jobs:
           latest=false
           if [ "$newest" = "$tag" ]; then latest=true; fi
           gh release edit "$tag" --repo "$repo" --draft=false --latest="$latest"
+
+  # PyPI, after the Release is published, with the very sdist and wheel the release job attested
+  # (the artifact of this run, never a rebuild). Off until the owner sets PYPI_PUBLISH to "true"
+  # and registers this workflow and the environment "pypi" as a trusted publisher on PyPI, so a
+  # release keeps working before that. It holds no repository permission, only the OIDC token
+  # PyPI exchanges for a short-lived upload token; no API token is stored anywhere. If it fails,
+  # "Re-run failed jobs" uploads the same files again (skip-existing: files PyPI already has
+  # are left alone). A fresh run for a published version stops at plan, so it never re-uploads.
+  pypi:
+    needs: [plan, release]
+    if: needs.plan.outputs.release == 'true' && vars.PYPI_PUBLISH == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: pypi
+      cancel-in-progress: false
+    environment:
+      name: pypi
+      url: https://pypi.org/project/espanso-prompt-rewriter/${{ needs.plan.outputs.version }}/
+    permissions:
+      id-token: write
+    steps:
+      - name: Download the artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: dist
+          path: ${{ runner.temp }}/artifacts
+      # Exactly the sdist and the wheel of this version; constraints.txt stays on the Release.
+      - name: Pick the sdist and the wheel
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          mkdir "$RUNNER_TEMP/pypi"
+          for name in "espanso_prompt_rewriter-$VERSION.tar.gz" \
+              "espanso_prompt_rewriter-$VERSION-py3-none-any.whl"; do
+            cp "$RUNNER_TEMP/artifacts/$name" "$RUNNER_TEMP/pypi/"
+          done
+          ls -l "$RUNNER_TEMP/pypi"
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # v1.14.2
+        with:
+          packages-dir: ${{ runner.temp }}/pypi
+          skip-existing: true

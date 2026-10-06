@@ -14,6 +14,23 @@ All notable changes to this project are documented here. The format follows
   when checked; if a pinned endpoint does not qualify, OpenRouter falls back to one that does
   while `OPENROUTER_ALLOW_FALLBACKS=true`, and otherwise the trigger pastes an HTTP error
   marker. README "What is sent, and to whom" and the Configuration table describe it.
+- The release workflow can upload each release's sdist and wheel to PyPI as
+  `espanso-prompt-rewriter`, by trusted publishing (no stored token), once the owner turns it
+  on with the repository variable `PYPI_PUBLISH` (#95). The new `pypi` job runs after the
+  GitHub Release is published, holds only the OIDC token, and uploads the files the release
+  job attested, never a rebuild.
+- `scripts/brew_formula.py` writes the Homebrew formula for the project's own tap
+  (`vlastimilbures/homebrew-tap`, formula `prompt-workflow`) from `uv.lock`: the Release's
+  sdist plus one resource per runtime dependency, each pinned by SHA-256 (#95).
+- README "Install", "Updating" and "Uninstall" cover each channel: uv from PyPI or from a
+  GitHub Release, and Homebrew (the PyPI and Homebrew channels start with 0.19.0), with the
+  tap trust note and how to switch channels (#96). Scoop and WinGet are no longer planned.
+
+### Fixed
+- `prompt-workflow espanso deploy` finds Homebrew's stable `bin/` launcher also when Python
+  reports the formula's virtualenv through Homebrew's `opt/<formula>` link rather than its
+  Cellar path; before, it fell back to the running script, labelled `script` instead of
+  `homebrew` (#95).
 
 ### Changed
 - README "CLI" documents the `[prompt-workflow: …]` marker as the stable way for a script to
