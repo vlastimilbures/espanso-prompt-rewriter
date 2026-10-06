@@ -1059,6 +1059,38 @@ def test_file_an_old_script_wrote_is_stale(espanso, windows):
     assert _states(espanso)["prompts-llm.yml"] == deploy.STALE
 
 
+# #38 dropped -prompt- from prompts-core.yml: the file 0.18.0 deployed is ours and stale, so
+# the next deploy replaces it without a conflict, with or without its manifest entry.
+@pytest.mark.parametrize("manifest", [True, False])
+def test_0_18_prompts_core_with_prompt_form_is_replaced(monkeypatch, espanso, manifest):
+    git = shutil.which("git")
+    old = subprocess.run(
+        [git, "show", "v0.18.0:espanso/match/prompts-core.yml"],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=30,
+        check=True,
+    ).stdout
+    assert 'trigger: "-prompt-"' in old
+    real = assets.read_match
+    monkeypatch.setattr(deploy, "__version__", "0.18.0")
+    monkeypatch.setattr(assets, "read_match", lambda name: old if name == STATIC else real(name))
+    deploy.apply(_plan(espanso))
+    monkeypatch.setattr(deploy, "__version__", VERSION)
+    monkeypatch.setattr(assets, "read_match", real)
+    if not manifest:
+        (user_data_dir() / deploy.MANIFEST_NAME).unlink()
+    assert _states(espanso)[STATIC] == deploy.STALE
+    outcome = deploy.apply(_plan(espanso))
+    assert not outcome.kept
+    target = espanso / "match" / STATIC
+    assert '"-prompt-"' not in target.read_text("utf-8")
+    assert not list(target.parent.glob(f"{STATIC}.bak-*"))
+    assert _plan(espanso).is_noop
+
+
 def _old_release(monkeypatch, name="prompts-llm.yml"):
     """An 'older release' of a match file, registered in the history like a real one."""
     old = 'matches:\n  - trigger: "-old-"\n    cmd: "\\"__PROMPT_WORKFLOW__\\" improve"\n'

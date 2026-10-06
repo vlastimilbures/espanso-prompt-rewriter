@@ -176,7 +176,7 @@ espanso-prompt-rewriter/
 ├── espanso/                      deployed into Espanso by `prompt-workflow espanso deploy`
 │   ├── match/                    also shipped in the wheel, see assets.py
 │   │   ├── prompts-llm.yml       -i- -ip- -if- -iok- -il- -ilm- (-ic-): call the CLI
-│   │   ├── prompts-core.yml      -prompt- -risk-: static snippets and forms
+│   │   ├── prompts-core.yml      -risk-: static snippet
 │   │   └── prompts-template.yml  -p-: the empty golden template, opens with your persona
 ├── src/prompt_workflow/          the prompt-workflow CLI
 │   ├── cli.py                    improve and persona commands, the single output sink;
