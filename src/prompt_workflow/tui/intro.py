@@ -53,6 +53,7 @@ class IntroScreen(ModalScreen[None]):
 
     def on_click(self, event: events.Click) -> None:
         event.stop()
+        event.prevent_default()
         self.close()
 
 
