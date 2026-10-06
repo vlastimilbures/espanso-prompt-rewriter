@@ -78,9 +78,12 @@ promptmend config validate                   # check everything as a trigger rea
 refuses a key name or a value that looks like a key. A change applies to the next trigger,
 with no redeploy.
 
-`config set` refuses to write in two cases: while a `.env` is in use without `config.toml`
-(the `.env` would be orphaned; [migrate](#migrate-a-env) first), and in legacy mode, with
-`PROMPTMEND_ENV` set, where that `.env` stays the only settings file: edit the file itself.
+`config set` refuses to write while a `.env` is in use without `config.toml` (the `.env`
+would be orphaned; [migrate](#migrate-a-env) first).
+
+In legacy mode, with `PROMPTMEND_ENV` set, that `.env` stays the only settings file: nothing
+is migrated, and `config set`, `config unset` and `secrets set|remove` refuse to write. Edit
+the file itself.
 
 ## API keys
 
@@ -158,7 +161,7 @@ included (see [Privacy](privacy.md#what-is-sent-and-to-whom)).
 | Setting | Default | Purpose |
 |---------|---------|---------|
 | `OPENROUTER_API_KEY` | — | Required for OpenRouter |
-| `OPENROUTER_MODEL` | `google/gemini-3.5-flash-lite` | Model for `-i-`, `-iok-` (see the [benchmark](benchmark.md)) |
+| `OPENROUTER_MODEL` | `google/gemini-3.5-flash-lite` | Model for `-i-`, `-iok-` and the bare CLI's standard tier (see the [benchmark](benchmark.md)) |
 | `OPENROUTER_PROVIDER` | `google-ai-studio/flex` | Pin a serving endpoint; empty = OpenRouter's own routing |
 | `OPENROUTER_REASONING_EFFORT` | `minimal` | `none`…`high`; empty omits it (models without the control) |
 | `OPENROUTER_ALLOW_FALLBACKS` | `true` | `false` makes the pin binding |

@@ -162,7 +162,8 @@ function Invoke-PromptMendInstall {
     if ((Test-Path -LiteralPath $receipt) -and
             ((Get-Content -Raw -LiteralPath $receipt) -match '(?m)\beditable\s*=')) {
         Write-Host ('Note: promptmend is installed as editable from a checkout; this replaces ' +
-            'it with the release. See "From a checkout install" in docs/install.md to copy its .env.')
+            'it with the release. To copy its .env, see ' +
+            "$Repo/blob/main/docs/install.md#from-a-checkout-install")
     }
 
     # The tool's name before 0.19.0 (#169) owns a `prompt-workflow` launcher where promptmend

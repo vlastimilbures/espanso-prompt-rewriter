@@ -43,7 +43,9 @@ only; [Set up](#set-up) then writes the Espanso match files.
 | uv from PyPI | Yes | Yes | Recommended | `uv tool install --force …` |
 | uv from a GitHub Release wheel | Yes | Yes | Yes | `uv tool install --force …` |
 
-There is no Scoop or WinGet package. To run the code from a git checkout instead, see
+PyPI and the Homebrew tap carry releases from 0.19.0 on, the GitHub Release wheels from 0.16
+on, and `install.ps1` from the release after 0.19.0 on. There is no Scoop or WinGet package.
+To run the code from a git checkout instead, see
 [Install from a checkout](#install-from-a-checkout).
 
 ## macOS
@@ -98,8 +100,9 @@ Paste this into PowerShell or a Command Prompt. It needs no Python or uv first:
 powershell -ExecutionPolicy ByPass -c "irm https://github.com/vlastimilbures/promptmend/releases/latest/download/install.ps1 | iex"
 ```
 
-`install.ps1` is attached to each GitHub Release with that release's version filled in, and
-attested like the other release files. You can
+`install.ps1` is attached to each GitHub Release from the release after 0.19.0 on (0.19.0
+does not have it), with that release's version filled in, and attested like the other release
+files. You can
 [read it](https://github.com/vlastimilbures/promptmend/blob/main/scripts/install.ps1) first.
 It prints each command before running it, and:
 
@@ -149,8 +152,8 @@ trigger pastes a `[promptmend: Clipboard unavailable: …]` marker instead of a 
 ## Verify a download
 
 Each [GitHub Release](https://github.com/vlastimilbures/promptmend/releases) carries the
-sdist, the wheel, `constraints.txt` and `install.ps1`, each with a build provenance
-attestation. To check the files before installing them:
+sdist, the wheel and `constraints.txt` (the wheel and constraints from 0.16 on), and
+`install.ps1` from the release after 0.19.0, each with a build provenance attestation. To check the files before installing them:
 
 1. Download them: `gh release download v<version> -R vlastimilbures/promptmend`.
 2. Verify each one: `gh attestation verify <file> -R vlastimilbures/promptmend`.
@@ -203,7 +206,8 @@ Update through the channel you installed with, then check the result with
 | uv from a Release wheel | The install command with the new version and `--force` |
 
 With uv, install the new release over the old one with its own `constraints.txt`; `--force`
-makes uv replace the tool already there:
+makes uv replace the tool already there (`install.ps1` and the checkout install scripts pass it
+too):
 
 ```bash
 uv tool install --force promptmend -c https://github.com/vlastimilbures/promptmend/releases/latest/download/constraints.txt
@@ -285,8 +289,9 @@ Uninstall the old tool first. Both install a `prompt-workflow` launcher in the s
 uv refuses to install `promptmend` next to it. If `--force` made it, uninstalling the old tool
 afterwards deletes the `prompt-workflow` alias that now belongs to `promptmend`. If you already
 installed with `--force`, run `uv tool uninstall espanso-prompt-rewriter`, then the
-`uv tool install --force promptmend …` line again. The install scripts and `install.ps1`
-uninstall the old tool themselves.
+`uv tool install --force promptmend …` line again.
+
+The install scripts and `install.ps1` uninstall the old tool themselves.
 
 The deploy counts the match files an earlier release wrote (stamped `# prompt-workflow …`) as
 its own and `stale`, so it replaces them without asking. `doctor` warns while the deployed

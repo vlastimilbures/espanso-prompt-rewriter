@@ -52,7 +52,9 @@ carrying:
 The persona goes with every such call and is **not** scanned by the gate: an email, a company
 name or one of your `PROMPT_EXTRA_PATTERNS` in the persona is sent even where the same text in
 the draft would be blocked. Keep the persona to what you are happy to send to every recipient
-below. `config validate` and `doctor` (and the interface's Home and Diagnostics tabs) run the
+below.
+
+`config validate` and `doctor` (and the interface's Home and Diagnostics tabs) run the
 gate's scan over the persona when your profiles send it (not with `PROMPT_LOCAL_ONLY=true`
 unless `PROMPT_GATE_LOCAL=true`), and name what it matches, never the text.
 
@@ -89,11 +91,13 @@ the default, sends no such field). The request then asks OpenRouter, through its
 storing or training on requests, for both tiers. That can mean fewer endpoints.
 
 The default pin, `google-ai-studio/flex`, served a `deny` call when this was checked
-(2026-10-06), but OpenRouter's endpoint policies can change. If the pinned endpoint (or the
-`-ip-`/`-if-` one) does not qualify, OpenRouter falls back to another endpoint that does while
-`OPENROUTER_ALLOW_FALLBACKS=true`. Otherwise the trigger pastes an error marker instead of a
-rewrite, typically `[promptmend: OpenRouter returned HTTP 404: not found…]` followed by
-OpenRouter's reason. Pick another endpoint (`OPENROUTER_PROVIDER`, `OPENROUTER_PRO_PROVIDER`)
+(2026-10-06), but OpenRouter's endpoint policies can change.
+
+If the pinned endpoint (or the `-ip-`/`-if-` one) does not qualify, OpenRouter falls back to
+another endpoint that does while `OPENROUTER_ALLOW_FALLBACKS=true`.
+
+Otherwise the trigger pastes an error marker instead of a rewrite, typically
+`[promptmend: OpenRouter returned HTTP 404: not found…]` followed by OpenRouter's reason. Pick another endpoint (`OPENROUTER_PROVIDER`, `OPENROUTER_PRO_PROVIDER`)
 or clear the setting.
 
 ## The data-protection gate
@@ -102,7 +106,7 @@ Every call that can send the draft off your machine first runs through a regex g
 ([`redaction.py`](../src/promptmend/redaction.py)):
 
 - OpenRouter and Anthropic, always;
-- Ollama or LM Studio when their base URL is not `localhost` (or `127.0.0.1`, `::1`);
+- Ollama or LM Studio when their base URL is not loopback (`localhost`, `127.0.0.0/8` or `::1`);
 - Ollama when the model is a cloud model: a `:cloud` or `-cloud` tag in any letter case, also
   with an `@sha256:…` digest, which the local daemon forwards to ollama.com;
 - with `PROMPT_GATE_LOCAL=true`, Ollama and LM Studio on `localhost` too.
@@ -267,7 +271,7 @@ Metadata only, from a fixed list of columns:
 Each managed match passes its own fixed `--trigger-id` (`i`, `iok`, `ip`, `if`, `il`, `ilm`,
 `ic`, `p`), stored as the trigger (`-i-`). A run from the terminal, or from a match of your own
 without `--trigger-id`, is recorded as `direct`; a match passing an id that is not on that list
-is recorded as a managed run with no trigger. The trigger is never guessed from the other
+is recorded as a managed run with no trigger (unattributed). The trigger is never guessed from the other
 options. `-p-` counts once, through its `persona` call.
 
 ### What is never stored
@@ -278,8 +282,9 @@ no column is meant for them, and a record's other fields are never read.
 Each text column also has a fixed shape. The outcome, endpoint, cost state and error kind are
 words from fixed lists; a trigger looks like `-i-`; a profile, provider or version is a short
 lower-case or slug name; a response id must start with `gen-`, `msg_` or `chatcmpl-`. Only the
-two model columns take `/` and `:` (`openai/gpt-x:free`). No column takes a space, `@` or `\`,
-and a value the gate or your `PROMPT_EXTRA_PATTERNS` would flag, or that holds a token-like
+two model columns take `/` and `:` (`openai/gpt-x:free`).
+
+No column takes a space, `@` or `\`, and a value the gate or your `PROMPT_EXTRA_PATTERNS` would flag, or that holds a token-like
 word, is not stored. So a sentence, a path, an email, a `user:password@host` or a key cannot
 get in. A single harmless-looking word in a name column (say, a model called `hunter2`) can,
 which is why only your settings and the provider's reply fill those columns, never the draft.
@@ -296,7 +301,8 @@ which is why only your settings and the provider's reply fill those columns, nev
   every record (the same metadata, nothing more), `promptmend history prune [--older-than DAYS]`
   deletes older records now, and `promptmend history reset` deletes them all. Uninstalling does
   not delete the history.
-- **Off:** `promptmend config set PROMPT_HISTORY false`, then `promptmend history reset` to
+- **Off:** `promptmend config set PROMPT_HISTORY false` (or `PROMPT_HISTORY=false` in your
+  `.env`), then `promptmend history reset` to
   delete what is there. `setup` and `stats` say that the history is on, what it stores and
   where. Nothing is recorded either when the settings fail to load, since whether you turned
   it off is then unknown.
@@ -306,7 +312,9 @@ which is why only your settings and the provider's reply fill those columns, nev
 The run is written after its output is printed, so it never changes what is pasted, and the
 usage of a reply that then failed (rejected content, a clipboard error) is still kept. Writing
 never breaks a trigger and delays it by about 0.25 s at most (1 s once, for the write that
-creates the file). A write that cannot finish in that time (a locked, read-only, full or
+creates the file).
+
+A write that cannot finish in that time (a locked, read-only, full or
 corrupt file) is dropped, and a small `history.lost` file next to it counts the dropped writes.
 Only a disk the operating system itself stalls (a hung network drive) can hold it up longer.
 

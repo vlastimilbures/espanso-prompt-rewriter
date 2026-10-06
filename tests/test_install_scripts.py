@@ -171,3 +171,27 @@ def test_version_check() -> None:
     assert r"$Version -cnotmatch '^[0-9]+\.[0-9]+\.[0-9]+([a-z]+[0-9]+)?\z'" in code
     assert "$Oldest = [version]'0.19.0'" in code
     assert "-lt $Oldest" in code
+
+
+def _anchors(page: Path) -> set[str]:
+    """GitHub's anchor for each heading of a Markdown page."""
+    headings = re.findall(r"^#{1,6} (.+)$", page.read_text("utf-8"), re.MULTILINE)
+    return {re.sub(r"[^\w\- ]", "", h.strip().lower()).replace(" ", "-") for h in headings}
+
+
+# install.ps1 runs outside a checkout (`irm | iex`), so every docs page it names is an
+# absolute GitHub URL; the checkout scripts name a docs page by its path. Each page and
+# anchor exists.
+@pytest.mark.parametrize("name", ["install.ps1", "install_macos.sh", "install_windows.ps1"])
+def test_scripts_point_at_existing_docs(name: str) -> None:
+    text = (SCRIPTS / name).read_text("utf-8")
+    refs = re.findall(r"(\S*)docs/([a-z-]+\.md)(?:#([\w-]+))?", text)
+    assert refs, f"{name} names no docs page"
+    for prefix, page, anchor in refs:
+        if name == "install.ps1":
+            assert prefix.endswith("$Repo/blob/main/"), f"{name}: docs/{page} is not absolute"
+        else:
+            assert prefix in ("", "("), f"{name}: docs/{page}"
+        assert (REPO / "docs" / page).is_file(), f"{name}: no docs/{page}"
+        if anchor:
+            assert anchor in _anchors(REPO / "docs" / page), f"{name}: no #{anchor} in {page}"

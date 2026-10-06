@@ -39,8 +39,8 @@ invented.
 
 The prompt itself is organised in lowercase XML sections (`<section_rules>`, `<step>`,
 `<decision_rule>`, `<example>`…), which keeps its own scaffolding visibly apart from the
-uppercase sections the model must write. The retired name `default-pro` still resolves to
-`default`.
+uppercase sections the model must write. `default-pro`, the pro tier's own
+variant in 0.12.0 and 0.13.0, is now an alias of `default`.
 
 ### general
 

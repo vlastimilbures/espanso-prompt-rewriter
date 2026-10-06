@@ -305,9 +305,10 @@ def _target(doc: str, link: str) -> tuple[Path, str] | None:
     return ((REPO / doc).parent / path if path else REPO / doc).resolve(), anchor
 
 
-# Every link from README.md or a docs page into the repository names a file that exists and,
-# for a Markdown file, a heading it has, so a moved section cannot leave a dead link behind.
-@pytest.mark.parametrize("doc", DOCS)
+# Every link from README.md, a docs page or a contributor page into the repository names a
+# file that exists and, for a Markdown file, a heading it has, so a moved section cannot leave
+# a dead link behind.
+@pytest.mark.parametrize("doc", [*DOCS, "CONTRIBUTING.md", "CLAUDE.md", "SECURITY.md"])
 def test_doc_links_resolve(doc: str) -> None:
     for link in _links((REPO / doc).read_text("utf-8")):
         target = _target(doc, link)

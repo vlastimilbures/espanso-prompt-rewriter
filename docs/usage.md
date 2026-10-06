@@ -167,13 +167,14 @@ then keeps your copy (or replaces it, with a backup, if you choose ours), so it 
 receives updates.
 
 In a checkout, you can enable `-ic-` by uncommenting it in `espanso/match/prompts-llm.yml`
-and running `promptmend espanso deploy` again.
+and running `promptmend espanso deploy` (or the install script) again.
 
 ## Managing the match files
 
 Espanso starts the CLI as a GUI subprocess, without your shell's `PATH` or environment. So
 `promptmend espanso deploy` writes the CLI's absolute path into the match files it puts in
 Espanso's `match/` folder (found with `espanso path config`, else Espanso's default folder).
+
 It records them in `espanso-manifest.json` in the
 [data folder](configuration.md#files-and-folders), and each deployed file starts with
 `# promptmend <version> (managed; edit at your own risk)`.

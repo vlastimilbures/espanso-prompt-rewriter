@@ -48,14 +48,14 @@ copy a draft --> type -i- --> data-protection gate --> model (cloud or local) --
 - **Four providers, fully local if you like.** OpenRouter (default), Anthropic, Ollama and LM
   Studio. Each trigger names its provider; `PROMPT_LOCAL_ONLY=true` refuses every cloud call.
 - **Data-protection gate.** Before a draft can leave your machine it is scanned for payment
-  cards, national IDs, emails, API keys, tokens, passwords, private keys, confidentiality
+  cards, Vietnamese national IDs, emails, API keys, tokens, passwords, private keys, confidentiality
   labels and your own patterns, and blocked unless you explicitly override.
 - **Your persona, once.** Set `PROMPT_PERSONA` and every rewrite (and the `-p-` snippet) opens
   with your role.
 - **Never a blank paste.** Errors arrive inline as `[promptmend: …]`, because Espanso cannot
   show stderr or exit codes.
-- **Clean output.** Reasoning blocks, control characters and invisible Unicode never reach the
-  app you are typing in.
+- **Clean output.** A leading reasoning block, control characters and invisible Unicode never
+  reach the app you are typing in.
 - **Interface and commands.** A full-screen interface with a Try tab, and headless commands
   for scripts, with `promptmend doctor` to check everything.
 - **Benchmarked defaults.** The default models and prompt were chosen by a bundled benchmark
@@ -72,6 +72,8 @@ Home: whether you are ready, what each trigger runs, the match files, the histor
 
 Try: type a draft and rewrite it the way `-i-` would, against a local stub or, once you
 confirm, a real provider; the clipboard is never touched.
+
+More: [docs/interface.md](https://github.com/vlastimilbures/promptmend/blob/main/docs/interface.md) (every tab, the command line, the keys).
 
 ## Example
 
@@ -124,6 +126,9 @@ step 1 is "execute now" (analysing an export first could also justify "plan firs
 audience selected the independent-review step. A quick note to yourself would get a
 self-review checklist instead.
 
+More: [docs/profiles.md](https://github.com/vlastimilbures/promptmend/blob/main/docs/profiles.md) (what the `default` profile does, and
+how to write your own).
+
 ## Requirements
 
 - [Espanso](https://espanso.org/install/), installed and running.
@@ -131,6 +136,8 @@ self-review checklist instead.
 - An [OpenRouter API key](https://openrouter.ai/keys) for the default `-i-` trigger, or
   [Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai) for fully local use.
 - Python 3.12 or later, which Homebrew or uv installs for you.
+
+More: [docs/install.md](https://github.com/vlastimilbures/promptmend/blob/main/docs/install.md#requirements).
 
 ## Install
 
@@ -187,7 +194,7 @@ match file as `stale`, run `promptmend espanso deploy`.
 
 | Channel | Update | Uninstall |
 |---------|--------|-----------|
-| Homebrew | `brew upgrade promptmend` | `brew uninstall promptmend` |
+| Homebrew | `brew update`, then `brew upgrade promptmend` | `brew uninstall promptmend` |
 | One-command install | Run the same command again | `uv tool uninstall promptmend` |
 | uv | The `uv tool install` line above with `--force` | `uv tool uninstall promptmend` |
 
@@ -219,6 +226,9 @@ More: [docs/install.md](https://github.com/vlastimilbures/promptmend/blob/main/d
    ```bash
    promptmend doctor
    ```
+
+More: [docs/install.md](https://github.com/vlastimilbures/promptmend/blob/main/docs/install.md#set-up) (`setup` options, non-interactive
+setup) and [docs/troubleshooting.md](https://github.com/vlastimilbures/promptmend/blob/main/docs/troubleshooting.md).
 
 ### Fully local
 
@@ -281,7 +291,7 @@ files.
 
 | OS | Config folder (settings, keys, profiles) | Data folder (usage history) |
 |----|------------------------------------------|-----------------------------|
-| macOS | `~/.config/promptmend/` | `~/.local/share/promptmend/` |
+| macOS | `~/.config/promptmend/` (`$XDG_CONFIG_HOME`) | `~/.local/share/promptmend/` (`$XDG_DATA_HOME`) |
 | Windows | `%APPDATA%\promptmend\` | `%LOCALAPPDATA%\promptmend\` |
 | Linux | `~/.config/promptmend/` (`$XDG_CONFIG_HOME`) | `~/.local/share/promptmend/` (`$XDG_DATA_HOME`) |
 
@@ -308,19 +318,21 @@ More: [docs/configuration.md](https://github.com/vlastimilbures/promptmend/blob/
 ## Privacy
 
 Cloud triggers send your clipboard to OpenRouter (and the endpoint that serves the model) or
-Anthropic. Each call carries:
+Anthropic; so does Ollama or LM Studio at another address, or an Ollama `cloud` model. Each
+such call carries:
 
 - the draft, after the data-protection gate and the removal of invisible characters;
 - the system prompt: the profile's instructions and your persona, which the gate does not scan;
 - the model name and request settings;
 - the API key, only as the authentication header of its own provider.
 
-Before that, the gate blocks keys, tokens, passwords, payment cards, national IDs,
-confidentiality labels and your own patterns; `-iok-` sends one flagged draft on purpose when
-every finding is a label, ID, email or IBAN. `PROMPT_LOCAL_ONLY=true` refuses every cloud call,
-and the local triggers keep everything on your machine. On macOS and Windows, clipboard items
-a password manager marks as concealed are refused. The usage history is metadata only and never leaves this
-device.
+Before that, the gate blocks keys, tokens, passwords, payment cards, Vietnamese national IDs,
+emails, IBANs, confidentiality labels and your own patterns; `-iok-` sends one flagged draft on
+purpose when every finding is a label, ID, email or IBAN.
+
+`PROMPT_LOCAL_ONLY=true` refuses every cloud call, and the local triggers keep everything on
+your machine. On macOS and Windows, clipboard items a password manager marks as concealed are
+refused. The usage history is metadata only and never leaves this device.
 
 **The gate is a heuristic safety net, not a compliance control: use cloud triggers only where
 your organisation's policy allows.**
@@ -333,8 +345,10 @@ More: [docs/privacy.md](https://github.com/vlastimilbures/promptmend/blob/main/d
 The defaults were chosen with a bundled benchmark that scores every rewrite mechanically for
 template fidelity, prompt injection and language edge cases, latency and real cost. `-i-`
 runs `google/gemini-3.5-flash-lite` on `google-ai-studio/flex` (effort `minimal`); `-ip-` runs
-`openai/gpt-6-luna` on `openai` (effort `low`). The scores, timings and costs, and how to run
-it: [docs/benchmark.md](https://github.com/vlastimilbures/promptmend/blob/main/docs/benchmark.md).
+`openai/gpt-6-luna` on `openai` (effort `low`).
+
+More: [docs/benchmark.md](https://github.com/vlastimilbures/promptmend/blob/main/docs/benchmark.md)
+(the scores, timings and costs, and how to run it).
 
 ## Documentation
 

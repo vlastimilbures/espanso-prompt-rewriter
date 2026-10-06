@@ -39,7 +39,7 @@ retire the old `.env`. See [From a checkout install](install.md#from-a-checkout-
 |-----|-----|------------------------|
 | `1` | Home | Whether you are ready, the most urgent problem, the session log and the command line |
 | `2` | Providers | Each provider's settings and keys (set or not set); change a setting, set or remove a key, migrate a `.env`, run the Test call |
-| `3` | Profiles | Built-in and your own profiles; pick the default profile, copy a checkout's profiles |
+| `3` | Profiles | Built-in and your own profiles; pick the default profile, edit a profile in `$VISUAL` or `$EDITOR`, copy a checkout's profiles |
 | `4` | Triggers | The match files and their states, the diff, deploy and detach |
 | `5` | History | Usage statistics by trigger, provider, model or day; export, prune, reset |
 | `6` | Diagnostics | The `doctor` checks, and an import-time check of the CLI |
@@ -120,6 +120,7 @@ result before a trigger pastes one.
 
 The clipboard is never read or written, and the draft never goes into a command line. The
 settings are read as a trigger reads them, so an invalid one stops the run with its marker.
+
 Every run goes through the [data-protection gate](privacy.md#the-data-protection-gate): a
 draft the gate blocks shows the same `[promptmend: …]` marker a trigger would paste, and
 nothing is sent. A stub run is gated (and refused under `PROMPT_LOCAL_ONLY`) exactly as the

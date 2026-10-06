@@ -32,8 +32,10 @@ install a release, see [docs/install.md](docs/install.md)):
 
 The script runs `uv tool install --editable` pinned to `uv.lock` (and checks the tool venv
 against it), then `promptmend espanso deploy --yes`, which writes the match files with the
-CLI's absolute path and restarts Espanso. It never touches Espanso's `config/` folder. The
-Windows script runs on Windows PowerShell 5.1 and PowerShell 7. If script execution is
+CLI's absolute path and restarts Espanso. It never touches Espanso's `config/` folder (the
+old `--with-config` / `-WithConfig` option is gone).
+
+The Windows script runs on Windows PowerShell 5.1 and PowerShell 7. If script execution is
 disabled, run it as `powershell -ExecutionPolicy Bypass -File .\scripts\install_windows.ps1`
 (`pwsh` for PowerShell 7), which allows this one run without changing your execution policy.
 On Linux, run `uv tool install --editable .` and `promptmend espanso deploy`.
@@ -47,6 +49,8 @@ instead (`chmod 600` it), where a careless `git add` cannot pick it up.
 
 Run these before opening a pull request. CI runs the same, except that it runs the tests as
 `uv run pytest --cov`, which fails below 95 % coverage (`fail_under` in `pyproject.toml`).
+It runs lint and type checks once, and the tests on macOS, Windows and Linux with Python 3.12
+to 3.14. Gitleaks scans every push for secrets.
 
 ```bash
 uv run pytest                                   # unit tests, no network
