@@ -2,6 +2,6 @@ from importlib.metadata import PackageNotFoundError, version
 
 # Single source of truth is pyproject.toml, read from the installed metadata.
 try:
-    __version__ = version("espanso-prompt-rewriter")
+    __version__ = version("promptmend")
 except PackageNotFoundError:  # running from a source tree that was never installed
     __version__ = "0+unknown"

@@ -8,8 +8,8 @@ from typing import Any
 
 import pytest
 
-from prompt_workflow import clipboard_guard
-from prompt_workflow.clipboard_guard import is_concealed, mac_concealed, win_concealed
+from promptmend import clipboard_guard
+from promptmend.clipboard_guard import is_concealed, mac_concealed, win_concealed
 
 # The marker names are spelled out here, not taken from the module, so a test cannot simply
 # mirror a wrong or missing name.

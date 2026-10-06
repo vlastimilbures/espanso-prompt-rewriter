@@ -8,11 +8,11 @@ from typing import TYPE_CHECKING, Any
 import httpx
 import pytest
 
-from prompt_workflow.config import Settings, env_names
-from prompt_workflow.providers import base
+from promptmend.config import Settings, env_names
+from promptmend.providers import base
 
 if TYPE_CHECKING:
-    from prompt_workflow.history import HistoryStore
+    from promptmend.history import HistoryStore
 
 # history_rows(table) lists that table of the per-test usage history as dicts.
 HistoryRows = Callable[[str], list[dict[str, Any]]]
@@ -47,15 +47,15 @@ def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # the developer's real files (config.toml, secrets.toml, a repository .env, the folders).
     for name in ("HOME", "USERPROFILE"):
         monkeypatch.setenv(name, str(tmp_path / "home"))
-    from prompt_workflow import config
+    from promptmend import config
 
     monkeypatch.setattr(config, "_PROJECT_ROOT", tmp_path / "project")
     # Never probe the developer's real clipboard: a concealed item there would fail tests.
-    import prompt_workflow.cli as cli
+    import promptmend.cli as cli
 
     monkeypatch.setattr(cli, "is_concealed", lambda: None)
     # ...nor run the real espanso, uv or brew: a deploy test passes or patches in its own.
-    import prompt_workflow.deploy as deploy
+    import promptmend.deploy as deploy
 
     def refuse(argv: list[str]) -> None:
         raise AssertionError(f"a test ran a real command: {argv}")
@@ -63,7 +63,7 @@ def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(deploy, "run_command", refuse)
     # The user patterns safe_repr() hides are set by every settings load: start each test
     # without the previous test's.
-    from prompt_workflow import redaction
+    from promptmend import redaction
 
     monkeypatch.setattr(redaction, "_user_patterns", ())
 
@@ -188,7 +188,7 @@ class StubProvider:
 @pytest.fixture
 def stub_provider(monkeypatch: pytest.MonkeyPatch) -> StubProvider:
     """Replace the CLI's make_provider, so CLI tests never build a real provider."""
-    import prompt_workflow.cli as cli
+    import promptmend.cli as cli
 
     stub = StubProvider()
     monkeypatch.setattr(cli, "make_provider", stub)
@@ -203,7 +203,7 @@ def history_rows(monkeypatch: pytest.MonkeyPatch) -> HistoryRows:
     import sqlite3
     from contextlib import closing
 
-    from prompt_workflow import history
+    from promptmend import history
 
     monkeypatch.setattr(history, "_BUDGET", 2.25)
     monkeypatch.setattr(history, "_WRITE_BUDGET", 2.0)
@@ -230,7 +230,7 @@ def seed_history(monkeypatch: pytest.MonkeyPatch) -> SeedHistory:
     a bare ``assert False``. The budget tests in test_history.py assert record() themselves."""
     import sys
 
-    from prompt_workflow import history
+    from promptmend import history
 
     def seed(
         operation: Mapping[str, Any],

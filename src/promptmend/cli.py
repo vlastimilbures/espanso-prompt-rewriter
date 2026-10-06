@@ -66,13 +66,22 @@ class _LazyGroup(TyperGroup):
         with _redacted_usage_errors():
             return super().make_context(*args, **kwargs)
 
+    def main(self, *args: Any, **kwargs: Any) -> Any:
+        # Usage lines name `promptmend` however it was started (the alias, `python -m`).
+        if len(args) < 2 and not kwargs.get("prog_name"):
+            kwargs["prog_name"] = PROGRAM
+        return super().main(*args, **kwargs)
+
     def invoke(self, ctx: Context) -> Any:
-        _relocate_folders(self, ctx)
+        if _management_command(self, ctx):
+            if _run_as_alias():
+                typer.echo(DEPRECATED_ALIAS, err=True)
+            _relocate_folders()
         with _redacted_usage_errors():
             return super().invoke(ctx)
 
     def parse_args(self, ctx: Context, args: list[str]) -> list[str]:
-        # D-UI-1: a bare `prompt-workflow` on a terminal opens the interface (`ui`). Anywhere
+        # D-UI-1: a bare `promptmend` on a terminal opens the interface (`ui`). Anywhere
         # else no_args_is_help prints the help and exits 2, exactly as before.
         if not args and not ctx.resilient_parsing:
             from .commands.ui import on_a_terminal
@@ -94,24 +103,38 @@ class _LazyGroup(TyperGroup):
         return typer.main.get_command(getattr(module, attr))
 
 
+PROGRAM = "promptmend"
+# The command's name before the rename (#169): an alias that works until 1.0.0. Only the
+# management commands and the interface say so; the triggers, --version and --help never do.
+LEGACY_PROGRAM = "prompt-workflow"
+DEPRECATED_ALIAS = "`prompt-workflow` is deprecated; use `promptmend` (removed in 1.0.0)"
+
 # The commands Espanso runs: they never move a folder (config.folder_in_use() keeps them on the
 # legacy one until a management command has moved it).
 _TRIGGER_COMMANDS = frozenset({"improve", "persona"})
 
 
-def _relocate_folders(group: _LazyGroup, ctx: Context) -> None:
-    """Move the legacy user folders (relocate.py, #169) before any management command or the
-    interface runs, one stderr line per step. Not for the triggers, completion or a --help
-    (--version is eager and exits before this)."""
+def _management_command(group: _LazyGroup, ctx: Context) -> bool:
+    """A management command or the interface is about to run: not a trigger, completion or a
+    --help (--version is eager and exits before this)."""
     args = [*ctx._protected_args, *ctx.args]
-    if (
+    return not (
         ctx.resilient_parsing
         or not args
         or args[0] in _TRIGGER_COMMANDS
         or args[0] not in group.list_commands(ctx)
         or {"--help", "-h"} & set(args)
-    ):
-        return
+    )
+
+
+def _run_as_alias() -> bool:
+    """Started as the deprecated `prompt-workflow` (or `prompt-workflow.exe`), #169."""
+    return bool(sys.argv) and Path(sys.argv[0]).stem.lower() == LEGACY_PROGRAM
+
+
+def _relocate_folders() -> None:
+    """Move the legacy user folders (relocate.py, #169) before any management command or the
+    interface runs, one stderr line per step."""
     from .relocate import migrate_folders
 
     for line in migrate_folders():
@@ -209,7 +232,7 @@ def _main(
     ),
 ) -> None:
     """Espanso-invoked prompt rewriter. Keeps ``improve`` as an explicit subcommand
-    so the Espanso match files and docs (``prompt-workflow improve ...``) resolve."""
+    so the Espanso match files and docs (``promptmend improve ...``) resolve."""
     # A piped stdout uses the ANSI code page on Windows, which lacks many letters (Czech ř,
     # Vietnamese ố): printing such a rewrite would crash into a blank expansion.
     for stream in (sys.stdin, sys.stdout):
@@ -258,7 +281,7 @@ def _sent_despite_note(built: object) -> str:
     """A draft the gate let through with --allow-flagged says so where it is pasted, even when
     the call failed after the gate, naming only the findings."""
     if isinstance(built, GatedProvider) and built.sent_despite:
-        return f"[prompt-workflow: sent despite: {', '.join(built.sent_despite)}]\n\n"
+        return f"[promptmend: sent despite: {', '.join(built.sent_despite)}]\n\n"
     return ""
 
 
@@ -289,7 +312,7 @@ def _deliver(result: str, note: str, rec: recorder.Recorder) -> str:
         pyperclip.copy(rewrite)
     except Exception as exc:  # any failure: this runs after improve's guard, and must not lose it
         rec.outcome = recorder.CLIPBOARD_FAILED
-        error = f"[prompt-workflow: Clipboard unavailable: {exc}; the rewrite is pasted instead]"
+        error = f"[promptmend: Clipboard unavailable: {exc}; the rewrite is pasted instead]"
         return f"{note}{error}\n\n{result}"
     return "\n\n".join(marker for marker in (note.rstrip("\n"), stop) if marker)
 
@@ -412,7 +435,7 @@ def improve(
         # Nothing may traceback or exit nonzero: Espanso cannot surface stderr, so emit a
         # visible bracketed marker instead of a blank expansion.
         expected = isinstance(exc, ProviderError | ValueError)
-        error = f"[prompt-workflow: {'' if expected else 'unexpected error: '}{exc}]"
+        error = f"[promptmend: {'' if expected else 'unexpected error: '}{exc}]"
         _emit(_sent_despite_note(built) + error)
         rec.emitted()
         rec.outcome = _failure(exc, rec)
@@ -619,7 +642,7 @@ def espanso_deploy(
         names = ", ".join(p.name for p in outcome.kept)
         typer.echo(
             f"WARNING: {len(outcome.kept)} match file(s) kept as you have them and NOT updated: "
-            f"{names}. Run `prompt-workflow espanso deploy` to choose for each, or add "
+            f"{names}. Run `promptmend espanso deploy` to choose for each, or add "
             "`--on-conflict ours` to replace them (yours are backed up).",
             err=True,
         )
@@ -638,14 +661,14 @@ def espanso_detach(
     yes: bool = _YES,
     no_restart: bool = _NO_RESTART,
 ) -> None:
-    """Remove the match files prompt-workflow deployed. Files you edited are kept."""
+    """Remove the match files promptmend deployed. Files you edited are kept."""
     from . import deploy
     from .commands.common import confirm
 
     try:
         manifest = deploy.Manifest.load()
         if not manifest.entries:
-            typer.echo("Nothing to do: prompt-workflow has no deployed match files on record.")
+            typer.echo("Nothing to do: promptmend has no deployed match files on record.")
             return
         mode = "the CLI-calling match files" if keep_static else "every deployed match file"
         typer.echo(f"Detach removes {mode} that you have not edited:")

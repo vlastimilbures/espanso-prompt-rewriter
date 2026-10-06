@@ -20,11 +20,11 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from typer.testing import CliRunner
 
-from prompt_workflow import config, config_files, config_store
-from prompt_workflow.cli import PERSONA_PLACEHOLDER, app
-from prompt_workflow.config import ConfigLayers, Settings, env_names, secret_names
-from prompt_workflow.config_files import FileSecretStore, SecretStoreError
-from prompt_workflow.config_store import (
+from promptmend import config, config_files, config_store
+from promptmend.cli import PERSONA_PLACEHOLDER, app
+from promptmend.config import ConfigLayers, Settings, env_names, secret_names
+from promptmend.config_files import FileSecretStore, SecretStoreError
+from promptmend.config_store import (
     ConfigStoreError,
     MigrationError,
     ReadOnlyConfigError,
@@ -238,7 +238,7 @@ def test_invalid_config_fails_closed_in_cli(saved_mode: Path, stub_provider: Stu
     result = runner.invoke(app, ["improve", "--source", "argument", "--text", "draft"])
     assert result.exit_code == 0
     assert result.stdout == (
-        "[prompt-workflow: OPENROUTER_MAX_TOKENS must be a whole number above 0, got '0']"
+        "[promptmend: OPENROUTER_MAX_TOKENS must be a whole number above 0, got '0']"
     )
     assert stub_provider.built == []
     _write(saved_mode / "config.toml", 'PROMPT_PERSONA = "I am x."\nOLLAMA_THINK = "y"\n')
@@ -266,7 +266,7 @@ def test_store_error_never_falls_back(
 
     monkeypatch.setattr(config_files, "secret_store", lambda _directory: Broken())
     result = runner.invoke(app, ["improve", "--source", "argument", "--text", "draft"])
-    assert result.stdout == "[prompt-workflow: keyring is locked]"
+    assert result.stdout == "[promptmend: keyring is locked]"
     assert stub_provider.built == []
     with pytest.raises(SecretStoreError):
         config_store.save_secret("OPENROUTER_API_KEY", OPENROUTER_VALUE)
@@ -278,7 +278,7 @@ def test_trigger_path_does_not_import_writer(saved_mode: Path, tmp_path: Path) -
     _write(saved_mode / "config.toml", 'OLLAMA_MODEL = "m"\n')
     FileSecretStore(saved_mode / "secrets.toml").set("OPENROUTER_API_KEY", OPENROUTER_VALUE)
     code = (
-        "import sys, prompt_workflow.cli as cli; cli.Settings.load(); "
+        "import sys, promptmend.cli as cli; cli.Settings.load(); "
         "print(sorted({'tomli_w', 'tomlkit', 'keyring'} & sys.modules.keys()))"
     )
     env = {k: v for k, v in os.environ.items() if k != "PROMPTMEND_ENV"}

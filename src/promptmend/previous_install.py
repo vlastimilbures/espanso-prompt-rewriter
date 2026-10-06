@@ -20,9 +20,12 @@ from datetime import UTC, datetime
 from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 
 from . import config, config_files, deploy
-from .profiles import PROMPTS_PATH
+from .profiles import prompts_path
 
-PROJECT_NAME = "espanso-prompt-rewriter"
+PROJECT_NAME = "promptmend"
+# The project's and the command's names before the rename (#169): an earlier checkout has them.
+PROJECT_NAMES = (PROJECT_NAME, "espanso-prompt-rewriter")
+COMMANDS = ("promptmend", deploy.LEGACY_COMMAND)
 SKIP_FILE = "previous-install.json"
 SKIP_VERSION = 1
 
@@ -47,11 +50,12 @@ class Candidate:
 
 @dataclass(frozen=True)
 class Shadow:
-    """The `prompt-workflow` the shell finds first is not this install's launcher."""
+    """The `promptmend` the shell finds first is not this install's launcher."""
 
     path: str
     launcher: str
     hint: str
+    command: str = "promptmend"  # or the alias `prompt-workflow` (#169)
 
 
 @dataclass(frozen=True)
@@ -88,17 +92,18 @@ def gate(environ: Mapping[str, str]) -> str | None:
 
 
 def checkout_root_of(launcher: str) -> PurePath | None:
-    """The checkout a launcher belongs to: only `<root>/.venv/bin/prompt-workflow` or
-    `<root>\\.venv\\Scripts\\prompt-workflow.exe` (deployed with forward slashes), never a walk
-    upward, so a uv, Homebrew or Scoop launcher gives none."""
+    """The checkout a launcher belongs to: only `<root>/.venv/bin/promptmend` or
+    `<root>\\.venv\\Scripts\\promptmend.exe` (deployed with forward slashes), or the same
+    with the pre-rename `prompt-workflow` (#169), never a walk upward, so a uv, Homebrew or
+    Scoop launcher gives none."""
     windows = PureWindowsPath(launcher)
     if windows.drive:
         tail = tuple(p.lower() for p in windows.parts[-3:])
-        if tail == (".venv", "scripts", "prompt-workflow.exe"):
+        if tail in {(".venv", "scripts", f"{name}.exe") for name in COMMANDS}:
             return windows.parents[2]
         return None
     posix = PurePosixPath(launcher)
-    if posix.is_absolute() and posix.parts[-3:] == (".venv", "bin", "prompt-workflow"):
+    if posix.is_absolute() and posix.parts[-3:] in {(".venv", "bin", name) for name in COMMANDS}:
         return posix.parents[2]
     return None
 
@@ -123,8 +128,8 @@ def resolved(path: Path) -> Path:
 
 
 def is_checkout(root: Path) -> bool:
-    """``root`` holds a pyproject.toml naming this project."""
-    return config_files.is_file(root / "pyproject.toml") and _project_name(root) == PROJECT_NAME
+    """``root`` holds a pyproject.toml naming this project (by its new or its old name)."""
+    return config_files.is_file(root / "pyproject.toml") and _project_name(root) in PROJECT_NAMES
 
 
 def is_running_checkout(root: Path) -> bool:
@@ -134,6 +139,7 @@ def is_running_checkout(root: Path) -> bool:
 
 def receipt_root(runner: deploy.Runner) -> Path | None:
     """The source path uv recorded for an editable (or directory) tool install, from
+    `<uv tool dir>/promptmend/uv-receipt.toml`, or the pre-rename
     `<uv tool dir>/espanso-prompt-rewriter/uv-receipt.toml`. A wheel URL gives none, and so
     does a receipt that `uv tool install --force` of a wheel has overwritten."""
     import tomllib
@@ -141,20 +147,21 @@ def receipt_root(runner: deploy.Runner) -> Path | None:
     tool_dir = deploy.output(runner(["uv", "tool", "dir"]))
     if not tool_dir or not tool_dir.strip():
         return None
-    receipt = Path(tool_dir.strip()) / PROJECT_NAME / "uv-receipt.toml"
-    try:
-        table = tomllib.loads(receipt.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
-        return None
-    tool = table.get("tool")
-    requirements = tool.get("requirements") if isinstance(tool, dict) else None
-    for item in requirements if isinstance(requirements, list) else []:
-        if not isinstance(item, dict) or item.get("name") != PROJECT_NAME:
+    for name in PROJECT_NAMES:
+        receipt = Path(tool_dir.strip()) / name / "uv-receipt.toml"
+        try:
+            table = tomllib.loads(receipt.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
             continue
-        for key in ("editable", "directory"):
-            source = item.get(key)
-            if isinstance(source, str) and Path(source).is_absolute():
-                return Path(source)
+        tool = table.get("tool")
+        requirements = tool.get("requirements") if isinstance(tool, dict) else None
+        for item in requirements if isinstance(requirements, list) else []:
+            if not isinstance(item, dict) or item.get("name") != name:
+                continue
+            for key in ("editable", "directory"):
+                source = item.get(key)
+                if isinstance(source, str) and Path(source).is_absolute():
+                    return Path(source)
     return None
 
 
@@ -214,12 +221,13 @@ def shadow(
     *,
     look_up: bool = True,
 ) -> Shadow | None:
-    """The `prompt-workflow` first on PATH, when it is not this install's launcher: the shell
-    (and anything started from it) then runs another CLI with other settings. ``launcher``
-    is the one to compare with; without it, it is looked up unless ``look_up`` is False (the
-    caller already found none)."""
-    found = shutil.which("prompt-workflow", path=environ.get("PATH"))
-    if not found:
+    """The `promptmend` first on PATH, or its alias `prompt-workflow` (#169), when it is not
+    this install's own: the shell (and anything started from it) then runs another CLI with
+    other settings. ``launcher`` is the one to compare with (the alias sits next to it);
+    without it, it is looked up unless ``look_up`` is False (the caller already found none)."""
+    path = environ.get("PATH")
+    found = {command: shutil.which(command, path=path) for command in COMMANDS}
+    if not any(found.values()):
         return None
     if launcher is None:
         if not look_up:
@@ -228,19 +236,26 @@ def shadow(
             launcher = deploy.resolve_launcher(runner=runner).path
         except deploy.DeployError:
             return None
-    try:
-        if os.path.samefile(found, launcher):
-            return None
-    except OSError:
-        pass
+    for command, where in found.items():
+        if not where:
+            continue
+        own = launcher.with_name(command + launcher.suffix)
+        try:
+            if os.path.samefile(where, own):
+                continue
+        except OSError:
+            pass
+        return Shadow(where, str(own), _shadow_hint(environ, Path(where), own), command)
+    return None
+
+
+def _shadow_hint(environ: Mapping[str, str], found: Path, launcher: Path) -> str:
     venv = environ.get("VIRTUAL_ENV")
-    if venv and _inside(Path(found), Path(venv)):
-        hint = "a virtual environment is active: run `deactivate`"
-    elif ".venv" in Path(found).parts:
-        hint = f"remove {Path(found).parent} from PATH"
-    else:
-        hint = f"uninstall the old CLI, or put {launcher.parent} earlier on PATH"
-    return Shadow(found, str(launcher), hint)
+    if venv and _inside(found, Path(venv)):
+        return "a virtual environment is active: run `deactivate`"
+    if ".venv" in found.parts:
+        return f"remove {found.parent} from PATH"
+    return f"uninstall the old CLI, or put {launcher.parent} earlier on PATH"
 
 
 # --- Detection ----------------------------------------------------------------------------
@@ -348,7 +363,7 @@ def detect(
             continue
         inside = launchers_inside(launchers, root)
         env_file = root / ".env"
-        profiles = root / PROMPTS_PATH
+        profiles = root / prompts_path(root)
         candidates.append(
             Candidate(
                 root=root,

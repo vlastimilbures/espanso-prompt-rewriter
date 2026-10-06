@@ -50,8 +50,8 @@ def disclosure(settings: Settings) -> list[str]:
         "ran, which trigger, profile, provider and model, the outcome, latency, tokens and the "
         "cost the provider reported), never your draft, clipboard, rewrite, persona or keys.",
         f"It stays on this device, in {path}, for {settings.history_retention_days} days.",
-        "Switch it off: `prompt-workflow config set PROMPT_HISTORY false` (or "
-        "PROMPT_HISTORY=false in your .env); `prompt-workflow history reset` deletes the records.",
+        "Switch it off: `promptmend config set PROMPT_HISTORY false` (or "
+        "PROMPT_HISTORY=false in your .env); `promptmend history reset` deletes the records.",
     ]
 
 

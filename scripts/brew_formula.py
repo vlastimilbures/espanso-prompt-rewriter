@@ -1,6 +1,6 @@
 """Generate the Homebrew formula for the vlastimilbures/homebrew-tap repository (#95).
 
-    python3 scripts/brew_formula.py --sdist dist/espanso_prompt_rewriter-X.Y.Z.tar.gz \\
+    python3 scripts/brew_formula.py --sdist dist/promptmend-X.Y.Z.tar.gz \\
         -o ../homebrew-tap/Formula/prompt-workflow.rb
 
 Run it from a checkout of the release tag, so uv.lock and pyproject.toml are the released
@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-PROJECT = "espanso-prompt-rewriter"
+PROJECT = "promptmend"
 FORMULA = "prompt-workflow"
 REPO_URL = "https://github.com/vlastimilbures/espanso-prompt-rewriter"
 DESC = "Rewrite a rough draft into a precise LLM prompt from an Espanso trigger"
@@ -309,7 +309,7 @@ def render(
 
 
 def sdist_url(version: str) -> str:
-    return f"{REPO_URL}/releases/download/v{version}/espanso_prompt_rewriter-{version}.tar.gz"
+    return f"{REPO_URL}/releases/download/v{version}/promptmend-{version}.tar.gz"
 
 
 def sha256_of(path: Path) -> str:
@@ -330,7 +330,7 @@ def main(argv: list[str] | None = None) -> int:
         pyproject = tomllib.loads(args.pyproject.read_text(encoding="utf-8"))
         version = str(pyproject["project"]["version"])
         if args.sdist is not None:
-            expected = f"espanso_prompt_rewriter-{version}.tar.gz"
+            expected = f"promptmend-{version}.tar.gz"
             if args.sdist.name != expected:
                 raise FormulaError(f"{args.sdist.name} is not {expected} (check out v{version})")
             digest = sha256_of(args.sdist)

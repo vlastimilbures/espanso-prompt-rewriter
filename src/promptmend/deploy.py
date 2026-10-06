@@ -1,4 +1,4 @@
-"""Managed Espanso deployment: plan, apply and reverse what prompt-workflow writes into
+"""Managed Espanso deployment: plan, apply and reverse what promptmend writes into
 Espanso's `match/` folder (#86).
 
 Each packaged match file (assets.py) is rendered with the launcher path and a version stamp,
@@ -31,14 +31,19 @@ from .config import user_data_dir
 from .match_history import KNOWN_SOURCES
 
 PLACEHOLDER = "__PROMPT_WORKFLOW__"
-STAMP = "# prompt-workflow {version} (managed; edit at your own risk)\n"
-_STAMP_LINE = re.compile(r"# prompt-workflow \S+ \(managed; edit at your own risk\)\n")
+STAMP = "# promptmend {version} (managed; edit at your own risk)\n"
+# 0.18.0 and earlier stamped `# prompt-workflow <version> ...` (#169): both are ours.
+_STAMP_LINE = re.compile(
+    r"# (?:promptmend|prompt-workflow) \S+ \(managed; edit at your own risk\)\n"
+)
+# The command's name before the rename (#169), kept as a deprecated alias until 1.0.0.
+LEGACY_COMMAND = "prompt-workflow"
 MANIFEST_NAME = "espanso-manifest.json"
 MANIFEST_FORMAT = 1
 # Our backups of one file kept after a deploy; older ones we made are deleted.
 KEEP_BACKUPS = 2
 # A side-by-side copy is not a .yml file, so Espanso does not load its triggers twice.
-SIDE_SUFFIX = ".prompt-workflow-new"
+SIDE_SUFFIX = ".promptmend-new"
 COMMAND_TIMEOUT = 30
 # After a timed-out command is killed, how long to wait for its output pipes.
 GIVE_UP_TIMEOUT = 5
@@ -231,7 +236,7 @@ def resolve_launcher(
     runner = runner or run_command
     prefix = Path(sys.prefix) if prefix is None else prefix
     script = Path(sys.argv[0]) if script is None else script
-    exe = "prompt-workflow.exe" if windows else "prompt-workflow"
+    exe = "promptmend.exe" if windows else "promptmend"
 
     tool_dir = output(runner(["uv", "tool", "dir"]))
     if tool_dir and _inside(prefix, Path(tool_dir.strip())):
@@ -266,7 +271,7 @@ def resolve_launcher(
                 return Launcher(candidate, "script")
             break
     raise DeployError(
-        "Could not find a stable prompt-workflow launcher (install it with `uv tool install` "
+        "Could not find a stable promptmend launcher (install it with `uv tool install` "
         "or Homebrew, or pass --launcher)"
     )
 
@@ -456,7 +461,7 @@ class FileStep:
             (self.current or "").splitlines(keepends=True),
             self.rendered.splitlines(keepends=True),
             fromfile=f"{self.target} (on disk)",
-            tofile=f"{self.target} (prompt-workflow {__version__})",
+            tofile=f"{self.target} (promptmend {__version__})",
         )
         return "".join(line if line.endswith("\n") else line + "\n" for line in lines)
 
@@ -500,6 +505,13 @@ def launchers_in(text: str) -> set[str]:
     """The launcher paths a match file's cmd lines quote. Every release quoted the launcher
     the same way; Windows paths have forward slashes."""
     return set(_QUOTED_LAUNCHER.findall(text))
+
+
+def is_legacy_launcher(launcher: str) -> bool:
+    """A launcher deployed before the rename (#169): its file is `prompt-workflow` or
+    `prompt-workflow.exe` (a Windows path deployed with forward slashes, or backslashes)."""
+    name = re.split(r"[\\/]", launcher)[-1].lower()
+    return name in (LEGACY_COMMAND, f"{LEGACY_COMMAND}.exe")
 
 
 def deployed_launchers(espanso: Path) -> set[str]:
@@ -554,7 +566,7 @@ def _legacy_base(match_dir: Path) -> Path | None:
     creates for the user's snippets. Only our copy is retired; any other base.yml stays."""
     legacy = match_dir / "base.yml"
     text = _read(legacy)
-    if text and 'trigger: "-p-"' in text and "prompt-workflow" in text:
+    if text and 'trigger: "-p-"' in text and ("promptmend" in text or LEGACY_COMMAND in text):
         return legacy
     return None
 
@@ -753,7 +765,7 @@ def detach(manifest: Manifest, espanso: Path, *, remove_all: bool = False) -> Ou
             del manifest.entries[key]
             outcome.add(f"forgot {target} (already gone)", changed=False)
         elif _digest(current) != entry.digest:
-            outcome.add(f"kept {target}: edited since prompt-workflow deployed it", changed=False)
+            outcome.add(f"kept {target}: edited since promptmend deployed it", changed=False)
         elif remove_all or entry.calls_cli:
             target.unlink()
             del manifest.entries[key]

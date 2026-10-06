@@ -5,14 +5,14 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from prompt_workflow import factory
-from prompt_workflow.config import Settings
-from prompt_workflow.factory import PROVIDER_NAMES, make_provider, openrouter_routing
-from prompt_workflow.gate import GatedProvider
-from prompt_workflow.providers.anthropic import AnthropicProvider
-from prompt_workflow.providers.base import Provider, ProviderError
-from prompt_workflow.providers.ollama import OllamaProvider
-from prompt_workflow.providers.openai_compatible import OpenAICompatibleProvider
+from promptmend import factory
+from promptmend.config import Settings
+from promptmend.factory import PROVIDER_NAMES, make_provider, openrouter_routing
+from promptmend.gate import GatedProvider
+from promptmend.providers.anthropic import AnthropicProvider
+from promptmend.providers.base import Provider, ProviderError
+from promptmend.providers.ollama import OllamaProvider
+from promptmend.providers.openai_compatible import OpenAICompatibleProvider
 
 if TYPE_CHECKING:
     from conftest import FakeHttp
@@ -48,7 +48,7 @@ def test_make_provider_openrouter(monkeypatch: pytest.MonkeyPatch) -> None:
     provider = make_provider("openrouter", Settings())
     assert isinstance(provider, GatedProvider)
     assert isinstance(provider._inner, OpenAICompatibleProvider)
-    assert provider._inner.extra_headers["X-Title"] == "espanso-prompt-rewriter"
+    assert provider._inner.extra_headers["X-Title"] == "promptmend"
     assert provider._inner.max_tokens == Settings().openrouter_max_tokens
 
 

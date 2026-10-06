@@ -43,7 +43,7 @@ def profiles_list() -> None:
 
 def _checkout(path: str | None) -> Path:
     root = config._PROJECT_ROOT if path is None else Path(path).expanduser()
-    source = root / service.PROMPTS_PATH
+    source = root / service.prompts_path(root)
     if not source.is_dir():
         hint = "pass --checkout PATH" if path is None else "is it a checkout of this project?"
         raise common.CommandError(f"no {service.PROMPTS_PATH} under {root}; {hint}")
@@ -62,12 +62,12 @@ def profiles_migrate(
     dry_run: bool = typer.Option(False, "--dry-run", help="Only list what would be copied"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Copy without asking"),
 ) -> None:
-    """Copy the profiles you added or edited in a checkout's src/prompt_workflow/prompts to your
+    """Copy the profiles you added or edited in a checkout's src/promptmend/prompts to your
     profile folder, where an upgrade cannot replace them. Copies only, never overwrites."""
     common.no_key(checkout, "--checkout")
     common.no_key(rev, "--rev")
     root = _checkout(checkout)
-    source = root / service.PROMPTS_PATH
+    source = root / service.prompts_path(root)
     pristine = service.git_pristine_profiles(root, rev)
     changed = service.changed_profiles(source, pristine)
     if not changed:

@@ -18,7 +18,7 @@ from textual.widgets import Button, Footer, Header, Static
 
 from .. import config_store, deploy, previous_install
 from ..commands import common
-from ..profiles import PROMPTS_PATH
+from ..profiles import prompts_path
 from . import teach
 from .modals import ConfirmModal, Field, FormModal
 from .panes import (
@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 INTRO = (
     "An earlier install ran from a checkout of this project. This install never reads that "
     "checkout's .env or profiles, so copy what you need, in this order. Each step shows a "
-    "preview first; nothing is deleted, and `prompt-workflow config rollback` undoes the copy "
+    "preview first; nothing is deleted, and `promptmend config rollback` undoes the copy "
     "(the match files stay deployed)."
 )
 GATED = {
@@ -159,7 +159,8 @@ class PreviousInstallScreen(Screen[None]):
                 )
         if found.shadow:
             lines.append(
-                f"`prompt-workflow` on PATH is {found.shadow.path}, not {found.shadow.launcher}: "
+                f"`{found.shadow.command}` on PATH is {found.shadow.path}, "
+                f"not {found.shadow.launcher}: "
                 f"{found.shadow.hint}"
             )
         self.query_one("#previous-found", Static).update("\n".join(lines))
@@ -178,7 +179,10 @@ class PreviousInstallScreen(Screen[None]):
                 else (False, "nothing to copy: no .env")
             ),
             "previous-profiles": (
-                (True, f"from {root / PROMPTS_PATH}; the preview lists the added or edited ones")
+                (
+                    True,
+                    f"from {root / prompts_path(root)}; the preview lists the added or edited ones",
+                )
                 if root is not None
                 and ((best and best.profiles_dir) or (best is None and pending is not None))
                 else (False, "no profiles folder")
@@ -265,7 +269,7 @@ class PreviousInstallScreen(Screen[None]):
             self.report("\n".join(plan.describe()))
             return
         preview = "\n".join(
-            [*plan.describe(), "", "A backup is kept; `prompt-workflow config rollback` undoes it."]
+            [*plan.describe(), "", "A backup is kept; `promptmend config rollback` undoes it."]
         )
 
         def apply() -> str:
@@ -327,7 +331,7 @@ class PreviousInstallScreen(Screen[None]):
             if found.fallback:
                 raise config_store.MigrationError(
                     f"cannot check which CLI the match files run ({found.fallback}); in a "
-                    f"terminal: `prompt-workflow config retire --from {root} --espanso-dir PATH`"
+                    f"terminal: `promptmend config retire --from {root} --espanso-dir PATH`"
                 )
             folder = found.path
             plan = config_store.plan_retire(root, espanso_dir=folder)

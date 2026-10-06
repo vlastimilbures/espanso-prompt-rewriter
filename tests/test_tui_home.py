@@ -10,11 +10,11 @@ from pathlib import Path
 import pytest
 from test_tui_snapshots import fixed_state
 
-from prompt_workflow import deploy, doctor
-from prompt_workflow.config import OUTPUTS, ConfigLayers
-from prompt_workflow.tui import home
-from prompt_workflow.tui.home import READY, HomeRow, headline, home_rows, pill
-from prompt_workflow.tui.state import State
+from promptmend import deploy, doctor
+from promptmend.config import OUTPUTS, ConfigLayers
+from promptmend.tui import home
+from promptmend.tui.home import READY, HomeRow, headline, home_rows, pill
+from promptmend.tui.state import State
 
 
 def _report(state: State, **statuses: str) -> doctor.Report:
@@ -245,7 +245,7 @@ def test_checks_row_and_pill_count_every_check() -> None:
 def test_headline_shows_no_markdown_backticks() -> None:
     # Doctor marks a command with backticks; the headline is plain text (#174).
     state = ready()
-    message = "the deployed launcher is gone; run `prompt-workflow espanso deploy`."
+    message = "the deployed launcher is gone; run `promptmend espanso deploy`."
     report = doctor.Report(
         tuple(
             dataclasses.replace(c, status=doctor.FAIL, message=message) if c.id == "launcher" else c
@@ -255,4 +255,4 @@ def test_headline_shows_no_markdown_backticks() -> None:
     rows = home_rows(dataclasses.replace(state, report=report))
     text, _ = headline(rows)
     assert "`" not in text
-    assert text == "Not ready: the deployed launcher is gone; run prompt-workflow espanso deploy."
+    assert text == "Not ready: the deployed launcher is gone; run promptmend espanso deploy."

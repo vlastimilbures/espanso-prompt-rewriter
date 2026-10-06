@@ -16,11 +16,11 @@ import httpx
 import pytest
 from bench_module import GOOD, bench
 
-from prompt_workflow.config import Settings
-from prompt_workflow.prompt_builder import PROFILES, TEMPLATE_MARKER, system_prompt
-from prompt_workflow.providers.base import ProviderError
-from prompt_workflow.providers.usage import AttemptUsage
-from prompt_workflow.redaction import scan_draft
+from promptmend.config import Settings
+from promptmend.prompt_builder import PROFILES, TEMPLATE_MARKER, system_prompt
+from promptmend.providers.base import ProviderError
+from promptmend.providers.usage import AttemptUsage
+from promptmend.redaction import scan_draft
 
 if TYPE_CHECKING:
     from conftest import FakeHttp
@@ -142,7 +142,7 @@ def _prompt_texts() -> dict[str, str]:
     """Every shipped profile and the -p- template: what a rewrite can be shaped by."""
     texts = {
         path.name: path.read_text(encoding="utf-8")
-        for path in sorted((_REPO / "src/prompt_workflow/prompts").glob("*.md"))
+        for path in sorted((_REPO / "src/promptmend/prompts").glob("*.md"))
     }
     texts["prompts-template.yml"] = (_REPO / "espanso/match/prompts-template.yml").read_text(
         encoding="utf-8"
@@ -512,7 +512,7 @@ def test_call_request_shape(fake_http: FakeHttp, monkeypatch: pytest.MonkeyPatch
     assert fake_http.client_kwargs == [
         {"timeout": httpx.Timeout(120, connect=10), "transport": None}
     ]
-    assert call["headers"]["X-Title"] == "espanso-prompt-rewriter-bench"
+    assert call["headers"]["X-Title"] == "promptmend-bench"
     assert call["json"]["model"] == "a/b"
     assert call["json"]["usage"] == {"include": True}
     assert call["json"]["provider"] == {"order": ["c/d"], "allow_fallbacks": False}

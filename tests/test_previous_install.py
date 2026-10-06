@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 from typer.testing import CliRunner, Result
 
-from prompt_workflow import (
+from promptmend import (
     assets,
     config,
     config_files,
@@ -24,14 +24,16 @@ from prompt_workflow import (
     deploy,
     doctor,
     previous_install,
+    profiles,
 )
-from prompt_workflow.cli import app
-from prompt_workflow.config import Settings
-from prompt_workflow.config_store import MigrationError
-from prompt_workflow.previous_install import ENTERED, LAUNCHER, MANIFEST, RECEIPT
+from promptmend.cli import app
+from promptmend.config import Settings
+from promptmend.config_store import MigrationError
+from promptmend.previous_install import ENTERED, LAUNCHER, MANIFEST, RECEIPT
 
 WINDOWS = os.name == "nt"
-UV_BIN = "/Users/me/.local/bin/prompt-workflow"
+UV_BIN = "/Users/me/.local/bin/promptmend"
+LEGACY_PROJECT = "espanso-prompt-rewriter"  # the project name before the rename (#169)
 
 
 class FakeRunner:
@@ -49,23 +51,28 @@ def checkout(
     name: str = previous_install.PROJECT_NAME,
     *,
     env: bool = True,
+    legacy: bool = False,
 ) -> Path:
     """A checkout as an editable install left it: pyproject.toml, a .env with one setting and
-    one key (built at runtime, so no scanner takes it for a credential), an edited profile."""
+    one key (built at runtime, so no scanner takes it for a credential), an edited profile.
+    ``legacy``: one from before the rename (#169), with the old project and package names."""
     root = tmp_path / "Projects" / "epr"
-    (root / "src" / "prompt_workflow" / "prompts").mkdir(parents=True)
+    prompts = root / (profiles.LEGACY_PROMPTS_PATH if legacy else profiles.PROMPTS_PATH)
+    prompts.mkdir(parents=True)
+    if legacy and name == previous_install.PROJECT_NAME:
+        name = LEGACY_PROJECT
     (root / "pyproject.toml").write_text(f'[project]\nname = "{name}"\n', "utf-8")
     if env:
         key = "sk-or-v1-" + "0" * 8
         (root / ".env").write_text(f"PROMPT_TIMEOUT=45\nOPENROUTER_API_KEY={key}\n", "utf-8")
-    (root / "src" / "prompt_workflow" / "prompts" / "mine.md").write_text("Mine.\n", "utf-8")
+    (prompts / "mine.md").write_text("Mine.\n", "utf-8")
     return root
 
 
-def venv_launcher(root: Path) -> Path:
+def venv_launcher(root: Path, command: str = "promptmend") -> Path:
     if WINDOWS:
-        return root / ".venv" / "Scripts" / "prompt-workflow.exe"
-    return root / ".venv" / "bin" / "prompt-workflow"
+        return root / ".venv" / "Scripts" / f"{command}.exe"
+    return root / ".venv" / "bin" / command
 
 
 def deploy_old(espanso: Path, launcher: str) -> None:
@@ -78,11 +85,11 @@ def deploy_old(espanso: Path, launcher: str) -> None:
         (espanso / "match" / name).write_bytes(text.encode("utf-8"))
 
 
-def receipt(tools: Path, **source: Any) -> None:
-    folder = tools / previous_install.PROJECT_NAME
+def receipt(tools: Path, project: str = previous_install.PROJECT_NAME, **source: Any) -> None:
+    folder = tools / project
     folder.mkdir(parents=True, exist_ok=True)
     ((key, value),) = source.items()
-    item = f'{{ name = "{previous_install.PROJECT_NAME}", {key} = "{value}" }}'
+    item = f'{{ name = "{project}", {key} = "{value}" }}'
     text = f"[tool]\nrequirements = [{item}]\n"
     (folder / "uv-receipt.toml").write_text(text.replace("\\", "\\\\"), "utf-8")
 
@@ -97,7 +104,7 @@ def espanso(tmp_path: Path) -> Path:
 @pytest.fixture
 def env(monkeypatch: pytest.MonkeyPatch) -> MutableMapping[str, str]:
     """The process environment the tests run under (conftest's temp dirs), without a legacy
-    PROMPTMEND_ENV and with a PATH that holds no prompt-workflow."""
+    PROMPTMEND_ENV and with a PATH that holds no promptmend."""
     monkeypatch.delenv("PROMPTMEND_ENV", raising=False)
     monkeypatch.delenv("VIRTUAL_ENV", raising=False)
     monkeypatch.setattr(shutil, "which", lambda *a, **k: None)
@@ -114,18 +121,20 @@ def _roots(found: previous_install.Detection) -> dict[Path, frozenset[str]]:
 @pytest.mark.parametrize(
     ("launcher", "root"),
     [
-        ("/Users/me/epr/.venv/bin/prompt-workflow", PurePosixPath("/Users/me/epr")),
+        ("/Users/me/epr/.venv/bin/promptmend", PurePosixPath("/Users/me/epr")),
+        ("/Users/me/epr/.venv/bin/prompt-workflow", PurePosixPath("/Users/me/epr")),  # #169
         ("C:/Users/me/epr/.venv/Scripts/prompt-workflow.exe", PureWindowsPath("C:/Users/me/epr")),
+        ("C:/Users/me/epr/.venv/Scripts/promptmend.exe", PureWindowsPath("C:/Users/me/epr")),
         (
-            "C:\\Users\\me\\epr\\.venv\\Scripts\\prompt-workflow.exe",
+            "C:\\Users\\me\\epr\\.venv\\Scripts\\promptmend.exe",
             PureWindowsPath("C:/Users/me/epr"),
         ),
         ("C:/Users/me/epr/.VENV/scripts/Prompt-Workflow.EXE", PureWindowsPath("C:/Users/me/epr")),
         (UV_BIN, None),  # a uv tool bin: the same path for the editable install and the wheel
-        ("/opt/homebrew/bin/prompt-workflow", None),
-        ("C:/Users/me/scoop/shims/prompt-workflow.exe", None),
-        ("/Users/me/epr/.venv/lib/prompt-workflow", None),
-        (".venv/bin/prompt-workflow", None),  # relative: never resolved against the cwd
+        ("/opt/homebrew/bin/promptmend", None),
+        ("C:/Users/me/scoop/shims/promptmend.exe", None),
+        ("/Users/me/epr/.venv/lib/promptmend", None),
+        (".venv/bin/promptmend", None),  # relative: never resolved against the cwd
     ],
 )
 def test_checkout_root_of(launcher: str, root: PurePath | None) -> None:
@@ -146,9 +155,28 @@ def test_detects_the_launcher_in_old_match_files(
     assert candidate.root == root.resolve()
     assert candidate.signals == {LAUNCHER}
     assert candidate.env_file == root.resolve() / ".env"
-    assert candidate.profiles_dir == root.resolve() / "src" / "prompt_workflow" / "prompts"
+    assert candidate.profiles_dir == root.resolve() / "src" / "promptmend" / "prompts"
     assert candidate.launchers_in_root == (launcher.replace("\\", "/") if WINDOWS else launcher,)
     assert found.gated is None
+
+
+# #169: the realistic previous install is a checkout from before the rename: the old project
+# name, the old package folder and a `prompt-workflow` launcher in the match files.
+def test_detects_a_checkout_from_before_the_rename(
+    tmp_path: Path, espanso: Path, env: MutableMapping[str, str]
+) -> None:
+    root = checkout(tmp_path, legacy=True)
+    launcher = str(venv_launcher(root, "prompt-workflow"))
+    deploy_old(espanso, launcher)
+    tools = tmp_path / "uv" / "tools"
+    receipt(tools, LEGACY_PROJECT, editable=str(root))
+    runner = FakeRunner({"uv tool dir": f"{tools}\n"})
+    found = previous_install.detect(runner=runner, espanso_dir=espanso)
+    (candidate,) = found.candidates
+    assert candidate.root == root.resolve()
+    assert candidate.signals == {LAUNCHER, RECEIPT}
+    assert candidate.profiles_dir == root.resolve() / profiles.LEGACY_PROMPTS_PATH
+    assert candidate.launchers_in_root == (launcher.replace("\\", "/") if WINDOWS else launcher,)
 
 
 def test_detects_a_manifest_entry(
@@ -189,7 +217,7 @@ def test_a_wheel_receipt_gives_nothing(
 ) -> None:
     checkout(tmp_path)
     tools = tmp_path / "uv" / "tools"
-    receipt(tools, url="https://example.invalid/espanso_prompt_rewriter-0.16.1-py3-none-any.whl")
+    receipt(tools, url="https://example.invalid/promptmend-0.16.1-py3-none-any.whl")
     runner = FakeRunner({"uv tool dir": str(tools)})
     assert previous_install.detect(runner=runner, espanso_dir=espanso).candidates == ()
 
@@ -451,15 +479,19 @@ def test_a_damaged_skip_marker_counts_as_empty(
 
 @pytest.fixture
 def installed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    launcher = tmp_path / "uv-bin" / "prompt-workflow"
+    launcher = tmp_path / "uv-bin" / "promptmend"
     launcher.parent.mkdir()
     launcher.write_text("", "utf-8")
     monkeypatch.setattr(deploy, "resolve_launcher", lambda **_: deploy.Launcher(launcher, "uv"))
     return launcher
 
 
-def _which(monkeypatch: pytest.MonkeyPatch, path: Path | str) -> None:
-    monkeypatch.setattr(shutil, "which", lambda *a, **k: str(path))
+def _which(
+    monkeypatch: pytest.MonkeyPatch, path: Path | str, alias: Path | str | None = None
+) -> None:
+    """`promptmend` resolves to ``path``, its alias `prompt-workflow` to ``alias`` (#169)."""
+    found = {"promptmend": str(path), "prompt-workflow": None if alias is None else str(alias)}
+    monkeypatch.setattr(shutil, "which", lambda cmd, **k: found.get(cmd))
 
 
 def test_an_active_venv_shadows_the_launcher(
@@ -492,7 +524,7 @@ def test_a_venv_on_path_without_virtual_env(
 def test_another_cli_on_path(
     tmp_path: Path, installed: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    other = tmp_path / "pipx" / "prompt-workflow"
+    other = tmp_path / "pipx" / "promptmend"
     other.parent.mkdir()
     other.write_text("", "utf-8")
     _which(monkeypatch, other)
@@ -508,8 +540,40 @@ def test_no_shadow_when_path_finds_the_launcher(
     assert previous_install.shadow({"PATH": str(installed.parent)}, FakeRunner()) is None
 
 
+def test_the_alias_next_to_the_launcher_is_no_shadow(
+    installed: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    alias = installed.with_name("prompt-workflow")
+    alias.write_text("", "utf-8")
+    _which(monkeypatch, installed, alias)
+    assert previous_install.shadow({"PATH": str(installed.parent)}, FakeRunner()) is None
+
+
+# #169: an old checkout's `prompt-workflow` first on PATH shadows the alias, even when the
+# new `promptmend` is found where it belongs.
+def test_an_old_prompt_workflow_on_path_shadows_the_alias(
+    tmp_path: Path, installed: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    old = checkout(tmp_path) / ".venv" / "bin" / "prompt-workflow"
+    old.parent.mkdir(parents=True)
+    old.write_text("", "utf-8")
+    _which(monkeypatch, installed, old)
+    found = previous_install.shadow({"PATH": str(old.parent)}, FakeRunner())
+    assert found is not None
+    assert (found.command, found.path) == ("prompt-workflow", str(old))
+    assert found.launcher == str(installed.with_name("prompt-workflow"))
+    assert str(old.parent) in found.hint
+
+
+def test_no_shadow_when_nothing_is_on_path(
+    installed: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(shutil, "which", lambda *a, **k: None)
+    assert previous_install.shadow({}, FakeRunner()) is None
+
+
 def test_no_shadow_without_a_launcher(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _which(monkeypatch, tmp_path / "prompt-workflow")
+    _which(monkeypatch, tmp_path / "promptmend")
 
     def nothing(**_: Any) -> None:
         raise deploy.DeployError("none")
@@ -523,9 +587,9 @@ def test_a_given_launcher_is_not_looked_up(tmp_path: Path, monkeypatch: pytest.M
         raise AssertionError("looked up")
 
     monkeypatch.setattr(deploy, "resolve_launcher", unexpected)
-    other = tmp_path / "other" / "prompt-workflow"
+    other = tmp_path / "other" / "promptmend"
     _which(monkeypatch, other)
-    given = tmp_path / "given" / "prompt-workflow"
+    given = tmp_path / "given" / "promptmend"
     found = previous_install.shadow({}, FakeRunner(), given)
     assert found is not None
     assert found.launcher == str(given)
@@ -543,7 +607,7 @@ def _check(report: doctor.Report) -> doctor.Check:
 def no_clipboard(monkeypatch: pytest.MonkeyPatch) -> None:
     import pyperclip
 
-    from prompt_workflow import clipboard_guard
+    from promptmend import clipboard_guard
 
     monkeypatch.setattr(clipboard_guard, "is_concealed", lambda: None)
     monkeypatch.setattr(pyperclip, "paste", lambda: "")
@@ -1076,7 +1140,7 @@ def test_setup_non_interactive_offers_the_copy_and_writes_nothing(
     )
     assert result.exit_code == 0, result.output
     assert f"Previous install: {root.resolve()} (launcher)" in result.stdout
-    todo = f"to do: copy the settings of {root.resolve()}: `prompt-workflow config migrate --from"
+    todo = f"to do: copy the settings of {root.resolve()}: `promptmend config migrate --from"
     assert todo in result.stdout
     assert "Taken from" in result.stdout
     assert COPIED_KEY not in result.output
@@ -1087,8 +1151,8 @@ def test_setup_non_interactive_offers_the_copy_and_writes_nothing(
 def _interactive(
     monkeypatch: pytest.MonkeyPatch, answers: dict[str, str] | None = None
 ) -> FakeRunner:
-    from prompt_workflow import smoke
-    from prompt_workflow.commands import common
+    from promptmend import smoke
+    from promptmend.commands import common
 
     fake = FakeRunner({"espanso restart": "", **(answers or {})})
     monkeypatch.setattr(deploy, "run_command", fake)
@@ -1139,8 +1203,8 @@ def test_setup_carries_on_past_a_broken_env_it_found_itself(
 def test_setup_copies_with_consent_then_offers_retire_after_the_deploy(
     tmp_path: Path, espanso: Path, env: MutableMapping[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from prompt_workflow import smoke
-    from prompt_workflow.commands import common
+    from promptmend import smoke
+    from promptmend.commands import common
 
     root = old_checkout(tmp_path)
     monkeypatch.setattr(deploy, "run_command", FakeRunner({"espanso restart": ""}))
@@ -1175,7 +1239,7 @@ def test_rollback_of_a_retired_copy_never_says_the_env_is_read_again(
     config_store.apply_retire(root, espanso_dir=espanso, consent=plan.token)
     preview = _cli("config", "rollback", "--dry-run").stdout
     assert f"This install does not read {root.resolve() / '.env'}" in preview
-    assert f"`prompt-workflow config migrate --from {root.resolve()}`" in preview
+    assert f"`promptmend config migrate --from {root.resolve()}`" in preview
     token = preview.split("Preview token: ")[1].split()[0]
     result = _cli("config", "rollback", "--yes", "--preview-token", token)
     assert result.exit_code == 0, result.output

@@ -1,4 +1,4 @@
-"""Copy the profiles a checkout added or edited under src/prompt_workflow/prompts into the user
+"""Copy the profiles a checkout added or edited under src/promptmend/prompts into the user
 profile directory, where an upgrade cannot replace them (the `profiles migrate` service).
 
 Nothing here runs on the trigger path. It only ever copies: no file is deleted, and an existing
@@ -7,21 +7,24 @@ user file is never overwritten.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 from .prompt_builder import PROFILE_NAME, PROFILES, user_profiles_dir
 
-# Where a checkout keeps the built-in profiles, relative to its root.
-PROMPTS_PATH = "src/prompt_workflow/prompts"
+# Where a checkout keeps the built-in profiles, relative to its root; a checkout from before
+# the rename (#169, 0.18.0 and earlier) keeps them under the old package name.
+PROMPTS_PATH = "src/promptmend/prompts"
+LEGACY_PROMPTS_PATH = "src/prompt_workflow/prompts"
 
 # What `profiles migrate` and the interface say when the comparison with git finds nothing:
 # without --rev a profile committed on a branch with no upstream counts as pristine.
 NOTHING_CHANGED = (
     "No added or edited profiles; nothing to copy. Compared with the commit the branch shares "
     "with its upstream (HEAD without one); to compare with an older commit: "
-    "`prompt-workflow profiles migrate --rev <commit>`."
+    "`promptmend profiles migrate --rev <commit>`."
 )
 
 # Migration.status values.
@@ -38,6 +41,14 @@ class Migration:
     source: Path
     target: Path
     status: str
+
+
+def prompts_path(root: Path) -> str:
+    """Where the checkout at ``root`` keeps its profiles: PROMPTS_PATH, or the pre-rename
+    LEGACY_PROMPTS_PATH when only that folder exists."""
+    if not os.path.isdir(root / PROMPTS_PATH) and os.path.isdir(root / LEGACY_PROMPTS_PATH):
+        return LEGACY_PROMPTS_PATH
+    return PROMPTS_PATH
 
 
 def changed_profiles(source_dir: Path, pristine: Mapping[str, str]) -> dict[str, str]:
@@ -83,16 +94,26 @@ def git_pristine_profiles(checkout: Path, rev: str | None = None) -> dict[str, s
                 rev = run("merge-base", "HEAD", "@{upstream}").strip()
             except subprocess.CalledProcessError:
                 rev = "HEAD"
-        listing = run("ls-tree", "--name-only", f"{rev}:{PROMPTS_PATH}").split("\n")
+        # The folder the working tree has first: ``rev`` may predate the rename (#169).
+        first = prompts_path(checkout)
+        listing: list[str] | None = None
+        for path in dict.fromkeys((first, PROMPTS_PATH, LEGACY_PROMPTS_PATH)):
+            try:
+                listing = run("ls-tree", "--name-only", f"{rev}:{path}").split("\n")
+            except subprocess.CalledProcessError:
+                continue
+            break
+        if listing is None:
+            raise ValueError(f"git could not read {first} at {rev}")
         pristine = {}
         for name in (n for n in listing if n.endswith(".md")):
             try:
-                pristine[name.removesuffix(".md")] = run("show", f"{rev}:{PROMPTS_PATH}/{name}")
+                pristine[name.removesuffix(".md")] = run("show", f"{rev}:{path}/{name}")
             except UnicodeDecodeError:
                 raise ValueError(f"Cannot read profile {name} at {rev} (not UTF-8)") from None
         return pristine
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, UnicodeDecodeError) as exc:
-        raise ValueError(f"git could not read {PROMPTS_PATH} at {rev}") from exc
+        raise ValueError(f"git could not read {prompts_path(checkout)} at {rev}") from exc
 
 
 def overrides_hint(names: Iterable[str], current: Collection[str] = ()) -> str | None:
@@ -106,7 +127,7 @@ def overrides_hint(names: Iterable[str], current: Collection[str] = ()) -> str |
     files = ", ".join(f"{name}.md" for name in builtins)
     return (
         f"Your {files} replaces the built-in only once PROMPT_PROFILE_OVERRIDES lists it: "
-        f"`prompt-workflow config set PROMPT_PROFILE_OVERRIDES {value}`."
+        f"`promptmend config set PROMPT_PROFILE_OVERRIDES {value}`."
     )
 
 

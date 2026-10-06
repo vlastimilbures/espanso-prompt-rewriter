@@ -150,7 +150,7 @@ jobs:
           uv venv --python $env:PYTHON_VERSION $venv
           uv pip install --python $venv $wheel -c $constraints
           $python = if ($IsWindows) { "$venv/Scripts/python.exe" } else { "$venv/bin/python" }
-          $cli = if ($IsWindows) { "$venv/Scripts/prompt-workflow.exe" } else { "$venv/bin/prompt-workflow" }
+          $cli = if ($IsWindows) { "$venv/Scripts/promptmend.exe" } else { "$venv/bin/promptmend" }
           $installed = & $cli --version
           if ($installed -ne $env:VERSION) { throw "installed $installed, expected $env:VERSION" }
           & $python "$env:GITHUB_WORKSPACE/scripts/check_wheel.py" --repo $env:GITHUB_WORKSPACE --wheel $wheel --constraints $constraints
@@ -275,8 +275,8 @@ jobs:
           VERSION: ${{ needs.plan.outputs.version }}
         run: |
           mkdir "$RUNNER_TEMP/pypi"
-          for name in "espanso_prompt_rewriter-$VERSION.tar.gz" \
-              "espanso_prompt_rewriter-$VERSION-py3-none-any.whl"; do
+          for name in "promptmend-$VERSION.tar.gz" \
+              "promptmend-$VERSION-py3-none-any.whl"; do
             cp "$RUNNER_TEMP/artifacts/$name" "$RUNNER_TEMP/pypi/"
           done
           ls -l "$RUNNER_TEMP/pypi"

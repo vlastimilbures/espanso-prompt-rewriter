@@ -25,7 +25,7 @@ version = 1
 revision = 3
 
 [[package]]
-name = "espanso-prompt-rewriter"
+name = "promptmend"
 version = "0.15.0"
 source = { editable = "." }
 
@@ -62,7 +62,7 @@ def test_matching_venv(
     lock_file: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     installed = [
-        {"name": "espanso-prompt-rewriter", "version": "0.16.0.dev0"},  # editable: skipped
+        {"name": "promptmend", "version": "0.16.0.dev0"},  # editable: skipped
         {"name": "httpx", "version": "0.28.1"},
         {"name": "Typing_Extensions", "version": "4.12.2"},  # PEP 503 names
         {"name": "numpy", "version": "2.0.0"},  # one of a fork's pins

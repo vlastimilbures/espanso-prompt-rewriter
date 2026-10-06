@@ -15,10 +15,10 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from typer.testing import CliRunner
 
-from prompt_workflow.cli import app
-from prompt_workflow.config import env_names
-from prompt_workflow.providers.base import ProviderError
-from prompt_workflow.providers.openai_compatible import OpenAICompatibleProvider
+from promptmend.cli import app
+from promptmend.config import env_names
+from promptmend.providers.base import ProviderError
+from promptmend.providers.openai_compatible import OpenAICompatibleProvider
 
 if TYPE_CHECKING:
     from conftest import FakeHttp, StubProvider
@@ -63,12 +63,12 @@ def test_improve_success(stub_provider: StubProvider) -> None:
 @pytest.mark.parametrize(
     ("exc", "expected"),
     [
-        (ProviderError("Ollama request failed"), b"[prompt-workflow: Ollama request failed]"),
+        (ProviderError("Ollama request failed"), b"[promptmend: Ollama request failed]"),
         (
             ValueError("OLLAMA_TIMEOUT is not a number"),
-            b"[prompt-workflow: OLLAMA_TIMEOUT is not a number]",
+            b"[promptmend: OLLAMA_TIMEOUT is not a number]",
         ),
-        (RuntimeError("kaput"), b"[prompt-workflow: unexpected error: kaput]"),
+        (RuntimeError("kaput"), b"[promptmend: unexpected error: kaput]"),
     ],
     ids=["provider-error", "value-error", "unexpected"],
 )
@@ -78,7 +78,7 @@ def test_improve_error_marker(stub_provider: StubProvider, exc: Exception, expec
 
 
 # A bad setting fails before any provider is built, with the same marker shape.
-SETTINGS_ERROR = b"[prompt-workflow: PROMPT_LOCAL_ONLY must be true or false, got 'maybe']"
+SETTINGS_ERROR = b"[promptmend: PROMPT_LOCAL_ONLY must be true or false, got 'maybe']"
 
 
 def test_improve_settings_error_marker(
@@ -92,7 +92,7 @@ def test_improve_settings_error_marker(
 # --allow-flagged opens the paste with the note, on success and when the call fails after
 # the gate let the draft through.
 DRAFT = "CONFIDENTIAL: summarise the board minutes for jane@example.com"
-NOTE = b"[prompt-workflow: sent despite: email, confidential_label]\n\n"
+NOTE = b"[promptmend: sent despite: email, confidential_label]\n\n"
 
 
 FLAGGED = ["improve", "--provider", "openrouter", "--allow-flagged", "--source", "argument"]
@@ -111,7 +111,7 @@ def test_improve_sent_despite_note_with_error(monkeypatch: pytest.MonkeyPatch) -
         raise ProviderError("upstream down")
 
     monkeypatch.setattr(OpenAICompatibleProvider, "generate", fail)
-    _golden([*FLAGGED, "--text", DRAFT], NOTE + b"[prompt-workflow: upstream down]")
+    _golden([*FLAGGED, "--text", DRAFT], NOTE + b"[promptmend: upstream down]")
 
 
 # Clipboard output (PROMPT_OUTPUT=clipboard, #134): a success prints nothing at all, the note
@@ -119,17 +119,17 @@ def test_improve_sent_despite_note_with_error(monkeypatch: pytest.MonkeyPatch) -
 def test_improve_clipboard_output(
     monkeypatch: pytest.MonkeyPatch, stub_provider: StubProvider
 ) -> None:
-    monkeypatch.setattr("prompt_workflow.cli.pyperclip.copy", lambda text: None)
+    monkeypatch.setattr("promptmend.cli.pyperclip.copy", lambda text: None)
     monkeypatch.setenv("PROMPT_OUTPUT", "clipboard")
     _golden(IMPROVE, b"")
     stub_provider.exc = ProviderError("Ollama request failed")
-    _golden(IMPROVE, b"[prompt-workflow: Ollama request failed]")
+    _golden(IMPROVE, b"[promptmend: Ollama request failed]")
 
 
 def test_improve_clipboard_output_sent_despite(
     monkeypatch: pytest.MonkeyPatch, fake_http: FakeHttp
 ) -> None:
-    monkeypatch.setattr("prompt_workflow.cli.pyperclip.copy", lambda text: None)
+    monkeypatch.setattr("promptmend.cli.pyperclip.copy", lambda text: None)
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     fake_http.reply({"choices": [{"message": {"content": "rewrite"}}]})
     _golden([*FLAGGED, "--output", "clipboard", "--text", DRAFT], NOTE.rstrip(b"\n"))
@@ -170,8 +170,8 @@ from pathlib import Path
 
 import httpx
 
-import prompt_workflow.cli as cli
-from prompt_workflow.providers import base
+import promptmend.cli as cli
+from promptmend.providers import base
 
 real_client = httpx.Client
 status = [200]
@@ -240,17 +240,17 @@ FORBIDDEN = (
     "tomli_w",
     "tomlkit",
     "keyring",
-    "prompt_workflow.deploy",
-    "prompt_workflow.commands",
-    "prompt_workflow.doctor",
-    "prompt_workflow.smoke",
-    "prompt_workflow.config_store",
-    "prompt_workflow.previous_install",
-    "prompt_workflow.relocate",
+    "promptmend.deploy",
+    "promptmend.commands",
+    "promptmend.doctor",
+    "promptmend.smoke",
+    "promptmend.config_store",
+    "promptmend.previous_install",
+    "promptmend.relocate",
 )
 # The usage history (#89) writes each run after its output, so sqlite3 loads on the trigger
 # path when tracking is on (PROMPT_HISTORY, the default), and never when it is off.
-HISTORY_MODULES = ("prompt_workflow.history", "sqlite3", "_sqlite3")
+HISTORY_MODULES = ("promptmend.history", "sqlite3", "_sqlite3")
 
 # Modules the trigger scenarios add to a bare interpreter, macOS: 307 on Python 3.12 and 306 on
 # 3.14 with the usage history on, 296 on both with it off (see "Trigger start-up budget" in
@@ -310,7 +310,7 @@ def test_trigger_run_output(trigger_run: tuple[list[bytes], dict[str, Any]]) -> 
         b"",
         b"",
     )
-    assert cloud_error.startswith(b"[prompt-workflow: ")
+    assert cloud_error.startswith(b"[promptmend: ")
     assert cloud_error.endswith(b"]")
     assert settings_error == SETTINGS_ERROR
     assert data["codes"] == [0] * 7
@@ -352,8 +352,8 @@ import json
 import sys
 from pathlib import Path
 
-from prompt_workflow import deploy
-import prompt_workflow.cli as cli
+from promptmend import deploy
+import promptmend.cli as cli
 
 deploy.run_command = lambda argv: None
 scenarios = [
@@ -403,6 +403,6 @@ def test_management_commands_do_not_import_the_interface(tmp_path: Path) -> None
     assert data["codes"][0] == 2
     assert data["codes"][-1] == 3
     loaded = data["loaded"]
-    assert "prompt_workflow.commands.ui" in loaded  # --help listed it, so the guard is real
-    for module in ("textual", "prompt_workflow.tui"):
+    assert "promptmend.commands.ui" in loaded  # --help listed it, so the guard is real
+    for module in ("textual", "promptmend.tui"):
         assert not [m for m in loaded if m == module or m.startswith(module + ".")], module

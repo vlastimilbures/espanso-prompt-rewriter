@@ -20,7 +20,7 @@ One small Python CLI sits behind every trigger. It reads your clipboard, checks 
 sensitive content before anything leaves your machine, sends it with the rewrite instructions
 (including your persona, if you set one, which the gate does not scan; `config validate` and
 `doctor` check it) to the model, and pastes the
-result back — or a readable `[prompt-workflow: …]` message if something went wrong. See
+result back — or a readable `[promptmend: …]` message if something went wrong. See
 [What is sent, and to whom](#what-is-sent-and-to-whom). It works the same way on macOS and Windows, with
 [OpenRouter](https://openrouter.ai), [Anthropic](https://www.anthropic.com),
 [Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai).
@@ -113,7 +113,7 @@ self-review checklist instead.
   override.
 - 🙋 **Your persona, once.** Set `PROMPT_PERSONA` and every rewrite (and the `-p-` snippet) opens
   with your role.
-- 🧯 **Never a blank expansion.** Errors arrive inline as `[prompt-workflow: …]`, because Espanso
+- 🧯 **Never a blank expansion.** Errors arrive inline as `[promptmend: …]`, because Espanso
   cannot show stderr or exit codes.
 - 🧹 **Clean output.** A leading `<think>…</think>` reasoning block, control characters and
   invisible Unicode never reach the app you are typing in.
@@ -124,7 +124,7 @@ self-review checklist instead.
 
 ```mermaid
 flowchart LR
-    A["You type -i-"] --> B["Espanso runs<br/>prompt-workflow improve"]
+    A["You type -i-"] --> B["Espanso runs<br/>promptmend improve"]
     B --> C["Load settings,<br/>read clipboard"]
     C --> D{"Leaves this<br/>machine?"}
     D -- yes --> E{"Sensitive content?"}
@@ -137,7 +137,7 @@ flowchart LR
 ```
 
 Espanso starts the CLI as a GUI subprocess without your shell's `PATH` or environment. So
-`prompt-workflow espanso deploy` writes the CLI's absolute path into the match files, and the
+`promptmend espanso deploy` writes the CLI's absolute path into the match files, and the
 CLI reads its settings from files rather than your shell: a `.env`, or the saved `config.toml`
 and `secrets.toml` (see [Configuration](#configuration)).
 
@@ -146,7 +146,7 @@ and `secrets.toml` (see [Configuration](#configuration)).
 - macOS or Windows with [Espanso](https://espanso.org/install/) installed and running. Espanso
   also runs on Linux, where the CLI is tested but the triggers are not used day to day. There
   the clipboard needs `xclip` or `xsel` (X11) or `wl-clipboard` (Wayland); without one, a
-  trigger pastes `[prompt-workflow: Clipboard unavailable: Pyperclip could not find a copy/paste
+  trigger pastes `[promptmend: Clipboard unavailable: Pyperclip could not find a copy/paste
   mechanism …]` instead of a rewrite.
 - Python 3.12+ and [uv](https://docs.astral.sh/uv/getting-started/installation/), or (macOS
   and Linux, from 0.19.0) [Homebrew](https://brew.sh), which brings its own Python
@@ -161,13 +161,13 @@ wheel built and tested by the release workflow, with the exact dependency versio
 `uv.lock`. To run from a checkout instead, see [Development](#development).
 
 **From PyPI with uv (from 0.19.0).** The package is
-[`espanso-prompt-rewriter`](https://pypi.org/project/espanso-prompt-rewriter/), uploaded by the
+[`promptmend`](https://pypi.org/project/espanso-prompt-rewriter/), uploaded by the
 release workflow through PyPI's trusted publishing (no stored token). Pass the release's
 `constraints.txt`, the exact dependency versions from `uv.lock`; a plain `uv tool install`
 would resolve the version ranges afresh:
 
 ```bash
-uv tool install espanso-prompt-rewriter==<version> \
+uv tool install promptmend==<version> \
   -c https://github.com/vlastimilbures/espanso-prompt-rewriter/releases/download/v<version>/constraints.txt
 ```
 
@@ -177,7 +177,7 @@ on carries the wheel and `constraints.txt`:
 
 ```bash
 uv tool install \
-  https://github.com/vlastimilbures/espanso-prompt-rewriter/releases/download/v<version>/espanso_prompt_rewriter-<version>-py3-none-any.whl \
+  https://github.com/vlastimilbures/espanso-prompt-rewriter/releases/download/v<version>/promptmend-<version>-py3-none-any.whl \
   -c https://github.com/vlastimilbures/espanso-prompt-rewriter/releases/download/v<version>/constraints.txt
 ```
 
@@ -191,7 +191,7 @@ vlastimilbures/espanso-prompt-rewriter` on each, and install the local wheel wit
 homebrew/core:
 
 ```bash
-brew install vlastimilbures/tap/prompt-workflow
+brew install vlastimilbures/tap/promptmend
 ```
 
 A tap is a third-party repository: Homebrew runs its formulas with your user's rights and
@@ -203,7 +203,7 @@ Windows, use uv.
 
 ## First run
 
-Run `prompt-workflow` in a terminal (or `prompt-workflow ui`) for a full-screen interface with
+Run `promptmend` in a terminal (or `promptmend ui`) for a full-screen interface with
 six tabs: Home, Providers & keys, Profiles, Triggers, History and Diagnostics. Home says in one
 line whether you are ready (or names the most urgent problem and the tab that fixes it), then
 shows what `-i-` and `-ip-` run, the match files and Espanso, the usage history, the output mode and the
@@ -213,29 +213,29 @@ code. Keys are shown only as set or not set, removing a key, deploying, detachin
 deleting history asks first, and no provider is called except by the Test call button, which
 runs `improve` against a stub on `127.0.0.1` with a placeholder key.
 
-![The Home tab of the prompt-workflow interface](docs/interface.svg)
+![The Home tab of the promptmend interface](docs/interface.svg)
 
 Every button's tooltip shows the command that does the same in a terminal, every result
-starts with that command (`$ prompt-workflow config set …`), and Home lists this session's
+starts with that command (`$ promptmend config set …`), and Home lists this session's
 commands, or a few useful ones before you have done anything.
 
 It opens with a short intro that stays until you press Enter (or any other key, or click);
 that key does nothing else. Its last line says how to turn it off for good:
-`prompt-workflow config set PROMPT_UI_INTRO false`. `prompt-workflow ui --no-intro` skips it
+`promptmend config set PROMPT_UI_INTRO false`. `promptmend ui --no-intro` skips it
 once.
 
 `1`-`6` switch tabs, `a` shows the version, install channel, folders and licence, `r` reloads,
 `t` switches to a high-contrast theme and `q` quits; `NO_COLOR` turns colour off. Scripts and screen readers can use the headless commands instead.
-Without a terminal, a bare `prompt-workflow` prints the help.
+Without a terminal, a bare `promptmend` prints the help.
 
-Or answer a few questions instead: `prompt-workflow setup` asks for the provider and default
+Or answer a few questions instead: `promptmend setup` asks for the provider and default
 profile (saved in `config.toml`), the API key (hidden input, saved in `secrets.toml`), shows the
 match files it would deploy and writes them only if you agree, and ends with a smoke test that
 runs `improve` against a stub on `127.0.0.1` (never a paid call). In a script, pass the key on
 stdin and nothing is asked:
 
 ```bash
-prompt-workflow setup --non-interactive --api-key-stdin --deploy < key.txt
+promptmend setup --non-interactive --api-key-stdin --deploy < key.txt
 ```
 
 Without `--deploy` the deploy stays a preview. Now copy a rough draft, type `-i-` in any text
@@ -244,21 +244,21 @@ rewrite wherever the focus is when the answer arrives.
 
 ### Managing the deployed match files
 
-`prompt-workflow espanso` owns the match files it writes into Espanso's `match/` folder (found
+`promptmend espanso` owns the match files it writes into Espanso's `match/` folder (found
 with `espanso path config`, else Espanso's default folder) and keeps a manifest of them,
 `espanso-manifest.json`, in `~/.local/share/promptmend/` (`$XDG_DATA_HOME`;
 `%LOCALAPPDATA%\promptmend\` on Windows). Each deployed file starts with
-`# prompt-workflow <version> (managed; edit at your own risk)`.
+`# promptmend <version> (managed; edit at your own risk)`.
 
 | Command | What it does |
 |---------|--------------|
-| `prompt-workflow espanso status [--diff]` | Each file: `missing`, `in sync`, `stale` (an older deploy of ours, such as after an upgrade), `modified` (you edited it) or `foreign` (not ours), then each other `.yml`/`.yaml` file in `match/` as `yours` (Espanso's own `base.yml`, your overlays: never touched by `deploy` or `detach`) |
-| `prompt-workflow espanso deploy` | Shows the plan and a diff, asks, then writes and restarts Espanso. `--yes` skips the question, `--dry-run` stops after the diff; a second run with nothing to change does nothing |
-| `prompt-workflow espanso detach` | Removes the matches that call the CLI and keeps `-risk-` as a static snippet (`--keep-static`, the default); `--remove-all` removes every file we deployed |
+| `promptmend espanso status [--diff]` | Each file: `missing`, `in sync`, `stale` (an older deploy of ours, such as after an upgrade), `modified` (you edited it) or `foreign` (not ours), then each other `.yml`/`.yaml` file in `match/` as `yours` (Espanso's own `base.yml`, your overlays: never touched by `deploy` or `detach`) |
+| `promptmend espanso deploy` | Shows the plan and a diff, asks, then writes and restarts Espanso. `--yes` skips the question, `--dry-run` stops after the diff; a second run with nothing to change does nothing |
+| `promptmend espanso detach` | Removes the matches that call the CLI and keeps `-risk-` as a static snippet (`--keep-static`, the default); `--remove-all` removes every file we deployed |
 
 A file you edited is never overwritten silently: `deploy` asks whether to keep yours, take ours
 (yours is saved as `<file>.bak-<timestamp>`; only the last 2 of these backups are kept) or write
-ours side by side as `<file>.prompt-workflow-new`, which Espanso does not load. With `--yes` it
+ours side by side as `<file>.promptmend-new`, which Espanso does not load. With `--yes` it
 keeps yours unless you pass `--on-conflict ours|side`, and ends with a `WARNING` naming each file
 it kept. A file an older release's installer wrote, unedited, is recognised as ours and updated. `detach` likewise removes only files whose
 content is still what we wrote, and reports any you edited. The launcher written into the
@@ -273,24 +273,52 @@ judge its launcher.
 checkout's `.env` or its profiles, but it can copy them. Leave the checkout and its `.env` where
 they are, so the old triggers keep working until the match files are deployed again:
 
-1. Install the wheel as shown below, then run `prompt-workflow setup` (or open the interface,
-   `prompt-workflow`, which shows a "Previous install" checklist). It finds the checkout through
+1. Install the wheel as shown below, then run `promptmend setup` (or open the interface,
+   `promptmend`, which shows a "Previous install" checklist). It finds the checkout through
    the deployed match files, the deploy manifest or uv's receipt, and offers to copy the
    settings and key (only those still at their default here) and the profiles you edited, then
    to deploy the match files. If it finds nothing (a `--force` install overwrites uv's receipt,
    and a uv launcher does not point into the checkout), name the checkout:
-   `prompt-workflow setup --migrate-from PATH`. Without setup: `prompt-workflow config migrate
-   --from PATH` and `prompt-workflow profiles migrate --checkout PATH`, then
-   `prompt-workflow espanso deploy`.
-2. Once the match files no longer run the checkout's CLI, `prompt-workflow config retire --from
-   PATH` moves the old `.env` into the backup. `prompt-workflow config rollback` undoes the copy
+   `promptmend setup --migrate-from PATH`. Without setup: `promptmend config migrate
+   --from PATH` and `promptmend profiles migrate --checkout PATH`, then
+   `promptmend espanso deploy`.
+2. Once the match files no longer run the checkout's CLI, `promptmend config retire --from
+   PATH` moves the old `.env` into the backup. `promptmend config rollback` undoes the copy
    and the retire.
-3. If `doctor` says `prompt-workflow` on `PATH` is the checkout's, run `deactivate` (its `.venv`
+3. If `doctor` says `promptmend` on `PATH` is the checkout's, run `deactivate` (its `.venv`
    is active) or take it off `PATH`.
 
 Or keep a `.env`: move it to the config folder (`~/.config/promptmend/.env`,
 `%APPDATA%\promptmend\.env` on Windows), where the wheel reads it too, or point
 `PROMPTMEND_ENV` at it (set for GUI apps, since Espanso does not inherit your shell).
+
+**The new name (0.19.0).** Up to 0.18.0 the package was `espanso-prompt-rewriter` and the
+command `prompt-workflow`; both are now `promptmend`. Switch over once:
+
+```bash
+uv tool uninstall espanso-prompt-rewriter   # first; the triggers stop working until the deploy
+uv tool install promptmend==<version> \
+  -c https://github.com/vlastimilbures/espanso-prompt-rewriter/releases/download/v<version>/constraints.txt
+promptmend espanso deploy                   # the matches now call promptmend
+promptmend doctor
+```
+
+Uninstall the old tool first: both install a `prompt-workflow` launcher in the same folder,
+so uv refuses to install `promptmend` next to it, and if `--force` made it, uninstalling the
+old tool afterwards deletes the `prompt-workflow` alias that now belongs to `promptmend`. If
+you already installed with `--force`, run `uv tool uninstall espanso-prompt-rewriter`, then
+the `uv tool install --force promptmend==<version> …` line again. The install scripts
+uninstall the old tool themselves.
+
+The deploy counts the match files an earlier release wrote (stamped `# prompt-workflow …`) as
+its own and `stale`, so it replaces them without asking. Until 1.0.0, `prompt-workflow` stays
+installed as a deprecated alias of `promptmend`: the triggers and `--help`/`--version` behave
+exactly the same, and every other command first prints one line on stderr,
+"`prompt-workflow` is deprecated; use `promptmend` (removed in 1.0.0)". `doctor` warns while
+the deployed matches still call a `prompt-workflow` launcher. Other changes a script may
+notice: the error and note marker is now `[promptmend: …]` (was `[prompt-workflow: …]`),
+the match labels in Espanso's search bar start with `PromptMend:`, the Python package is
+`promptmend`, and OpenRouter sees the `X-Title: promptmend` header.
 
 **The folders' new name.** Releases up to 0.18.0 kept your settings in
 `~/.config/prompt-workflow/` and the usage history and deploy manifest in
@@ -300,7 +328,7 @@ first management command you run, or the interface, renames them and prints one 
 folder on stderr (not `improve`, `persona`, `--help`, `--version`, an unknown command or shell
 completion). It is a rename, so `secrets.toml` stays private to you; until then the triggers
 keep using the old folders. If both folders exist, only what the new one lacks is moved,
-nothing is overwritten, and `prompt-workflow doctor` lists what stayed behind. A move that
+nothing is overwritten, and `promptmend doctor` lists what stayed behind. A move that
 fails (on Windows, a file another program holds open) is tried again by the next command. If
 `PROMPTMEND_ENV` or `PROMPT_WORKFLOW_ENV` (in your shell or in Espanso's environment) names a
 `.env` inside the old config folder, that folder is not moved: point the variable at the same
@@ -308,36 +336,36 @@ file under the new folder, then run the command again. A symlinked old folder is
 move it by hand.
 
 Update through the channel you installed with, then check the result with
-`prompt-workflow doctor`. With uv, install the new release over the old one with its own
+`promptmend doctor`. With uv, install the new release over the old one with its own
 `constraints.txt`: `--force` makes uv replace the tool already there (the install scripts pass
 it too). From PyPI (from 0.19.0):
 
 ```bash
-uv tool install --force espanso-prompt-rewriter==<version> \
+uv tool install --force promptmend==<version> \
   -c https://github.com/vlastimilbures/espanso-prompt-rewriter/releases/download/v<version>/constraints.txt
-prompt-workflow doctor
+promptmend doctor
 ```
 
 From a GitHub Release:
 
 ```bash
 uv tool install --force \
-  https://github.com/vlastimilbures/espanso-prompt-rewriter/releases/download/v<version>/espanso_prompt_rewriter-<version>-py3-none-any.whl \
+  https://github.com/vlastimilbures/espanso-prompt-rewriter/releases/download/v<version>/promptmend-<version>-py3-none-any.whl \
   -c https://github.com/vlastimilbures/espanso-prompt-rewriter/releases/download/v<version>/constraints.txt
-prompt-workflow doctor
+promptmend doctor
 ```
 
-With Homebrew (from 0.19.0), `brew update` then `brew upgrade prompt-workflow`. The tap's
+With Homebrew (from 0.19.0), `brew update` then `brew upgrade promptmend`. The tap's
 formula is updated by hand after each release, so it can trail the GitHub Release by a while.
 
 Switching channels (say from uv to Homebrew): install the new one, run
-`prompt-workflow espanso deploy` from it so the match files call its launcher, then uninstall
+`promptmend espanso deploy` from it so the match files call its launcher, then uninstall
 the old one (step 4 of [Uninstall](#uninstall)). Run from the new install, `doctor` warns while
-the matches still call the old launcher, or while the old `prompt-workflow` comes first on
+the matches still call the old launcher, or while the old `promptmend` comes first on
 `PATH`.
 
 Upgrading the CLI does not touch the match files Espanso holds. If `doctor` reports one as
-`stale` (for example `prompts-template.yml: stale`), run `prompt-workflow espanso deploy` to
+`stale` (for example `prompts-template.yml: stale`), run `promptmend espanso deploy` to
 bring it up to date.
 
 ## Uninstall
@@ -345,26 +373,26 @@ bring it up to date.
 Detach before you uninstall: once the CLI is gone, every trigger that calls it fails with
 Espanso's rendering error.
 
-1. `prompt-workflow espanso detach` removes the matches that call the CLI
+1. `promptmend espanso detach` removes the matches that call the CLI
    (`prompts-llm.yml`, `prompts-template.yml`) and keeps `-risk-` as a static
    snippet (`--keep-static`, the default); `--remove-all` removes every file it deployed. The
    `.bak-…` backups are never deleted.
-2. Check with `prompt-workflow espanso status` that neither `prompts-llm.yml` nor
+2. Check with `promptmend espanso status` that neither `prompts-llm.yml` nor
    `prompts-template.yml` is left (both should be `missing`). Detach removes only files on
    record and unedited, so:
    - if it said `Nothing to do` (the files came from an install script before 0.16, so there is
-     no record), run `prompt-workflow espanso deploy` first: it adopts unedited files any
+     no record), run `promptmend espanso deploy` first: it adopts unedited files any
      release wrote, after which `detach` removes them;
    - a file you edited (`modified` or `foreign`) is kept: delete it from Espanso's `match/`
      folder by hand, or remove its CLI-calling matches.
 
    Do not uninstall while one of these files is left.
-3. Optionally, and only if you want them gone: `prompt-workflow history reset` deletes the
-   usage history, and `prompt-workflow secrets remove OPENROUTER_API_KEY` (or
+3. Optionally, and only if you want them gone: `promptmend history reset` deletes the
+   usage history, and `promptmend secrets remove OPENROUTER_API_KEY` (or
    `ANTHROPIC_API_KEY`) deletes a saved key. The config folder (`config.toml`, `profiles/`,
    `backups/`) and the data folder stay until you delete them.
 4. Uninstall through the channel you installed with: `uv tool uninstall
-   espanso-prompt-rewriter`, or with Homebrew `brew uninstall prompt-workflow` (and
+   promptmend`, or with Homebrew `brew uninstall promptmend` (and
    `brew untap vlastimilbures/tap` if nothing else of it is installed).
 
 If the CLI is already broken or gone, install it again (see [Install](#install)), then detach.
@@ -397,7 +425,7 @@ For a draft that pastes an email, a thread or a document to work on, use `-ip-`:
 copies the pasted material into INPUTS word for word (up to 60 lines), while `-i-`'s faster
 model often summarises a short pasted email instead (CONTRIBUTING, "Known gaps in the default prompt", #42).
 
-Each match has a label starting with `prompt-workflow:`, which Espanso's search bar
+Each match has a label starting with `PromptMend:`, which Espanso's search bar
 (Alt+Space / Option+Space by default) shows instead of the `{{output}}` placeholder.
 
 Triggers expand only at the start of a word: after a space, tab, newline, punctuation
@@ -408,7 +436,7 @@ does. If a trigger follows anything else (a letter, digit, `-`, `=`, `/` …), t
 The improve triggers (`-i-`, `-ip-`, `-if-`, `-iok-`, `-il-`, `-ilm-`) send your current clipboard
 as-is, whatever it holds, so copy the draft first. On macOS and Windows an item a password
 manager marked as concealed is refused and cleared from the clipboard
-(`[prompt-workflow: The clipboard held a password-manager item …]`) when the check can tell. Cloud triggers pass through the
+(`[promptmend: The clipboard held a password-manager item …]`) when the check can tell. Cloud triggers pass through the
 [data-protection gate](#privacy-and-data-protection) first. To rewrite text in place, select
 it, copy it (Cmd+C / Ctrl+C) and type `-i-`: as in any editor, the first character you type
 replaces the selection, and Espanso then replaces the trigger with the rewrite.
@@ -427,17 +455,17 @@ By default every improve trigger pastes the rewrite in place of the trigger. Wit
 `PROMPT_OUTPUT=clipboard` the rewrite goes on the clipboard instead:
 
 ```bash
-prompt-workflow config set PROMPT_OUTPUT clipboard   # or Change setting under Providers & keys in `prompt-workflow ui`
-prompt-workflow config set PROMPT_OUTPUT paste       # back to pasting
+promptmend config set PROMPT_OUTPUT clipboard   # or Change setting under Providers & keys in `promptmend ui`
+promptmend config set PROMPT_OUTPUT paste       # back to pasting
 ```
 
 It applies to every improve trigger at once, with no redeploy. Type the trigger as usual: after
 the wait the trigger text vanishes and nothing is pasted, and the rewrite is on the clipboard.
 Press Cmd+V / Ctrl+V where you want it. Everything that is not the rewrite still pastes, so you
-see it where you typed: every error marker, the `[prompt-workflow: sent despite: …]` note of
+see it where you typed: every error marker, the `[promptmend: sent despite: …]` note of
 `-iok-` (the clipboard then holds only the rewrite, without the note), and the cut-off note of
 a reply that hit its output limit (the clipboard holds the partial rewrite). If the clipboard
-cannot be written, the rewrite is pasted after a `[prompt-workflow: Clipboard unavailable: …]`
+cannot be written, the rewrite is pasted after a `[promptmend: Clipboard unavailable: …]`
 marker, so it is never lost. `-p-` and the other static snippets are unaffected; for one call,
 `improve --output paste|clipboard` overrides the setting.
 
@@ -454,7 +482,7 @@ marker, so it is never lost. `-p-` and the other static snippets are unaffected;
 
 In a checkout ([Development](#development)), you enable `-ic-` by uncommenting it in
 [`espanso/match/prompts-llm.yml`](espanso/match/prompts-llm.yml) and running
-`prompt-workflow espanso deploy` (or the installer) again.
+`promptmend espanso deploy` (or the installer) again.
 
 `-if-` opens an Espanso form with four dropdowns before the rewrite runs: the model
 (each entry is `model@endpoint`, the OpenRouter slug plus its endpoint pin; `@auto` leaves
@@ -475,7 +503,7 @@ With a release wheel there is no checkout to edit: put your own variants (`-ic-`
 with other lists) in a file of your own in Espanso's `match/` folder, such as
 `my-prompts.yml`. Copy the match from the deployed `prompts-llm.yml`, which already holds the
 CLI's absolute path, give it a trigger no other match uses, and keep its `--trigger-id`
-only if its runs should count as that trigger in the usage history. `prompt-workflow espanso
+only if its runs should count as that trigger in the usage history. `promptmend espanso
 deploy` and `detach` handle only the files they deployed (`prompts-core.yml`,
 `prompts-llm.yml`, `prompts-template.yml`), so they never change yours; `status` lists yours
 as `yours`. Editing a
@@ -484,14 +512,15 @@ backup, if you choose ours), so it no longer receives updates.
 
 ### CLI
 
-The same CLI works on its own, which is handy for trying profiles and models:
+The same CLI works on its own, which is handy for trying profiles and models (the old name,
+`prompt-workflow`, still runs it until 1.0.0; see [Updating](#updating)):
 
 ```bash
-echo "summarise the Q3 incident log for the ops team" | prompt-workflow improve --source stdin
-prompt-workflow improve --provider ollama --profile general --source clipboard
-prompt-workflow improve --model openai/gpt-4.1-nano --source argument --text "your draft"
-prompt-workflow improve --tier pro --source clipboard   # the reasoning model behind -ip-
-prompt-workflow persona          # prints PROMPT_PERSONA (used by -p-)
+echo "summarise the Q3 incident log for the ops team" | promptmend improve --source stdin
+promptmend improve --provider ollama --profile general --source clipboard
+promptmend improve --model openai/gpt-4.1-nano --source argument --text "your draft"
+promptmend improve --tier pro --source clipboard   # the reasoning model behind -ip-
+promptmend persona          # prints PROMPT_PERSONA (used by -p-)
 ```
 
 | Option       | Default                     | Meaning                                         |
@@ -509,18 +538,18 @@ prompt-workflow persona          # prints PROMPT_PERSONA (used by -p-)
 | `--copy`     | off                         | With `paste` output, also copy the result to the clipboard (no effect with `clipboard`) |
 
 `--tier pro` and `--effort` (other than `default`) with any provider but OpenRouter are
-refused with a `[prompt-workflow: …]` marker, and no call is made: no other provider has a pro
+refused with a `[promptmend: …]` marker, and no call is made: no other provider has a pro
 tier or a reasoning-effort control.
 
-Output is UTF-8 with no trailing newline, and every failure is printed as `[prompt-workflow: …]`
+Output is UTF-8 with no trailing newline, and every failure is printed as `[promptmend: …]`
 with exit code 0, so Espanso always has something to paste. Drafts over 50,000 characters are
 refused (an accidental copy of a log or document should not go to the cloud). If the model stops
 at its output limit, the partial rewrite is pasted with
-`[prompt-workflow: the reply hit the model's output limit and is cut off]` at the end.
+`[promptmend: the reply hit the model's output limit and is cut off]` at the end.
 
 For scripts, the exit code says nothing: `improve` exits 0 whether or not it rewrote. A run failed
-when its whole output is one `[prompt-workflow: …]` marker. A rewrite starts with a marker only
-after `--allow-flagged` (`[prompt-workflow: sent despite: …]`) and ends with one only when it is
+when its whole output is one `[promptmend: …]` marker. A rewrite starts with a marker only
+after `--allow-flagged` (`[promptmend: sent despite: …]`) and ends with one only when it is
 cut off. This prefix is stable. With `clipboard` output a successful run prints nothing, or only
 those markers, and the rewrite is on the clipboard.
 
@@ -528,20 +557,20 @@ those markers, and the rewrite is on the clipboard.
 
 | Command | What it does |
 |---------|--------------|
-| `prompt-workflow --version` | Prints the installed version |
-| `prompt-workflow` / `prompt-workflow ui` | Opens the [full-screen interface](#first-run) when stdin and stdout are a terminal. Otherwise a bare `prompt-workflow` prints the help and exits 2, and `ui` exits 3 |
-| `prompt-workflow setup` | First run: provider and default profile (saved in `config.toml`), the API key (hidden prompt), a deploy preview it applies only if you agree, and a smoke test that runs `improve` against a stub on `127.0.0.1` (never a paid call, never your real key). If your settings are in a `.env`, it offers to migrate them and changes nothing unless you say yes; the same goes for an earlier checkout install it finds (or the one `--migrate-from PATH` names): it offers to copy its settings and edited profiles, and to retire its `.env` once the match files no longer run it. `--non-interactive` asks nothing (key with `--api-key-stdin`; the deploy stays a preview unless `--deploy`) |
-| `prompt-workflow config show [--raw]` | Every setting, its value and where it comes from (default, a file or the environment), and which lower files it overrides. Keys and the persona are shown only as set or not set; a value set to empty on purpose reads `(empty)` |
-| `prompt-workflow config get NAME` / `set NAME VALUE` / `unset NAME` | Read one setting; save it in `config.toml` after checking it as the CLI reads it; remove it so the default applies. A key is refused here. `get` prints the raw value (an empty line for an empty one). `set` warns on stderr, naming the findings only, when the saved change leaves a `PROMPT_PERSONA` that `config validate` would flag; the value stays saved |
-| `prompt-workflow config validate` | Checks the settings as `improve` reads them, and the profiles they name, and flags a `PROMPT_PERSONA` that the data-protection gate's patterns match |
-| `prompt-workflow config migrate` / `rollback` | Moves the `.env` in use to `config.toml` and its keys to the secret store, with a backup, or undoes that. Shows a preview first and applies only once you confirm it; in a script, pass `--yes --preview-token <token>` from that preview. `--from PATH` also copies an earlier checkout's `.env` into every setting still at its default; that `.env` stays in place, so the old triggers keep working until you deploy again |
-| `prompt-workflow config retire --from PATH` | Moves that checkout's `.env` into the backup once its settings were copied. Refused while a match file still runs the checkout's CLI (`prompt-workflow espanso deploy` first); same preview and `--yes --preview-token` as migrate, and `rollback` puts it back |
-| `prompt-workflow secrets set NAME [--stdin]` / `status` / `remove NAME` | Saves a key from a hidden prompt or stdin (never an argument); shows whether each key is set and where from, never the value; deletes one |
-| `prompt-workflow profiles list` / `migrate` | Lists built-in and your own profiles and their state; copies profiles you added or edited in a checkout to your profile folder (copies only, never overwrites) |
-| `prompt-workflow espanso deploy [--dry-run]` / `status` / `detach` | See [Managing the deployed match files](#managing-the-deployed-match-files) |
-| `prompt-workflow stats [--by trigger\|provider\|model\|day] [--json]` | Calls, latency, tokens and costs from the [usage history](#usage-history) |
-| `prompt-workflow history export [--format json\|csv] [-o FILE]` / `prune [--older-than DAYS]` / `reset` | Exports (metadata only), deletes old records (asking first when the age is shorter than `PROMPT_HISTORY_RETENTION_DAYS`), or deletes them all |
-| `prompt-workflow doctor [--json]` | Version, CLI path and install channel, config validity, keys set or not, Espanso found and running, each deployed match file (`in sync`, `stale`, `modified`, `missing`), launcher drift, history health, SQLite version, and a clipboard read test that reports only the length. Safe to paste into an issue: it never shows a key, your persona or clipboard text |
+| `promptmend --version` | Prints the installed version |
+| `promptmend` / `promptmend ui` | Opens the [full-screen interface](#first-run) when stdin and stdout are a terminal. Otherwise a bare `promptmend` prints the help and exits 2, and `ui` exits 3 |
+| `promptmend setup` | First run: provider and default profile (saved in `config.toml`), the API key (hidden prompt), a deploy preview it applies only if you agree, and a smoke test that runs `improve` against a stub on `127.0.0.1` (never a paid call, never your real key). If your settings are in a `.env`, it offers to migrate them and changes nothing unless you say yes; the same goes for an earlier checkout install it finds (or the one `--migrate-from PATH` names): it offers to copy its settings and edited profiles, and to retire its `.env` once the match files no longer run it. `--non-interactive` asks nothing (key with `--api-key-stdin`; the deploy stays a preview unless `--deploy`) |
+| `promptmend config show [--raw]` | Every setting, its value and where it comes from (default, a file or the environment), and which lower files it overrides. Keys and the persona are shown only as set or not set; a value set to empty on purpose reads `(empty)` |
+| `promptmend config get NAME` / `set NAME VALUE` / `unset NAME` | Read one setting; save it in `config.toml` after checking it as the CLI reads it; remove it so the default applies. A key is refused here. `get` prints the raw value (an empty line for an empty one). `set` warns on stderr, naming the findings only, when the saved change leaves a `PROMPT_PERSONA` that `config validate` would flag; the value stays saved |
+| `promptmend config validate` | Checks the settings as `improve` reads them, and the profiles they name, and flags a `PROMPT_PERSONA` that the data-protection gate's patterns match |
+| `promptmend config migrate` / `rollback` | Moves the `.env` in use to `config.toml` and its keys to the secret store, with a backup, or undoes that. Shows a preview first and applies only once you confirm it; in a script, pass `--yes --preview-token <token>` from that preview. `--from PATH` also copies an earlier checkout's `.env` into every setting still at its default; that `.env` stays in place, so the old triggers keep working until you deploy again |
+| `promptmend config retire --from PATH` | Moves that checkout's `.env` into the backup once its settings were copied. Refused while a match file still runs the checkout's CLI (`promptmend espanso deploy` first); same preview and `--yes --preview-token` as migrate, and `rollback` puts it back |
+| `promptmend secrets set NAME [--stdin]` / `status` / `remove NAME` | Saves a key from a hidden prompt or stdin (never an argument); shows whether each key is set and where from, never the value; deletes one |
+| `promptmend profiles list` / `migrate` | Lists built-in and your own profiles and their state; copies profiles you added or edited in a checkout to your profile folder (copies only, never overwrites) |
+| `promptmend espanso deploy [--dry-run]` / `status` / `detach` | See [Managing the deployed match files](#managing-the-deployed-match-files) |
+| `promptmend stats [--by trigger\|provider\|model\|day] [--json]` | Calls, latency, tokens and costs from the [usage history](#usage-history) |
+| `promptmend history export [--format json\|csv] [-o FILE]` / `prune [--older-than DAYS]` / `reset` | Exports (metadata only), deletes old records (asking first when the age is shorter than `PROMPT_HISTORY_RETENTION_DAYS`), or deletes them all |
+| `promptmend doctor [--json]` | Version, CLI path and install channel, config validity, keys set or not, Espanso found and running, each deployed match file (`in sync`, `stale`, `modified`, `missing`), launcher drift, history health, SQLite version, and a clipboard read test that reports only the length. Safe to paste into an issue: it never shows a key, your persona or clipboard text |
 
 `stats` reports local observations on this device, not provider billing: check your provider's
 dashboard for what you were charged. Read it with these caveats:
@@ -598,7 +627,7 @@ folder, which wins over a key in a `.env`. Order of precedence: built-in default
 macOS/Linux, an access list for your account alone on Windows). An existing `.env` can be
 migrated to both after a preview and your confirmation: values equal to their default are
 left out, the `.env` is moved into `backups/` in the config folder rather than deleted, and a
-rollback restores it exactly: `prompt-workflow config migrate` and `prompt-workflow config
+rollback restores it exactly: `promptmend config migrate` and `promptmend config
 rollback` (both show a preview first). With `PROMPTMEND_ENV` set (legacy mode), that `.env` stays
 the only settings file: nothing is migrated, and `config set` and `secrets` refuse to write, so
 edit the file itself. A keychain is
@@ -669,7 +698,7 @@ short, does not look like a key and matches none of your `PROMPT_EXTRA_PATTERNS`
 
 ## Profiles and persona
 
-A profile is a system prompt in [`src/prompt_workflow/prompts/`](src/prompt_workflow/prompts/):
+A profile is a system prompt in [`src/promptmend/prompts/`](src/promptmend/prompts/):
 
 - **`default`** rewrites the draft into the golden template (the same one the static `-p-`
   snippet gives you). Step 1 is "plan first" for multi-step or ambiguous work, otherwise
@@ -710,7 +739,7 @@ A file named like a built-in (`default.md`, `general.md`) is ignored, so a stray
 silently change what every trigger sends. To replace a built-in on purpose, list it in
 `PROMPT_PROFILE_OVERRIDES`, for example `PROMPT_PROFILE_OVERRIDES=default`; delete the line to
 go back. The package's own files are never changed. A profile you added under
-`src/prompt_workflow/prompts/` in a checkout keeps working there, but belongs in this folder.
+`src/promptmend/prompts/` in a checkout keeps working there, but belongs in this folder.
 To add a built-in profile to the project, see [CONTRIBUTING.md](CONTRIBUTING.md#add-a-profile).
 
 **Persona.** Set `PROMPT_PERSONA` to a first-person sentence, for example
@@ -727,7 +756,7 @@ opens `CONTEXT` with it, unless the draft names a different role, and `-p-` inse
 > and nothing leaves it. Each trigger names its own provider, so `PROMPT_PROVIDER` does not make
 > `-i-` local. To rule out cloud calls, set `PROMPT_LOCAL_ONLY=true`: every trigger or command
 > that would send the draft off your machine then pastes
-> `[prompt-workflow: PROMPT_LOCAL_ONLY=true: … would send the draft off this machine]` instead.
+> `[promptmend: PROMPT_LOCAL_ONLY=true: … would send the draft off this machine]` instead.
 > It judges by the base URL and the Ollama model tag, so a relay on `localhost` that forwards to
 > a cloud API (LiteLLM, an SSH tunnel) still counts as local. If your `localhost` server is such
 > a relay, set `PROMPT_GATE_LOCAL=true`: the gate below then scans `-il-` and `-ilm-` drafts too,
@@ -746,7 +775,7 @@ web clipboard and set no marker), apps that set none of these markers, a probe t
 Linux; there the item is sent like any other text.
 
 Every call that can send the draft off your machine first runs through a regex gate
-([`redaction.py`](src/prompt_workflow/redaction.py)): OpenRouter and Anthropic always, and
+([`redaction.py`](src/promptmend/redaction.py)): OpenRouter and Anthropic always, and
 Ollama or LM Studio when their base URL is not `localhost` (or `127.0.0.1`, `::1`) or the Ollama
 model is a cloud model (a `:cloud` or `-cloud` tag in any letter case, also with an
 `@sha256:…` digest, which the local daemon forwards to ollama.com). With `PROMPT_GATE_LOCAL=true`
@@ -805,10 +834,10 @@ The gate blocks drafts containing:
 The draft is also scanned in a normalised form, so no-break or zero-width spaces, soft hyphens,
 variation selectors, Hangul fillers and fullwidth digits cannot split a card number or key.
 
-A blocked draft pastes `[prompt-workflow: Blocked cloud call. Sensitive content detected: …]`
+A blocked draft pastes `[promptmend: Blocked cloud call. Sensitive content detected: …]`
 instead of calling the API. When every finding is a label, a Vietnamese ID, an email address or
 an IBAN, you can send that one draft with `-iok-` (`--allow-flagged`): the paste then starts with
-`[prompt-workflow: sent despite: …]`, and the next draft is checked as usual. Keys, tokens,
+`[promptmend: sent despite: …]`, and the next draft is checked as usual. Keys, tokens,
 passwords, cards, private keys, a bare token and your own `PROMPT_EXTRA_PATTERNS` are never sent
 this way. `ALLOW_CLOUD_OVERRIDE=true` turns the gate off for every finding and every later call;
 prefer `-iok-` for a one-off. No code path builds a
@@ -855,7 +884,7 @@ Who receives it:
 
 | Provider | Recipients |
 |---|---|
-| OpenRouter (`-i-`, `-iok-`, `-ip-`, `-if-`) | OpenRouter (`OPENROUTER_BASE_URL`), and the upstream endpoint that serves the model: the one pinned by `OPENROUTER_PROVIDER` (`OPENROUTER_PRO_PROVIDER` for `-ip-`, the form's pick for `-if-`), or another endpoint serving the same model when OpenRouter falls back, which `OPENROUTER_ALLOW_FALLBACKS` allows by default (`false` makes the pin binding). An empty pin leaves the choice to OpenRouter. With `OPENROUTER_DATA_COLLECTION=deny` the request asks OpenRouter to use only endpoints that do not store or train on requests (its `provider.data_collection` routing field), for both tiers. The request also carries an `X-Title: espanso-prompt-rewriter` header, which attributes the calls to this app in OpenRouter's dashboard (the benchmark script sends `espanso-prompt-rewriter-bench`). |
+| OpenRouter (`-i-`, `-iok-`, `-ip-`, `-if-`) | OpenRouter (`OPENROUTER_BASE_URL`), and the upstream endpoint that serves the model: the one pinned by `OPENROUTER_PROVIDER` (`OPENROUTER_PRO_PROVIDER` for `-ip-`, the form's pick for `-if-`), or another endpoint serving the same model when OpenRouter falls back, which `OPENROUTER_ALLOW_FALLBACKS` allows by default (`false` makes the pin binding). An empty pin leaves the choice to OpenRouter. With `OPENROUTER_DATA_COLLECTION=deny` the request asks OpenRouter to use only endpoints that do not store or train on requests (its `provider.data_collection` routing field), for both tiers. The request also carries an `X-Title: promptmend` header, which attributes the calls to this app in OpenRouter's dashboard (the benchmark script sends `promptmend-bench`). |
 | Anthropic (`-ic-`, commented out) | Anthropic (`ANTHROPIC_BASE_URL`). |
 | Ollama / LM Studio on `localhost` (`-il-`, `-ilm-`) | Nobody else, as long as the server on this machine runs the model itself (a `localhost` relay that forwards to a cloud API is not detected, see above; a `cloud`-tagged Ollama model is the next row). These triggers use the `general` profile, which has no persona. |
 | Ollama / LM Studio at another address, or an Ollama `cloud` model | The configured server (`OLLAMA_BASE_URL`/`api/chat` or `LMSTUDIO_BASE_URL`); for a cloud model that Ollama server also forwards the request to ollama.com (this tool sends no key there). With an `http://` URL anyone on the network path can read the draft too. The gate applies as for the cloud providers. |
@@ -874,7 +903,7 @@ policy allows storing or training on requests. That can mean fewer endpoints. Th
 OpenRouter's endpoint policies can change: if the pinned endpoint (or the `-ip-`/`-if-` one)
 does not qualify, OpenRouter falls back to another endpoint that does while
 `OPENROUTER_ALLOW_FALLBACKS=true`, and otherwise the trigger pastes an error marker instead of
-a rewrite, typically `[prompt-workflow: OpenRouter returned HTTP 404: not found…]` followed by
+a rewrite, typically `[promptmend: OpenRouter returned HTTP 404: not found…]` followed by
 OpenRouter's reason. Pick another endpoint (`OPENROUTER_PROVIDER`, `OPENROUTER_PRO_PROVIDER`)
 or clear the setting.
 
@@ -919,12 +948,12 @@ request it made (a retried request counts twice, in the same run). It is on by d
   recorded run also deletes up to 100 of the oldest records past that age, so the history
   stays within it without a separate clean-up (after lowering the setting, a large backlog goes
   over the next few runs).
-- **Export, prune, reset:** `prompt-workflow history export [--format json|csv] [-o FILE]`
+- **Export, prune, reset:** `promptmend history export [--format json|csv] [-o FILE]`
   writes every record (the same metadata, nothing more), `history prune [--older-than DAYS]`
   deletes older records now, and `history reset` deletes them all. Uninstalling does not delete
   the history (see [Uninstall](#uninstall)).
-- **Off:** `prompt-workflow config set PROMPT_HISTORY false` (or `PROMPT_HISTORY=false` in your
-  `.env`), then `prompt-workflow history reset` to delete what is there. `setup` and `stats`
+- **Off:** `promptmend config set PROMPT_HISTORY false` (or `PROMPT_HISTORY=false` in your
+  `.env`), then `promptmend history reset` to delete what is there. `setup` and `stats`
   say that the history is on, what it stores and where.
   Nothing is recorded either when the settings fail to load, since whether you turned it off
   is then unknown.
@@ -976,32 +1005,32 @@ run it are in [docs/benchmark.md](docs/benchmark.md).
 | Symptom | Fix |
 |---------|-----|
 | Trigger does not expand right after a letter, digit, `-` or `=`, or in a field you emptied with the keyboard | Triggers only fire at the start of a word, judged by what you last typed. Type a space first, or click into the field. |
-| Trigger does not expand | Run `espanso status`, then `prompt-workflow espanso status`, then `prompt-workflow espanso deploy`. |
-| `[Espanso]: An error occurred during rendering` | The CLI the matches call is gone or broken: the checkout of an editable install was moved or deleted, or the tool was uninstalled without `prompt-workflow espanso detach`. `prompt-workflow doctor` (once a CLI runs again) reports `launcher: the deployed matches call …, which is gone`. Install it again (see [Install](#install)), then run `prompt-workflow espanso deploy`, or `prompt-workflow espanso detach` to remove the triggers. |
-| `doctor` reports `launcher: the deployed matches call …, this install is …` | Launcher drift: the matches call another install of the CLI than the one you just ran (say, an old checkout after switching to a release wheel). Run `prompt-workflow espanso deploy` from the install you want the triggers to use. |
-| `doctor` reports `prompts-template.yml: stale` (or another match file) | The deployed match files are from an older version, so `-p-` and the `-if-` lists differ from the CLI. Run `prompt-workflow espanso deploy`. |
-| Not sure what is wrong | `prompt-workflow doctor` checks the install, settings, keys, Espanso, the match files, the history and the folders; `prompt-workflow config validate` checks the settings alone. |
-| `[prompt-workflow: OPENROUTER_API_KEY is not configured]` | The key is missing from `.env` (or `secrets.toml`), or the file is not in one of the [places the CLI looks](#configuration). Once `config.toml` exists, a `.env` is no longer read. |
-| `[prompt-workflow: config.toml is not valid TOML (at line …)]` | Fix that line of `config.toml` in the config folder (`secrets.toml` likewise). |
-| `[prompt-workflow: OpenRouter returned HTTP 401: check the API key…]` | Wrong key. Replace it in `.env`. |
-| `[prompt-workflow: OpenRouter returned HTTP 402: out of credits…]` | Add credits to your OpenRouter account. |
-| `[prompt-workflow: … returned HTTP 429: rate limited…]`, `… HTTP 5xx: provider unavailable…` or `… returned an error (code …)` | The provider is busy or down. A rate limit (unless it asks to wait more than 3 s), a 502/503/504/529 or a refused connection to another machine was already retried once within the time limit. Trigger again in a moment, or pick another endpoint in `-if-`. The text after the hint is the provider's own reason. |
-| `[prompt-workflow: … HTTP 400: bad request…]` or `… HTTP 404: not found…` | Check the model slug, the endpoint pin and the base URL; the provider's reason follows the hint. With `OPENROUTER_DATA_COLLECTION=deny`, a 404 can also mean no endpoint for that model meets the data policy (see [What is sent](#what-is-sent-and-to-whom)). |
-| `[prompt-workflow: …_API_KEY contains a non-ASCII or invisible character…]` | The key was pasted with a smart quote or an invisible character. Paste it again as plain text. |
-| `[prompt-workflow: OPENROUTER_REASONING_EFFORT must be empty or one of …]` | Fix the value in `.env` (`OPENROUTER_PRO_REASONING_EFFORT` likewise). |
+| Trigger does not expand | Run `espanso status`, then `promptmend espanso status`, then `promptmend espanso deploy`. |
+| `[Espanso]: An error occurred during rendering` | The CLI the matches call is gone or broken: the checkout of an editable install was moved or deleted, or the tool was uninstalled without `promptmend espanso detach`. `promptmend doctor` (once a CLI runs again) reports `launcher: the deployed matches call …, which is gone`. Install it again (see [Install](#install)), then run `promptmend espanso deploy`, or `promptmend espanso detach` to remove the triggers. |
+| `doctor` reports `launcher: the deployed matches call …, this install is …` | Launcher drift: the matches call another install of the CLI than the one you just ran (say, an old checkout after switching to a release wheel). Run `promptmend espanso deploy` from the install you want the triggers to use. |
+| `doctor` reports `prompts-template.yml: stale` (or another match file) | The deployed match files are from an older version, so `-p-` and the `-if-` lists differ from the CLI. Run `promptmend espanso deploy`. |
+| Not sure what is wrong | `promptmend doctor` checks the install, settings, keys, Espanso, the match files, the history and the folders; `promptmend config validate` checks the settings alone. |
+| `[promptmend: OPENROUTER_API_KEY is not configured]` | The key is missing from `.env` (or `secrets.toml`), or the file is not in one of the [places the CLI looks](#configuration). Once `config.toml` exists, a `.env` is no longer read. |
+| `[promptmend: config.toml is not valid TOML (at line …)]` | Fix that line of `config.toml` in the config folder (`secrets.toml` likewise). |
+| `[promptmend: OpenRouter returned HTTP 401: check the API key…]` | Wrong key. Replace it in `.env`. |
+| `[promptmend: OpenRouter returned HTTP 402: out of credits…]` | Add credits to your OpenRouter account. |
+| `[promptmend: … returned HTTP 429: rate limited…]`, `… HTTP 5xx: provider unavailable…` or `… returned an error (code …)` | The provider is busy or down. A rate limit (unless it asks to wait more than 3 s), a 502/503/504/529 or a refused connection to another machine was already retried once within the time limit. Trigger again in a moment, or pick another endpoint in `-if-`. The text after the hint is the provider's own reason. |
+| `[promptmend: … HTTP 400: bad request…]` or `… HTTP 404: not found…` | Check the model slug, the endpoint pin and the base URL; the provider's reason follows the hint. With `OPENROUTER_DATA_COLLECTION=deny`, a 404 can also mean no endpoint for that model meets the data policy (see [What is sent](#what-is-sent-and-to-whom)). |
+| `[promptmend: …_API_KEY contains a non-ASCII or invisible character…]` | The key was pasted with a smart quote or an invisible character. Paste it again as plain text. |
+| `[promptmend: OPENROUTER_REASONING_EFFORT must be empty or one of …]` | Fix the value in `.env` (`OPENROUTER_PRO_REASONING_EFFORT` likewise). |
 | `… the model stopped early (content_filter)]` at the end, or `… declined the request (refusal)` | A content filter or the model's safety policy stopped the rewrite. Rephrase the draft or use another model. |
-| `[prompt-workflow: Ollama request failed: …]` | Start Ollama (`ollama serve`) and pull the model (`ollama pull qwen3:8b`). |
-| `[prompt-workflow: Blocked cloud call. …]` | The [gate](#privacy-and-data-protection) matched. Remove the content or use a local trigger (with `PROMPT_GATE_LOCAL=true` the message offers none, since those are gated too). If the message offers `-iok-` and the content may leave your machine, use `-iok-` for this draft. |
-| `[prompt-workflow: Blocked call to the local server …]` | `PROMPT_GATE_LOCAL=true` and the gate matched a `-il-`/`-ilm-` draft. Remove the content, or set `PROMPT_GATE_LOCAL=false` if your `localhost` server runs the model itself (not a relay to a cloud API). |
-| `[prompt-workflow: sent despite: …]` at the top of a rewrite | You used `-iok-`; the draft was sent despite those findings. Delete the line. |
-| `[prompt-workflow: Input is too long …]` | The clipboard holds more than 50,000 characters. Copy just the draft. |
+| `[promptmend: Ollama request failed: …]` | Start Ollama (`ollama serve`) and pull the model (`ollama pull qwen3:8b`). |
+| `[promptmend: Blocked cloud call. …]` | The [gate](#privacy-and-data-protection) matched. Remove the content or use a local trigger (with `PROMPT_GATE_LOCAL=true` the message offers none, since those are gated too). If the message offers `-iok-` and the content may leave your machine, use `-iok-` for this draft. |
+| `[promptmend: Blocked call to the local server …]` | `PROMPT_GATE_LOCAL=true` and the gate matched a `-il-`/`-ilm-` draft. Remove the content, or set `PROMPT_GATE_LOCAL=false` if your `localhost` server runs the model itself (not a relay to a cloud API). |
+| `[promptmend: sent despite: …]` at the top of a rewrite | You used `-iok-`; the draft was sent despite those findings. Delete the line. |
+| `[promptmend: Input is too long …]` | The clipboard holds more than 50,000 characters. Copy just the draft. |
 | `… the reply hit the model's output limit and is cut off]` at the end, or `… used its whole output limit before writing any text` | The model hit its output cap, often by spending it on reasoning. Raise `OPENROUTER_MAX_TOKENS` (`OPENROUTER_PRO_MAX_TOKENS` for the pro tier alone: `-ip-`, `-if-`, `--tier pro`; `ANTHROPIC_MAX_TOKENS` for Anthropic), or pick a larger max tokens (or lower effort) in `-if-`. For Ollama and LM Studio pass `--max-tokens` (in your own variant trigger); without it the server's own default applies. |
 | A `base.yml.bak-…` file appeared in Espanso's `match` folder | Versions before 0.9 deployed `-p-` as `match/base.yml`, the file Espanso creates for your own snippets. The installer backed up that copy and replaced it with `prompts-template.yml`. Older installers overwrote `base.yml` without a backup, so snippets you kept there before first installing this project can only come from your own backups. |
 | Expansion is slow | Use a faster model or endpoint (see [benchmark](#model-benchmark)); Espanso waits for the CLI. |
-| `[prompt-workflow: … must be an https:// URL]` | A cloud `*_BASE_URL` uses `http`. Switch it to `https`. |
-| `[prompt-workflow: OLLAMA_THINK must be true or false, got …]` (or `must be a number above 0`) | Fix that value in `.env`. A long value, or one that looks like a key, is shown as `<redacted, N chars>`. |
-| `[prompt-workflow: … in .env runs into the next line; add the missing newline]` | Two lines of `.env` were saved as one. Split them. |
-| `[prompt-workflow: … request failed: invalid header value (check the API key)]` | The API key in `.env` contains a line break or another character a key never has. Paste it again. |
+| `[promptmend: … must be an https:// URL]` | A cloud `*_BASE_URL` uses `http`. Switch it to `https`. |
+| `[promptmend: OLLAMA_THINK must be true or false, got …]` (or `must be a number above 0`) | Fix that value in `.env`. A long value, or one that looks like a key, is shown as `<redacted, N chars>`. |
+| `[promptmend: … in .env runs into the next line; add the missing newline]` | Two lines of `.env` were saved as one. Split them. |
+| `[promptmend: … request failed: invalid header value (check the API key)]` | The API key in `.env` contains a line break or another character a key never has. Paste it again. |
 | `-il-` or `-ilm-` says `Blocked cloud call` | `OLLAMA_BASE_URL` / `LMSTUDIO_BASE_URL` points at another machine, or the Ollama model is a cloud model, so the gate applies. Use a model on `localhost` for sensitive drafts. |
 | Reasoning text appears in the output | Set `OLLAMA_THINK=false`. A `<think>` block at the start of the reply is stripped (a later one is kept as answer text); extend `strip_thinking` in `providers/base.py` for other tag formats. |
 
@@ -1024,13 +1053,13 @@ To use a checkout with Espanso, install it as an editable tool instead of a rele
 ```
 
 The script runs `uv tool install --editable` pinned to `uv.lock` (and checks the tool venv
-against it), then `prompt-workflow espanso deploy --yes`, which writes the match files with the
+against it), then `promptmend espanso deploy --yes`, which writes the match files with the
 CLI's absolute path and restarts Espanso. It never touches Espanso's `config/` folder (the old
 `--with-config` / `-WithConfig` option is gone). The Windows script runs on Windows PowerShell
 5.1 and PowerShell 7. If script execution is disabled, run it as
 `powershell -ExecutionPolicy Bypass -File .\scripts\install_windows.ps1` (`pwsh` for PowerShell
 7), which allows this one run without changing your execution policy.
-On Linux, run `uv tool install --editable .` and `prompt-workflow espanso deploy`. An editable
+On Linux, run `uv tool install --editable .` and `promptmend espanso deploy`. An editable
 install runs the code and profiles straight from the checkout, so a `git pull` or a branch
 switch changes `-i-` at once, while the match files change only on the next deploy. It also
 reads a `.env` in the checkout; keep the one holding your key in the config folder instead

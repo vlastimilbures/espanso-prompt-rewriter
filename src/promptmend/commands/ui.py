@@ -1,4 +1,4 @@
-"""`ui`: the full-screen interface (#93), also what a bare `prompt-workflow` opens on a
+"""`ui`: the full-screen interface (#93), also what a bare `promptmend` opens on a
 terminal (D-UI-1). Textual is imported here only once the interface opens, so --help, the
 triggers and every other command never load it."""
 

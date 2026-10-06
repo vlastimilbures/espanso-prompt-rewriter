@@ -11,7 +11,7 @@ from .. import __version__, config, config_store
 
 # The interface's display name: the header, the intro, the wordmark and About all read it
 # here, so a rename (#169) changes this one line (and the snapshots).
-NAME = "prompt-workflow"
+NAME = "PromptMend"
 TAGLINE = "A rough draft in, a precise prompt out: type -i- in any text field."
 REPO_URL = "https://github.com/vlastimilbures/espanso-prompt-rewriter"
 LICENCE = "MIT"

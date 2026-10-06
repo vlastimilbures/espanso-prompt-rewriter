@@ -1,5 +1,5 @@
 [project]
-name = "espanso-prompt-rewriter"
+name = "promptmend"
 version = "0.18.0"
 description = "Cross-platform Espanso prompt workflow with OpenRouter, Anthropic, Ollama, and LM Studio"
 readme = "README.md"
@@ -9,7 +9,7 @@ requires-python = ">=3.12"
 dependencies = [
   "httpx>=0.27,<1",
   "pyperclip>=1.9,<2",
-  # The full-screen interface (`prompt-workflow` on a terminal, `ui`); imported only there.
+  # The full-screen interface (`promptmend` on a terminal, `ui`); imported only there.
   "textual>=8.2.8,<9",
   # Writes config.toml and secrets.toml; imported only when saving, never by a trigger.
   "tomli-w>=1.2,<2",
@@ -21,7 +21,9 @@ Homepage = "https://github.com/vlastimilbures/espanso-prompt-rewriter"
 Changelog = "https://github.com/vlastimilbures/espanso-prompt-rewriter/blob/main/CHANGELOG.md"
 
 [project.scripts]
-prompt-workflow = "prompt_workflow.cli:app"
+promptmend = "promptmend.cli:app"
+# Deprecated alias until 1.0.0 (#169): management commands print a note on stderr.
+prompt-workflow = "promptmend.cli:app"
 
 # Development tools: `uv sync` installs this group; `uv tool install` never does.
 [dependency-groups]
@@ -44,12 +46,12 @@ build-backend = "hatchling.build"
 build-constraint-dependencies = ["hatchling==1.32.4"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/prompt_workflow"]
+packages = ["src/promptmend"]
 
-# The Espanso match files ship in the wheel (read by prompt_workflow.assets); espanso/ in the
+# The Espanso match files ship in the wheel (read by promptmend.assets); espanso/ in the
 # repo stays their source. espanso/config/ is deliberately not shipped.
 [tool.hatch.build.targets.wheel.force-include]
-"espanso/match" = "prompt_workflow/espanso/match"
+"espanso/match" = "promptmend/espanso/match"
 
 [tool.ruff]
 line-length = 100
@@ -59,7 +61,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "S", "PT", "C4", "PIE", "RET",
 
 [tool.ruff.lint.per-file-ignores]
 # _env() returns a dataclasses.field(default_factory=...), not a shared default value.
-"src/prompt_workflow/config.py" = ["RUF009"]
+"src/promptmend/config.py" = ["RUF009"]
 # Tests assert, and run the CLI in a subprocess the way Espanso does.
 "tests/**" = ["S101", "S603"]
 
@@ -77,7 +79,7 @@ markers = ["live: calls the real OpenRouter API (opt-in: pytest -m live)"]
 
 [tool.coverage.run]
 branch = true
-source = ["prompt_workflow"]
+source = ["promptmend"]
 
 [tool.coverage.report]
 fail_under = 95

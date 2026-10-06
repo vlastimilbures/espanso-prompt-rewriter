@@ -5,10 +5,10 @@ from typing import Any
 
 import yaml
 
-from prompt_workflow.config import EFFORTS, KEEP, TIERS, split_model_spec
-from prompt_workflow.factory import PROVIDER_NAMES
-from prompt_workflow.prompt_builder import PROFILES
-from prompt_workflow.recorder import TRIGGER_IDS
+from promptmend.config import EFFORTS, KEEP, TIERS, split_model_spec
+from promptmend.factory import PROVIDER_NAMES
+from promptmend.prompt_builder import PROFILES
+from promptmend.recorder import TRIGGER_IDS
 
 ESPANSO_ROOT = Path(__file__).parents[1] / "espanso"
 MATCH_FILES = sorted((ESPANSO_ROOT / "match").glob("*.yml"))
@@ -269,7 +269,8 @@ def test_if_form_lists_default_to_the_tier_setting() -> None:
 
 
 # Every match, the commented-out ones included, has its own label: Espanso's search bar shows
-# it instead of the replacement text, which for the CLI triggers is only `{{output}}`.
+# it instead of the replacement text, which for the CLI triggers is only `{{output}}`. Each
+# starts with the display name (#169), so a search for it lists them all.
 def test_every_match_has_a_distinct_label() -> None:
     matches = [m for path in MATCH_FILES for m in _load(path)["matches"]]
     matches += [m for path in MATCH_FILES for m in _commented_matches(path)]
@@ -277,6 +278,7 @@ def test_every_match_has_a_distinct_label() -> None:
     for match, label in zip(matches, labels, strict=True):
         assert isinstance(label, str), f"{match['trigger']} has no label"
         assert label.strip(), f"{match['trigger']} has an empty label"
+        assert label.startswith("PromptMend: "), f"{match['trigger']}: {label!r}"
     assert len(set(labels)) == len(labels), "two matches share a label"
 
 

@@ -50,7 +50,7 @@ def _secret(name: str) -> str:
 def _not_a_secret(name: str, verb: str) -> None:
     if name in secret_names():
         raise common.CommandError(
-            f"{name} is a secret: {verb} it with `prompt-workflow secrets {verb} {name}` (a hidden "
+            f"{name} is a secret: {verb} it with `promptmend secrets {verb} {name}` (a hidden "
             "prompt or --stdin), never as an argument",
             common.USAGE,
         )
@@ -70,7 +70,7 @@ def _writable_config(what: str) -> None:
     if env_file is not None:
         raise common.CommandError(
             f"your settings are in {env_file}; saving {config_files.SETTINGS_FILE} would stop "
-            "it being read. Run `prompt-workflow config migrate` first, or edit that file"
+            "it being read. Run `promptmend config migrate` first, or edit that file"
         )
 
 
@@ -125,7 +125,7 @@ def save_setting(name: str, value: str) -> config_store.SavedSettings:
     if common.looks_like_a_key(value):
         raise common.CommandError(
             "that value looks like a key or password, which never goes in config.toml; use "
-            "`prompt-workflow secrets set NAME` for an API key",
+            "`promptmend secrets set NAME` for an API key",
             common.USAGE,
         )
     _writable_config(config_files.SETTINGS_FILE)
@@ -192,7 +192,7 @@ def config_get(name: str = _NAME) -> None:
     if common.looks_like_a_key(value):
         common.fail(
             f"{name} holds what looks like a key ({len(value)} chars), so it is not printed; "
-            "move the key to `prompt-workflow secrets set`"
+            "move the key to `promptmend secrets set`"
         )
     typer.echo(value)
 
@@ -317,14 +317,14 @@ def config_migrate(
     if result.copied is not None:
         typer.echo(f"  copied {result.copied} (left in place)")
         typer.echo(
-            "Next: `prompt-workflow espanso deploy`, then "
-            f"`prompt-workflow config retire --from {result.copied.parent}`."
+            "Next: `promptmend espanso deploy`, then "
+            f"`promptmend config retire --from {result.copied.parent}`."
         )
     for left in result.left:
         common.warn(
             f"{left} was not moved (edited since the preview, or not movable); it is no longer read"
         )
-    typer.echo("Undo with `prompt-workflow config rollback`.")
+    typer.echo("Undo with `promptmend config rollback`.")
 
 
 @config_app.command("rollback")

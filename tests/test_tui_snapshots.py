@@ -22,14 +22,14 @@ from typing import Any
 
 import pytest
 
-from prompt_workflow import assets, config, deploy, doctor, previous_install
-from prompt_workflow.config import ConfigLayers
-from prompt_workflow.history import StatsRow
-from prompt_workflow.prompt_builder import UserProfile
-from prompt_workflow.tui import app as app_module
-from prompt_workflow.tui import brand
-from prompt_workflow.tui.app import HIGH_CONTRAST, ManageApp
-from prompt_workflow.tui.state import State
+from promptmend import assets, deploy, doctor, previous_install
+from promptmend.config import ConfigLayers
+from promptmend.history import StatsRow
+from promptmend.prompt_builder import UserProfile
+from promptmend.tui import app as app_module
+from promptmend.tui import brand
+from promptmend.tui.app import HIGH_CONTRAST, ManageApp
+from promptmend.tui.state import State
 
 pytestmark = pytest.mark.skipif(
     sys.platform == "win32", reason="snapshots are kept for Linux and macOS only (#93)"
@@ -41,21 +41,21 @@ README_SHOT = REPO / "docs" / "interface.svg"
 SIZE = (110, 36)
 HOME = "/home/me"
 ESPANSO = Path(f"{HOME}/.config/espanso")
-LAUNCHER = f"{HOME}/.local/bin/prompt-workflow"
+LAUNCHER = f"{HOME}/.local/bin/promptmend"
 # The header's version (#112), pinned so a release regenerates no snapshot.
 VERSION = "0.16.0"
 
 _MESSAGES = {
-    "version": (doctor.INFO, f"prompt-workflow {VERSION}"),
+    "version": (doctor.INFO, f"promptmend {VERSION}"),
     "cli": (doctor.INFO, f"running {LAUNCHER}"),
     "install": (doctor.OK, f"uv: {LAUNCHER}"),
-    "config": (doctor.OK, f"valid (saved: {HOME}/.config/prompt-workflow/config.toml)"),
+    "config": (doctor.OK, f"valid (saved: {HOME}/.config/promptmend/config.toml)"),
     "keys": (doctor.OK, "OPENROUTER_API_KEY: set, ANTHROPIC_API_KEY: not set"),
     "persona": (doctor.OK, "PROMPT_PERSONA matches no data-protection pattern"),
     "espanso": (doctor.OK, f"running (config: {ESPANSO})"),
     "match_files": (doctor.WARN, "some files are not ours as deployed"),
     "launcher": (doctor.OK, f"the deployed matches call {LAUNCHER}"),
-    "history": (doctor.OK, f"57 call(s) recorded in {HOME}/.local/share/prompt-workflow"),
+    "history": (doctor.OK, f"57 call(s) recorded in {HOME}/.local/share/promptmend"),
     "sqlite": (doctor.OK, "SQLite 3.51.3"),
     "clipboard": (doctor.INFO, "skipped (--no-clipboard)"),
     "profiles": (doctor.OK, "PROMPT_PROFILE default resolves"),
@@ -147,9 +147,7 @@ def fixed_state(
         deploy.Manifest(Path("manifest.json")),
         yours=[ESPANSO / "match" / "base.yml"],
     )
-    profiles = [
-        UserProfile("mine", Path(f"{HOME}/.config/prompt-workflow/profiles/mine.md"), "added")
-    ]
+    profiles = [UserProfile("mine", Path(f"{HOME}/.config/promptmend/profiles/mine.md"), "added")]
     return State(
         layers=layers,
         settings=layers.settings(),
@@ -167,14 +165,14 @@ def fixed_state(
 
 def previous_state(group_by: str = "trigger") -> State:
     """An earlier checkout install found through the old match files (#110)."""
-    root = Path(f"{HOME}/Projects/espanso-prompt-rewriter")
-    launcher = f"{root}/.venv/bin/prompt-workflow"
+    root = Path(f"{HOME}/Projects/promptmend")
+    launcher = f"{root}/.venv/bin/promptmend"
     candidate = previous_install.Candidate(
         root=root,
         signals=frozenset({previous_install.LAUNCHER, previous_install.RECEIPT}),
         env_file=root / ".env",
         launchers_in_root=(launcher,),
-        profiles_dir=root / "src" / "prompt_workflow" / "prompts",
+        profiles_dir=root / "src" / "promptmend" / "prompts",
     )
     return fixed_state(group_by, previous_install.Detection(candidates=(candidate,)))
 
@@ -187,10 +185,6 @@ def fixed_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     # About's runtime line (#112) differs by CI runner.
     monkeypatch.setattr(brand, "runtime", lambda: {"python": "3.14.0", "textual": "8.2.8"})
     monkeypatch.delenv("PROMPTMEND_ENV")
-    # The folders shown (About, History, Profiles) keep their legacy name until the rename
-    # (#169) regenerates the snapshots: no /home/me folder exists, so the new name would show.
-    # TODO(#169 PR B): regenerate with the promptmend paths.
-    monkeypatch.setattr(config, "APP_DIR", config.LEGACY_APP_DIR)
     monkeypatch.setenv("XDG_CONFIG_HOME", f"{HOME}/.config")
     monkeypatch.setenv("XDG_DATA_HOME", f"{HOME}/.local/share")
 
@@ -237,7 +231,7 @@ def _shoot(
             if key:
                 await pilot.press(key)
             await pilot.pause()
-            shots.append(app.export_screenshot(title="prompt-workflow"))
+            shots.append(app.export_screenshot(title=brand.NAME))
 
     asyncio.run(main())
     return shots[0]

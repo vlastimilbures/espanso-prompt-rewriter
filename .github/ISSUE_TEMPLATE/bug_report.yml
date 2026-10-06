@@ -11,7 +11,7 @@ body:
     id: what-happened
     attributes:
       label: What happened
-      description: "Include the exact `[prompt-workflow: …]` message if you got one."
+      description: "Include the exact `[promptmend: …]` message if you got one."
     validations:
       required: true
   - type: textarea
@@ -26,7 +26,7 @@ body:
       label: Steps to reproduce
       description: Trigger or CLI command, provider, profile, and a fake draft that shows the problem.
       placeholder: |
-        1. echo "…" | prompt-workflow improve --provider openrouter --source stdin
+        1. echo "…" | promptmend improve --provider openrouter --source stdin
         2. …
     validations:
       required: true
@@ -48,4 +48,4 @@ body:
     id: versions
     attributes:
       label: Versions
-      description: "Output of `uv tool list | grep espanso-prompt-rewriter` and `espanso --version`, plus the model if relevant."
+      description: "Output of `uv tool list | grep promptmend` and `espanso --version`, plus the model if relevant."

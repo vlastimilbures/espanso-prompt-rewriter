@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 import pytest
 from bench_module import bench
 
-from prompt_workflow.config import ENV_FILE_VARS, env_names
+from promptmend.config import ENV_FILE_VARS, env_names
 
 if TYPE_CHECKING:
     from typer._click import Command, Context
@@ -59,19 +59,20 @@ def test_documented_bench_outdirs_are_ignored() -> None:
 # as folders), so a new module cannot be left out of the map.
 def test_contributing_tree_lists_every_module() -> None:
     contributing = (REPO / "CONTRIBUTING.md").read_text("utf-8")
-    tree = contributing[contributing.index("├── src/prompt_workflow/") :]
+    tree = contributing[contributing.index("├── src/promptmend/") :]
     tree = tree[: tree.index("├── scripts/")]
-    package = REPO / "src" / "prompt_workflow"
+    package = REPO / "src" / "promptmend"
     modules = [*package.glob("*.py"), *(package / "providers").glob("*.py")]
     missing = [p.name for p in modules if p.stem != "__init__" and f"── {p.name} " not in tree]
     assert missing == [], f"add {missing} to the project tree in CONTRIBUTING.md"
 
 
 _FENCE = re.compile(r"^```[^\n]*\n(.*?)^```", re.MULTILINE | re.DOTALL)
-_INVOCATION = re.compile(r"(?<![\w/\\-])prompt-workflow(?![\w:-])([^`\n#]*)")
+# `prompt-workflow` is the deprecated alias (#169) of the same command tree: checked too.
+_INVOCATION = re.compile(r"(?<![\w/\\-])(?:promptmend|prompt-workflow)(?![\w:=-])([^`\n#]*)")
 _FLAG = re.compile(r"(?<![\w-])(--?[a-zA-Z][\w-]*)")
-# `prompt-workflow config get NAME` / `set NAME VALUE`: the later spans are siblings.
-_SIBLINGS = re.compile(r"`prompt-workflow ([^`]+)`((?:\s*/\s*`[^`]+`)+)")
+# `promptmend config get NAME` / `set NAME VALUE`: the later spans are siblings.
+_SIBLINGS = re.compile(r"`(?:promptmend|prompt-workflow) ([^`]+)`((?:\s*/\s*`[^`]+`)+)")
 # Options the README names for other tools: uv, the bench, the retired installer option.
 _OTHER_TOOLS_FLAGS = {"--force", "--persona", "--suite", "--with-config"}
 
@@ -82,7 +83,7 @@ def _spans(text: str) -> list[str]:
 
 
 def _documented_invocations(text: str) -> list[str]:
-    """What follows `prompt-workflow` in each code block line and inline code span (a
+    """What follows `promptmend` in each code block line and inline code span (a
     comment cut off), e.g. ` history export [--format json|csv] [-o FILE]`, plus each
     `/ x` sibling span after one, under the first span's parent command."""
     lines = [line for b in _FENCE.findall(text) for line in b.splitlines()]
@@ -108,13 +109,11 @@ def _changelog_notes(changelog: str) -> str:
 
 
 def test_changelog_notes_add_the_newest_release() -> None:
-    released = (
-        "## 1.1.0 - 2026-10-02\n\n- `prompt-workflow doctor`\n\n## 1.0.0 - 2026-10-01\n\n- y\n"
-    )
+    released = "## 1.1.0 - 2026-10-02\n\n- `promptmend doctor`\n\n## 1.0.0 - 2026-10-01\n\n- y\n"
     for unreleased, expected in [
-        ("## Unreleased\n\n", ["- `prompt-workflow doctor`"]),
-        ("", ["- `prompt-workflow doctor`"]),
-        ("## Unreleased\n\n- x\n\n", ["- x", "- `prompt-workflow doctor`"]),
+        ("## Unreleased\n\n", ["- `promptmend doctor`"]),
+        ("", ["- `promptmend doctor`"]),
+        ("## Unreleased\n\n- x\n\n", ["- x", "- `promptmend doctor`"]),
     ]:
         notes = _changelog_notes(f"# Changelog\n\n{unreleased}{released}")
         assert notes.split() == " ".join(expected).split()
@@ -123,13 +122,13 @@ def test_changelog_notes_add_the_newest_release() -> None:
 def _cli() -> tuple[Command, Context]:
     import typer
 
-    from prompt_workflow import cli
+    from promptmend import cli
 
     root = typer.main.get_command(cli.app)
-    return root, root.make_context("prompt-workflow", ["--help"], resilient_parsing=True)
+    return root, root.make_context("promptmend", ["--help"], resilient_parsing=True)
 
 
-# Every `prompt-workflow <command> [<subcommand>] --flag` the README (and the CHANGELOG's
+# Every `promptmend <command> [<subcommand>] --flag` the README (and the CHANGELOG's
 # newest notes) names exists in the CLI, so a renamed command or option cannot leave the
 # docs behind. Walks the Click tree; the lazy commands load their modules, never textual.
 @pytest.mark.parametrize("doc", ["README.md", "CHANGELOG.md"])
@@ -139,7 +138,7 @@ def test_documented_commands_and_flags_exist(doc: str) -> None:
     root, ctx = _cli()
     text = (REPO / doc).read_text("utf-8")
     invocations = _documented_invocations(text if doc == "README.md" else _changelog_notes(text))
-    assert invocations, f"{doc} names no prompt-workflow command; drop or adapt this test"
+    assert invocations, f"{doc} names no promptmend command; drop or adapt this test"
     for rest in invocations:
         command, words = root, rest.split()
         while words and isinstance(command, typer.core.TyperGroup):
@@ -147,11 +146,11 @@ def test_documented_commands_and_flags_exist(doc: str) -> None:
             if not re.fullmatch(r"[a-z]+", word):
                 break
             sub = command.get_command(ctx, word)
-            assert sub is not None, f"{doc}: `prompt-workflow{rest}`: no command {word!r}"
+            assert sub is not None, f"{doc}: `promptmend{rest}`: no command {word!r}"
             command, words = sub, words[1:]
         known = {"--help", *(o for p in command.params for o in (*p.opts, *p.secondary_opts))}
         for flag in _FLAG.findall(" ".join(words)):
-            assert flag in known, f"{doc}: `prompt-workflow{rest}`: no option {flag}"
+            assert flag in known, f"{doc}: `promptmend{rest}`: no option {flag}"
 
 
 # A code span that is only options (`--keep-static`, `--yes --preview-token <token>`) names
@@ -201,7 +200,7 @@ def _result_headings() -> list[str]:
 def test_benchmark_prompt_pin_is_current() -> None:
     import hashlib
 
-    prompt = (REPO / "src" / "prompt_workflow" / "prompts" / "default.md").read_bytes()
+    prompt = (REPO / "src" / "promptmend" / "prompts" / "default.md").read_bytes()
     assert hashlib.sha256(prompt).hexdigest() == _PROMPT_DIGEST, (
         "prompts/default.md changed: update _PROMPT_DIGEST and _PROMPT_CHANGED_IN, and add "
         "benchmark results for the new prompt to docs/benchmark.md"

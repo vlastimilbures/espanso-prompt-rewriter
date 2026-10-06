@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from prompt_workflow.prompt_builder import (
+from promptmend.prompt_builder import (
     PROFILES,
     TEMPLATE_MARKER,
     repair_template_tags,

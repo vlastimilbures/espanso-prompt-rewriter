@@ -13,11 +13,11 @@ from typing import TYPE_CHECKING, Any
 import httpx
 import pytest
 
-from prompt_workflow.config import Settings
-from prompt_workflow.factory import make_provider
-from prompt_workflow.gate import GatedProvider
-from prompt_workflow.providers.anthropic import ANTHROPIC_VERSION, AnthropicProvider
-from prompt_workflow.providers.base import (
+from promptmend.config import Settings
+from promptmend.factory import make_provider
+from promptmend.gate import GatedProvider
+from promptmend.providers.anthropic import ANTHROPIC_VERSION, AnthropicProvider
+from promptmend.providers.base import (
     FILTERED_NOTE,
     SERVER_MESSAGE_MAX,
     TRUNCATED_NOTE,
@@ -27,8 +27,8 @@ from prompt_workflow.providers.base import (
     is_loopback,
     post_json,
 )
-from prompt_workflow.providers.ollama import OllamaProvider
-from prompt_workflow.providers.openai_compatible import OpenAICompatibleProvider
+from promptmend.providers.ollama import OllamaProvider
+from promptmend.providers.openai_compatible import OpenAICompatibleProvider
 
 if TYPE_CHECKING:
     from conftest import FakeHttp
@@ -170,7 +170,7 @@ def test_openrouter_request_shape(fake_http: FakeHttp, monkeypatch: pytest.Monke
     assert call["url"] == "https://openrouter.ai/api/v1/chat/completions"
     assert call["headers"] == {
         "Content-Type": "application/json",
-        "X-Title": "espanso-prompt-rewriter",
+        "X-Title": "promptmend",
         "Authorization": "Bearer test-key",
     }
     assert call["json"] == {
@@ -495,8 +495,7 @@ def test_truncated_capped_openai_compatible_suggests_max_tokens(fake_http: FakeH
 # The note names no provider-specific setting (#32).
 def test_truncated_note_is_provider_neutral() -> None:
     assert (
-        TRUNCATED_NOTE
-        == "\n\n[prompt-workflow: the reply hit the model's output limit and is cut off]"
+        TRUNCATED_NOTE == "\n\n[promptmend: the reply hit the model's output limit and is cut off]"
     )
 
 

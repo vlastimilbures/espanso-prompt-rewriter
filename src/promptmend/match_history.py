@@ -14,6 +14,7 @@ KNOWN_SOURCES: dict[str, frozenset[str]] = {
             "0c0e2c0bf68a4e2573c713470c5cd4d43451e76691c8e671ae066944f807bbc4",
             "1c354d11cb89460ad12a0539d025eeecaf94fd4c6b3a92393455d1670551cde4",
             "1cf316c0745bbdc9827643530caacf3b782a59cb72312ccfebcfccd4ea73c656",
+            "36be0259e19c0eaf75e4a14099f179f3815b16355f486a46700a43cc6fadb93f",
             "7d04c4988a4bacf0b8e43bba5182886020b9bddd3d7fe41846390b46caec3170",
         }
     ),
@@ -27,12 +28,14 @@ KNOWN_SOURCES: dict[str, frozenset[str]] = {
             "8f9eb7a8d4cd42606df54f7e3e3ea7cdcfd9e57770dbd39fc6ed020bc3d3d21c",
             "9454bff8830e3ab38934a0f1a97cb42fdad6769cc0249cce38a456dc1dfe796c",
             "9bc66c69044c3b795126cb5819f70dce11435f7167bf6ad1fdc94d0614b02c4e",
+            "bf4d6525f48f7e23aafc3169d7c413d4cc53449280a17b7c8e74ab4a82bdec4d",
             "c8f51c448713aff6f0ea69a83d6a9e1e918b28569bf1430597e675cf0f59a2da",
             "e7e437e9e07e78de55f181d8f263f31dbe06bc3617defca8b2665bbed548ed77",
         }
     ),
     "prompts-template.yml": frozenset(
         {
+            "1aba00a5b2e8c789b0f1cf955b53eb7adb875ded20d44f3784c246f67d45a3f3",
             "1b967f502089e307a885ba7b3eb3a85782629c443bc4bc50ac864364b1c0e0ad",
             "1d271379279e787f18b1515d1c13990e718efad3ea562f78dd8a14d8640a3a4e",
             "38045846defcbbcf355e4fcf0db551516a141a02f7a483fba6876e417b8e15cc",

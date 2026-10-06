@@ -1,4 +1,4 @@
-"""The full-screen interface (#93): `prompt-workflow ui`, or a bare `prompt-workflow` on a
+"""The full-screen interface (#93): `promptmend ui`, or a bare `promptmend` on a
 terminal. Every screen calls the same services as the headless commands (#92) and adds no
 logic of its own.
 

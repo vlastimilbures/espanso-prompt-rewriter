@@ -1,4 +1,4 @@
-"""Regenerate src/prompt_workflow/match_history.py: the SHA-256 of every espanso/match/ source
+"""Regenerate src/promptmend/match_history.py: the SHA-256 of every espanso/match/ source
 anyone could have deployed. That is the union of
 - every digest the module already lists (a digest is never dropped),
 - each `v*` tag's version of each file,
@@ -25,7 +25,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 MATCH = Path("espanso") / "match"
-MODULE = REPO / "src" / "prompt_workflow" / "match_history.py"
+MODULE = REPO / "src" / "promptmend" / "match_history.py"
 
 
 def _git(*args: str) -> str:
