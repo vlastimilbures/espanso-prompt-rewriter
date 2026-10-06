@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## 0.19.0 - 2026-10-06
+
 ### Breaking
 - The project is renamed **PromptMend** (#169): the package (PyPI and wheel) is `promptmend`
   instead of `espanso-prompt-rewriter`, the command is `promptmend` instead of
