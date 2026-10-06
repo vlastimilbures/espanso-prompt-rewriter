@@ -1445,7 +1445,7 @@ def test_previous_install_walks_copy_deploy_retire(previous):
 
 
 def test_previous_install_cancel_writes_nothing_and_deploy_warns(previous):
-    before = {p.name: p.read_bytes() for p in previous.parent.parent.parent.rglob("*.yml")}
+    before = {p.name: p.read_bytes() for p in previous.parent.parent.rglob("*.yml")}
 
     async def scenario(app, pilot):
         await pilot.press("1")
@@ -1464,7 +1464,7 @@ def test_previous_install_cancel_writes_nothing_and_deploy_warns(previous):
     drive(scenario)
     assert not config.settings_file().exists()
     assert not (config._user_config_dir() / "secrets.toml").exists()
-    after = {p.name: p.read_bytes() for p in previous.parent.parent.parent.rglob("*.yml")}
+    after = {p.name: p.read_bytes() for p in previous.parent.parent.rglob("*.yml")}
     assert after == before
 
 
