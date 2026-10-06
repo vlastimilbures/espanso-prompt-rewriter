@@ -19,7 +19,7 @@ from rich.text import Text
 from textual import on, work
 from textual.app import ComposeResult
 from textual.containers import Horizontal, VerticalScroll
-from textual.widgets import Button, DataTable, Select, Static
+from textual.widgets import Button, DataTable, RichLog, Select, Static
 
 from .. import config_store, deploy, doctor, history, previous_install, smoke
 from .. import profiles as profile_service
@@ -32,7 +32,7 @@ from ..config_files import SecretStoreError
 from ..factory import PROVIDER_NAMES, routes
 from ..prompt_builder import ADDED, ALIASES, PROFILES, user_profiles_dir
 from . import teach
-from .console import CommandLine, describe
+from .console import CommandLine, Decision, Ran, Runner, describe, shown, shown_arg, transcript
 from .home import TAB_LABELS, HomeRow, headline, home_rows
 from .modals import ConfirmModal, Field, FormModal, TextModal
 from .state import State, current_plan
@@ -89,11 +89,6 @@ def result_text(message: str, command: str | None) -> Text:
     shown.append(f"$ {command}\n", style="dim")
     shown.append(message)
     return shown
-
-
-def shown_arg(value: str) -> str:
-    """A value as a command line may show it: never one that looks like a credential."""
-    return teach.WITHHELD if common.looks_like_a_key(value) else value
 
 
 class Pane(VerticalScroll):
@@ -242,15 +237,21 @@ class HomePane(Pane):
     (Mockup B, #112). The Diagnostics tab has every check; nothing here calls a provider."""
 
     rows: tuple[HomeRow, ...] = ()
+    # A command line's run is under way (one at a time).
+    running = False
 
     def compose(self) -> ComposeResult:
         yield Static("Checking…", markup=False, id="home-headline")
         yield Static("", id="home-rows")
         yield _buttons(("home-reload", "Check again"), ("home-previous", "Previous install…"))
-        # The command line (#111): completes and explains a command, runs none yet.
+        # The command line (#111): completes, explains and runs a command (console.POLICY).
         help_line = Static(describe(""), id="home-command-help", markup=False)
-        yield CommandLine(help_line)
+        yield CommandLine(help_line, host=self)
         yield help_line
+        # What a run printed; shown from the first run on.
+        output = RichLog(id="home-output", markup=False, highlight=False, wrap=True, max_lines=500)
+        output.display = False
+        yield output
         yield self.result()
         yield Static(session_text(()), id="home-session")
 
@@ -261,6 +262,69 @@ class HomePane(Pane):
 
     def show_session(self, entries: Sequence[teach.Entry]) -> None:
         self.query_one("#home-session", Static).update(session_text(entries))
+
+    def run_line(self, argv: tuple[str, ...], runner: Runner) -> None:
+        """Run ``argv`` in a thread; its output goes below the command line when it ends."""
+        self.running = True
+        output = self.query_one("#home-output", RichLog)
+        output.display = True
+        self.background(lambda: self._run_now(argv, runner))
+
+    def _run_now(self, argv: tuple[str, ...], runner: Runner) -> None:
+        try:
+            ran = runner(argv)
+        except Exception as exc:  # it could not start: shown as its output
+            ran = Ran(1, _error(exc))
+        self.app.call_from_thread(self._ran, argv, ran)
+
+    def _ran(self, argv: tuple[str, ...], ran: Ran) -> None:
+        self.running = False
+        done = transcript(argv, ran)
+        output = self.query_one("#home-output", RichLog)
+        output.write(Text(f"$ {done.command}", style="bold"))
+        for line in done.lines:
+            output.write(Text(line))
+        output.write(Text(done.status, style="dim"))
+        output.scroll_visible()
+        prompt = self.query_one(CommandLine)
+        if not prompt.value:  # not while the next line is being typed
+            prompt.help_line.update(Text(f"$ {done.command}: {done.status} (output below)"))
+        self.manage.log_action(teach.Entry(done.command, done.summary, done.error))
+        self.manage.reload()
+
+    def open_dialog(self, decision: Decision) -> str:
+        """Open the dialog of the tab that owns ``decision``'s command; what to say in the
+        help line."""
+        main = self.manage.main
+        values = decision.values
+        triggers = main.query_one("#triggers-pane", TriggersPane)
+        providers = main.query_one("#providers-pane", ProvidersPane)
+        usage_history = main.query_one("#history-pane", HistoryPane)
+        # Each console.DIALOG command -> its tab and what opens its dialog there.
+        dialogs: dict[tuple[str, ...], tuple[str, Callable[[], None]]] = {
+            ("espanso", "deploy"): ("triggers", triggers.start_deploy),
+            ("espanso", "detach"): (
+                "triggers",
+                lambda: triggers.ask_detach(remove_all=values.get("keep_static") is False),
+            ),
+            ("config", "migrate"): ("providers", providers.migrate_env),
+            ("secrets", "set"): ("providers", lambda: providers.set_key(values.get("name"))),
+            ("secrets", "remove"): ("providers", lambda: providers.remove_key(values.get("name"))),
+            ("history", "prune"): (
+                "history",
+                lambda: usage_history.prune(values.get("older_than")),
+            ),
+            ("history", "reset"): ("history", usage_history.reset),
+        }
+        tab, open_it = dialogs[decision.path]
+        if tab == "triggers" and triggers.busy:
+            return "A deploy or detach is already in progress; finish or cancel it first."
+        main.action_show(tab)
+        open_it()
+        message = f"$ {shown(decision.argv)}: on {TAB_LABELS[tab]}, in its dialog"
+        if decision.ignored:
+            message += f" ({', '.join(decision.ignored)} ignored: the dialog asks)"
+        return message + "."
 
     @on(Button.Pressed, "#home-reload")
     def _reload(self) -> None:
@@ -343,8 +407,12 @@ class ProvidersPane(Pane):
 
     @on(Button.Pressed, "#set-key")
     def _set_key(self) -> None:
+        self.set_key()
+
+    def set_key(self, name: str | None = None) -> None:
+        """The hidden Set key dialog, with ``name`` (a key's name) picked (`secrets set`)."""
         fields = [
-            Field("key-name", "Key", secret_names()),
+            Field("key-name", "Key", secret_names(), value=name or ""),
             Field("key-value", "Value (hidden as you type; never shown again)", secret=True),
         ]
         self.app.push_screen(
@@ -370,6 +438,10 @@ class ProvidersPane(Pane):
 
     @on(Button.Pressed, "#remove-key")
     def _remove_key(self) -> None:
+        self.remove_key()
+
+    def remove_key(self, name: str | None = None) -> None:
+        """Pick a saved key (``name`` first, when saved), then confirm (`secrets remove`)."""
         try:
             common.refuse_in_legacy_mode("the secret store")
             saved = config_store.saved_secret_names()
@@ -380,7 +452,11 @@ class ProvidersPane(Pane):
             self.report("The secret store holds no key; nothing to do.")
             return
         self.app.push_screen(
-            FormModal("Remove a key", [Field("key-name", "Key", saved)], submit="Remove…"),
+            FormModal(
+                "Remove a key",
+                [Field("key-name", "Key", saved, value=name or "")],
+                submit="Remove…",
+            ),
             self._confirm_remove,
         )
 
@@ -433,6 +509,10 @@ class ProvidersPane(Pane):
 
     @on(Button.Pressed, "#migrate-env")
     def _migrate(self) -> None:
+        self.migrate_env()
+
+    def migrate_env(self) -> None:
+        """Preview the .env migration, then apply it on Yes (`config migrate`)."""
         try:
             plan = config_store.plan_migration()
         except EXPECTED as exc:
@@ -819,14 +899,22 @@ class TriggersPane(Pane):
 
     @on(Button.Pressed, "#detach")
     def _ask_detach_start(self) -> None:
+        self.ask_detach()
+
+    def ask_detach(self, *, remove_all: bool = False) -> None:
+        """Read the deploy record in a worker, then ask (`espanso detach`); ``remove_all``
+        picks that mode first."""
         if self.claim():
             self.background(
                 lambda: self.app.call_from_thread(
-                    self._ask_detach, deploy.Manifest.load(), deploy.espanso_dir().resolve()
+                    self._ask_detach,
+                    deploy.Manifest.load(),
+                    deploy.espanso_dir().resolve(),
+                    remove_all,
                 )
             )
 
-    def _ask_detach(self, manifest: deploy.Manifest, root: Path) -> None:
+    def _ask_detach(self, manifest: deploy.Manifest, root: Path, remove_all: bool = False) -> None:
         if not manifest.entries:
             self.busy = False
             self.report("Nothing to do: promptmend has no deployed match files on record.")
@@ -839,6 +927,7 @@ class TriggersPane(Pane):
                 "mode",
                 "keep-static: only the matches that call the CLI; remove-all: every file",
                 ("keep-static", "remove-all"),
+                value="remove-all" if remove_all else "keep-static",
             )
         ]
 
@@ -1000,7 +1089,13 @@ class HistoryPane(Pane):
 
     @on(Button.Pressed, "#prune")
     def _prune(self) -> None:
-        days = str(self.state.settings.history_retention_days) if self.state else ""
+        self.prune()
+
+    def prune(self, days: str | None = None) -> None:
+        """Ask how old (``days`` filled in, else the retention), then confirm (`history
+        prune`)."""
+        if days is None:
+            days = str(self.state.settings.history_retention_days) if self.state else ""
         fields = [Field("days", "Delete the records older than this many days", value=days)]
         self.app.push_screen(
             FormModal("Prune the usage history", fields, submit="Next…"), self._ask_prune
@@ -1038,6 +1133,10 @@ class HistoryPane(Pane):
 
     @on(Button.Pressed, "#reset")
     def _reset(self) -> None:
+        self.reset()
+
+    def reset(self) -> None:
+        """Confirm, then delete every usage record (`history reset`)."""
         target = self._store()
 
         def reset() -> str:

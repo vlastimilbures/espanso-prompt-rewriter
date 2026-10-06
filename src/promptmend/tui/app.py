@@ -74,6 +74,7 @@ DataTable { height: auto; max-height: 14; margin-bottom: 1; }
 #home-rows { height: auto; }
 #home-command { margin-top: 1; }
 #home-command-help { color: $text-muted; }
+#home-output { height: 12; margin-top: 1; border: round $panel-lighten-2; }
 #home-session { margin-top: 1; text-wrap: nowrap; text-overflow: ellipsis; }
 ModalScreen { align: center middle; }
 .dialog {
