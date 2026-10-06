@@ -1173,4 +1173,6 @@ def test_usage_names_promptmend() -> None:
         check=False,
     )
     assert result.returncode == 0
-    assert "Usage: promptmend [OPTIONS] COMMAND" in result.stdout
+    # CI forces Rich's styles (bold) even with NO_COLOR, so compare the plain text.
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout)
+    assert "Usage: promptmend [OPTIONS] COMMAND" in plain
