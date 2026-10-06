@@ -25,6 +25,11 @@ All notable changes to this project are documented here. The format follows
 - README "Install", "Updating" and "Uninstall" cover each channel: uv from PyPI or from a
   GitHub Release, and Homebrew (the PyPI and Homebrew channels start with 0.19.0), with the
   tap trust note and how to switch channels (#96). Scoop and WinGet are no longer planned.
+- `prompt-workflow espanso status` and the interface's Triggers tab also list every other
+  `.yml`/`.yaml` file in Espanso's `match/` folder, such as Espanso's own `base.yml` or your
+  own variants, as `yours`: not managed, never touched by `deploy` or `detach` (#38). Our
+  backups, side-by-side copies and subfolders such as `packages/` are not listed; a symlinked
+  file is listed and marked as a link. These lines never change the exit code.
 
 ### Fixed
 - `prompt-workflow espanso deploy` finds Homebrew's stable `bin/` launcher also when Python

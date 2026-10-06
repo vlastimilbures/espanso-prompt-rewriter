@@ -446,7 +446,7 @@ def espanso_status(
     launcher: str | None = _LAUNCHER,
     diff: bool = typer.Option(False, "--diff", help="Show what deploy would change"),
 ) -> None:
-    """Report each match file: missing, in sync, stale, modified or foreign."""
+    """Report each match file: missing, in sync, stale, modified or foreign, then your own."""
     from . import deploy
 
     try:
@@ -459,6 +459,10 @@ def espanso_status(
             typer.echo(step.diff(), nl=False)
     if the_plan.legacy is not None:
         typer.echo(f"  legacy    {the_plan.legacy.name} (deploy retires it, with a backup)")
+    for path in the_plan.yours:
+        link = ", a link" if path.is_symlink() else ""
+        note = f"not managed{link}; never touched by deploy or detach"
+        typer.echo(f"  yours     {path.name} ({note})")
 
 
 def _ask_choice(name: str, state: str) -> str:

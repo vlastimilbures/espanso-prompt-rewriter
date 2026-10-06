@@ -134,7 +134,14 @@ def fixed_state(
         deploy.FileStep(name, ESPANSO / "match" / name, state, None, "", True, None)
         for name, state in _STATES.items()
     ]
-    plan = deploy.Plan(ESPANSO, LAUNCHER, steps, None, deploy.Manifest(Path("manifest.json")))
+    plan = deploy.Plan(
+        ESPANSO,
+        LAUNCHER,
+        steps,
+        None,
+        deploy.Manifest(Path("manifest.json")),
+        yours=[ESPANSO / "match" / "base.yml"],
+    )
     profiles = [
         UserProfile("mine", Path(f"{HOME}/.config/prompt-workflow/profiles/mine.md"), "added")
     ]
