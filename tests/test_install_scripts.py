@@ -60,10 +60,16 @@ INSTALL = SCRIPTS / "install.ps1"
 ASSET = "install.ps1"
 
 
-def _code_lines() -> list[str]:
-    """install.ps1 without comments and the lines that only print."""
+def _lines() -> list[str]:
+    """install.ps1 without comments and blank lines."""
     lines = [line.split("#", 1)[0].strip() for line in INSTALL.read_text("utf-8").splitlines()]
-    return [line for line in lines if line and not line.startswith(("Write-", "throw"))]
+    return [line for line in lines if line]
+
+
+def _code_lines() -> list[str]:
+    """Without the lines that only print or throw, or continue such a message."""
+    printed = ("Write-", "throw", "'", '"')
+    return [line for line in _lines() if not line.startswith(printed)]
 
 
 # The release workflow fills in the version: the placeholder is there exactly once, and the
@@ -104,8 +110,10 @@ def test_ascii() -> None:
 def test_release_renders() -> None:
     workflow = (REPO / ".github" / "workflows" / "release.yml").read_text("utf-8")
     assert f'scripts/render_installer.py "$VERSION" dist/{ASSET}' in workflow
-    # dist/* is what the release job attests and attaches.
+    # dist/* is what the release job attests and attaches, the wheel among them under the
+    # name install.ps1 downloads (the pypi job picks the same file).
     assert "dist/*" in workflow
+    assert '"promptmend-$VERSION-py3-none-any.whl"' in workflow
 
 
 def test_readme_url() -> None:
@@ -126,17 +134,40 @@ def test_never_deploys() -> None:
     assert "promptmend espanso deploy" in printed
 
 
+# The wheel and constraints.txt attached to the same Release (attested, there before PyPI's).
 def test_install_command() -> None:
-    code = "\n".join(_code_lines())
-    assert "@('tool', 'install', '--force', $Spec, '-c', $Constraints)" in code
+    code = "\n".join(_lines())
+    assert '$Download = "$Repo/releases/download/v$Version"' in code
+    assert '$Spec = "$Download/promptmend-$Version-py3-none-any.whl"' in code
+    assert '$Constraints = "$Download/constraints.txt"' in code
+    assert "$InstallArgs = @('tool', 'install', '--force', $Spec, '-c', $Constraints)" in code
+    assert "Assert-Native 'uv' $InstallArgs" in code
+    assert "promptmend==" not in code
     assert "@('tool', 'update-shell')" in code
     assert "@('doctor', '--no-clipboard')" in code
     assert "'--id', 'astral-sh.uv', '-e'" in code
-    assert "irm https://astral.sh/uv/install.ps1 | iex" in code
-    assert '$Constraints = "$Repo/releases/download/v$Version/constraints.txt"' in code
-    for override in ("PROMPTMEND_VERSION", "PROMPTMEND_WHEEL", "PROMPTMEND_CONSTRAINTS"):
-        assert f"$env:{override}" in code
+    assert "'--source', 'winget'" in code
+    assert "$WingetAlreadyInstalled = -1978335189" in code
+    assert "'irm https://astral.sh/uv/install.ps1 | iex'" in code
+    for override in ("VERSION", "WHEEL", "CONSTRAINTS", "DRY_RUN"):
+        assert f"$env:PROMPTMEND_{override}" in code
     assert "Set-StrictMode -Version Latest" in code
     assert "$ErrorActionPreference = 'Stop'" in code
+    assert "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false" in code
     # `exit` would close the window of a caller who ran `irm | iex` in their own session.
     assert not re.search(r"(?m)^exit\b", code)
+
+
+# uv is looked for only after PATH is refreshed, and the dry run stops before any uv call.
+def test_order() -> None:
+    code = "\n".join(_lines())
+    refresh = code.index("Update-SessionPath $guesses")
+    assert refresh < code.index("Get-Command uv")
+    assert code.index("$env:PROMPTMEND_DRY_RUN") < refresh
+
+
+def test_version_check() -> None:
+    code = "\n".join(_lines())
+    assert r"$Version -cnotmatch '^[0-9]+\.[0-9]+\.[0-9]+([a-z]+[0-9]+)?\z'" in code
+    assert "$Oldest = [version]'0.19.0'" in code
+    assert "-lt $Oldest" in code

@@ -21,8 +21,9 @@ promptmend espanso status  # missing / in sync / stale / modified / foreign per 
 
 Users install the release wheel instead (`uv tool install <wheel> -c constraints.txt`, README
 "Install"; on Windows `scripts/install.ps1`, the Release asset #186: uv via winget, then
-`promptmend==<version>` + that release's constraints, `doctor`; never setup/deploy; CI's
-`install-script` job runs it via `PROMPTMEND_WHEEL`/`PROMPTMEND_CONSTRAINTS`, never PyPI;
+the same Release's wheel + constraints.txt (not PyPI), `doctor`; never setup/deploy; CI's
+`install-script` job runs it via `PROMPTMEND_WHEEL`/`PROMPTMEND_CONSTRAINTS` (promptmend never
+comes from PyPI), once without uv on PATH, plus a `PROMPTMEND_DRY_RUN=1` rendered copy;
 never run it here), which reads no checkout `.env`; README "Updating"/"Uninstall" document `--force`
 and detach-before-uninstall. `tests/test_docs.py` checks every `promptmend …` invocation
 in README and in the CHANGELOG's Unreleased and newest release notes, and every standalone

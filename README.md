@@ -171,13 +171,16 @@ powershell -ExecutionPolicy ByPass -c "irm https://github.com/vlastimilbures/pro
 have it) with that release's version filled in, and attested like the other release files
 ([read it](scripts/install.ps1) first if you like). It installs uv if it is missing (with
 `winget install --id astral-sh.uv -e`, or uv's official installer where there is no winget),
-then installs `promptmend==<version>` from PyPI with that release's `constraints.txt`, runs
+then installs the wheel attached to that same Release with its `constraints.txt` (as
+[From a GitHub Release](#install) below shows, with `--force`; PyPI is not used), runs
 `uv tool update-shell` so a new terminal finds `promptmend`, and runs
 `promptmend doctor --no-clipboard`, which lists what [First run](#first-run) still has
 to do. It prints each command before running it and never runs `promptmend setup` or
 `promptmend espanso deploy`: it only names them as the next step. To install another
 release, set `$env:PROMPTMEND_VERSION = "<version>"` in PowerShell first (and run
-`irm … | iex` in that window).
+`irm … | iex` in that window); 0.19.0 is the oldest it accepts. It notes it when it
+replaces an editable install from a checkout or removes the old `espanso-prompt-rewriter`
+tool.
 
 **From PyPI with uv (from 0.19.0).** The package is
 [`promptmend`](https://pypi.org/project/promptmend/), uploaded by the
@@ -429,8 +432,10 @@ uv tool install --force \
 promptmend doctor
 ```
 
-With the Windows one-command install, run the same command again: it installs the newest
-release over the old one (same launcher, so the match files keep working).
+With the Windows one-command install, run the same command again (unset
+`PROMPTMEND_VERSION` first): it installs the newest release over the old one (same launcher,
+so the match files keep working). `uv tool upgrade promptmend` does not move such an
+install, since uv pins the wheel's URL; re-run the command instead.
 
 With Homebrew (from 0.19.0), `brew update` then `brew upgrade promptmend`. The tap's
 formula is updated by hand after each release, so it can trail the GitHub Release by a while.
