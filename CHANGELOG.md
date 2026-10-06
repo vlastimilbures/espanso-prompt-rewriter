@@ -11,10 +11,21 @@ All notable changes to this project are documented here. The format follows
   `promptmend` command. It completes commands, options, setting names (after `config set`,
   `get` and `unset`; never a key name there), key names (only after `secrets set` and
   `secrets remove`) and profile names, and shows the command's usage and help as you type, or
-  the usage error the CLI would print. Enter shows the command as you would run it in a
-  terminal but runs nothing yet (that comes in a later version); Up and Down go back through
-  this session's lines; Escape leaves it. A line that looks like it holds a key is never
-  shown back or kept in that history. The footer shows `c Command`.
+  the usage error the CLI would print. Up and Down go back through this session's lines;
+  Escape leaves it. A line that looks like it holds a key is never shown back or kept in that
+  history. The footer shows `c Command`.
+- Enter on that command line acts on the command (#111). A command that reads, previews,
+  changes a setting or writes an export, asking nothing (`doctor`, `config show|get|set|unset|validate`, `secrets status`, `profiles list`,
+  `stats`, `espanso status`, `history export`, any `--dry-run`, `--help` or `--version`) runs
+  in a separate process, one at a time, with no input and at most 120 seconds; its output
+  (keys redacted) and exit code appear below the line, and Home's session log lists it.
+  `doctor` skips the clipboard there unless you pass `--clipboard`. `espanso deploy`,
+  `espanso detach`, `config migrate`, `secrets set NAME`, `secrets remove`, `history prune`
+  and `history reset` open their tab's dialog, which asks first as the buttons do
+  (`--yes` and the like are ignored). `setup`, `config rollback`, `config retire` and
+  `profiles migrate` say to run them in a terminal; `improve`, `persona` and `ui` are
+  refused. `secrets set` with a value (or `--stdin`) after the key's name is cleared, not
+  run or kept.
 
 ## 0.19.0 - 2026-10-06
 

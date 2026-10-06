@@ -29,7 +29,7 @@ from promptmend.prompt_builder import UserProfile
 from promptmend.tui import app as app_module
 from promptmend.tui import brand
 from promptmend.tui.app import HIGH_CONTRAST, ManageApp
-from promptmend.tui.console import CommandLine
+from promptmend.tui.console import CommandLine, Ran
 from promptmend.tui.state import State
 
 pytestmark = pytest.mark.skipif(
@@ -217,6 +217,7 @@ def _shoot(
     size: tuple[int, int] = SIZE,
     intro: bool = False,
     typed: str = "",
+    ran: Ran | None = None,
 ) -> str:
     app = ManageApp(loader=loader, intro=intro)
     # The active tab's underline slides into place; a snapshot must not catch it midway.
@@ -234,8 +235,11 @@ def _shoot(
                 await pilot.press(key)
             if typed:
                 # A steady cursor, so the shot does not depend on the blink.
-                app.main.query_one(CommandLine).cursor_blink = False
-                await pilot.press(*typed)
+                line = app.main.query_one(CommandLine)
+                line.cursor_blink = False
+                if ran is not None:  # Enter runs the line through a fake: no child
+                    line.runner = lambda argv: ran
+                await pilot.press(*typed, *(["enter"] if ran is not None else []))
                 for _ in range(3):
                     await pilot.pause()
                     await app.workers.wait_for_complete()
@@ -282,6 +286,16 @@ def test_snapshot_home_70_columns() -> None:
 # Home's command line (#111): `c`, a half-typed command, its suggestion and help.
 def test_snapshot_home_console() -> None:
     _check("home-console", _shoot("c", typed="espanso st"))
+
+
+# A run from the command line (#111): its output below the help line, logged in the session.
+SECRETS_STATUS = (
+    "OPENROUTER_API_KEY: set (secret store)\nANTHROPIC_API_KEY: not set\nGROQ_API_KEY: not set\n"
+)
+
+
+def test_snapshot_home_output() -> None:
+    _check("home-output", _shoot("c", typed="secrets status", ran=Ran(0, SECRETS_STATUS)))
 
 
 # The intro (#112), wide enough for the wordmark and on a narrow terminal (text only), with

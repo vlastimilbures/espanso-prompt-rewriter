@@ -1,15 +1,17 @@
-"""Home's command line (#111, stage 2): it completes and explains `promptmend` commands as
-they are typed, against the CLI's own Click tree, but never runs one (that comes in the next
-version). A word that looks like a key is never echoed: not in the help line, not in the
-history. Only tui/ imports this module, so the triggers never load it."""
+"""Home's command line (#111): it completes and explains `promptmend` commands as they are
+typed, against the CLI's own Click tree, and Enter acts on them by POLICY: a read-only
+command (or a --dry-run preview) runs in a child process, its output on Home; a change with a
+dialog of its own opens that dialog; the rest is refused (a terminal's prompt, or the
+triggers). A word that looks like a key is never echoed: not in the help line, the output or
+the history. Only tui/ imports this module, so the triggers never load it."""
 
 from __future__ import annotations
 
 import functools
 import shlex
-from collections.abc import Sequence
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol, cast
 
 import typer
 from rich.text import Text
@@ -41,7 +43,6 @@ VALUE_ARGUMENT = "value"
 PROGRAMS = (teach.PROGRAM, "prompt-workflow")
 HISTORY_SIZE = 50
 
-NOT_YET = "Running commands comes in the next version; in a terminal:"
 WITHHELD_NOTE = (
     "That line looked like it holds a key: it was cleared, not kept. "
     "Keys go in Providers & keys (Set key), typed hidden."
@@ -58,11 +59,13 @@ def root() -> TyperGroup:
 
 @dataclass(frozen=True)
 class Resolved:
-    """Where a command line leads: the commands walked, the deepest one and its context."""
+    """Where a command line leads: the commands walked, the deepest one and its context, and
+    the values its parser read (by parameter name; a leaf's only)."""
 
     path: tuple[str, ...]
     command: Command
     context: Context
+    values: Mapping[str, Any] = field(default_factory=dict)
 
 
 def resolve(argv: Sequence[str], *, resilient: bool = False, partial: bool = False) -> Resolved:
@@ -111,7 +114,7 @@ def resolve(argv: Sequence[str], *, resilient: bool = False, partial: bool = Fal
                 else:
                     missing = f"argument {param.human_readable_name.upper()}"
                 raise UsageError(f"Missing {missing}.", leaf)
-    return Resolved(tuple(path), command, leaf)
+    return Resolved(tuple(path), command, leaf, values)
 
 
 def _visible_commands(group: TyperGroup, ctx: Context) -> list[str]:
@@ -240,6 +243,263 @@ def holds_a_key(line: str) -> bool:
     return any(common.looks_like_a_key(w) for w in [*words, line] if w.strip())
 
 
+def shown_arg(value: str) -> str:
+    """A value as a command line may show it: never one that looks like a credential."""
+    return teach.WITHHELD if common.looks_like_a_key(value) else value
+
+
+def shown(argv: Sequence[str]) -> str:
+    """``argv`` as `promptmend …` for the screen: a key-like word withheld, and the value of
+    a private setting (`config set PROMPT_PERSONA …`) too."""
+    words = [shown_arg(word) for word in argv]
+    if tuple(words[:2]) == ("config", "set") and len(words) > 3 and words[2] in common.PRIVATE:
+        words[3] = teach.WITHHELD
+    return teach.equivalent(*words)
+
+
+# --- What Enter does --------------------------------------------------------------------------
+
+RUN = "run"  # in a child process, its output on Home
+DIALOG = "dialog"  # the interface's own dialog for it, which asks before any change
+TERMINAL = "terminal"  # it prompts as it goes: quit and run it in a terminal
+REFUSE = "refuse"  # never from here
+
+
+@dataclass(frozen=True)
+class Rule:
+    kind: str
+    # --dry-run makes it a preview that changes nothing: then it runs.
+    dry_run: bool = False
+    why: str = ""
+
+
+# Every visible command of the CLI (tests/test_tui_console.py walks the tree), by its path.
+POLICY: dict[tuple[str, ...], Rule] = {
+    ("improve",): Rule(REFUSE, why="the Espanso triggers run it, and it reads the clipboard"),
+    ("persona",): Rule(REFUSE, why="the -p- trigger runs it"),
+    ("ui",): Rule(REFUSE, why="this is the interface"),
+    ("setup",): Rule(TERMINAL),
+    ("doctor",): Rule(RUN),
+    ("stats",): Rule(RUN),
+    ("espanso", "status"): Rule(RUN),
+    ("espanso", "deploy"): Rule(DIALOG, dry_run=True),
+    ("espanso", "detach"): Rule(DIALOG),
+    ("config", "show"): Rule(RUN),
+    ("config", "get"): Rule(RUN),
+    ("config", "set"): Rule(RUN),
+    ("config", "unset"): Rule(RUN),
+    ("config", "validate"): Rule(RUN),
+    ("config", "migrate"): Rule(DIALOG, dry_run=True),
+    ("config", "rollback"): Rule(TERMINAL, dry_run=True),
+    ("config", "retire"): Rule(TERMINAL, dry_run=True),
+    ("secrets", "set"): Rule(DIALOG),
+    ("secrets", "status"): Rule(RUN),
+    ("secrets", "remove"): Rule(DIALOG),
+    ("profiles", "list"): Rule(RUN),
+    ("profiles", "migrate"): Rule(TERMINAL, dry_run=True),
+    ("history", "export"): Rule(RUN),
+    ("history", "prune"): Rule(DIALOG),
+    ("history", "reset"): Rule(DIALOG),
+}
+DRY_RUN = "--dry-run"
+VERSION = "--version"
+# doctor in a child never reads the clipboard unless asked to.
+CLIPBOARD = ("--clipboard", "--no-clipboard")
+# What a dialog decides itself (it always asks): ignored when typed.
+DIALOG_DECIDES = ("--yes", "-y", "--on-conflict", "--no-restart", "--preview-token")
+# What a dialog cannot do (another folder or launcher, a copy from a checkout): a terminal can.
+TERMINAL_ONLY = ("--espanso-dir", "--launcher", "--from")
+SECRET_SET = ("secrets", "set")
+
+RUNNING = "A command is still running; wait for its exit line."
+SECRET_NOTE = (
+    f"$ promptmend secrets set {teach.WITHHELD}: refused, and the line was cleared, not kept. "
+    "Type only the key's name (secrets set OPENROUTER_API_KEY); its value goes in the dialog, "
+    "hidden."
+)
+
+
+@dataclass(frozen=True)
+class Decision:
+    """What Enter does with a line: ``argv`` is what runs (RUN) or what was typed."""
+
+    kind: str
+    argv: tuple[str, ...]
+    path: tuple[str, ...] = ()
+    values: Mapping[str, Any] = field(default_factory=dict)
+    message: str = ""
+    ignored: tuple[str, ...] = ()
+
+
+def _option(word: str) -> str:
+    return word.split("=", 1)[0]
+
+
+def _terminal_only(found: Resolved, argv: Sequence[str]) -> bool:
+    """A TERMINAL_ONLY option given: parsed with a value, or typed at all (as another
+    option's value too: never less strict than the parser)."""
+    names = {
+        param.name
+        for param in found.command.params
+        if isinstance(param, TyperOption) and set(param.opts) & set(TERMINAL_ONLY)
+    }
+    parsed = any(found.values.get(name or "") is not None for name in names)
+    return parsed or any(_option(w) in TERMINAL_ONLY for w in argv)
+
+
+def decide(found: Resolved, words: Sequence[str]) -> Decision:
+    """What Enter does with ``words``, which ``found`` resolved: --help (and a bare
+    --version) always runs; else the command's POLICY rule. A leaf's --help and --dry-run
+    count only as the parser read them, never a word another option took as its value
+    (`improve --profile --help`)."""
+    argv = tuple(words)
+    if isinstance(found.command, TyperGroup):
+        # A group's words are its own flags only (resolve() refuses any other): no option
+        # there takes a value, so a word is what it says.
+        helps = set(found.command.get_help_option_names(found.context))
+        if helps & set(argv) or argv == (VERSION,):
+            return Decision(RUN, argv, found.path)
+        name = " ".join(found.path) or teach.PROGRAM
+        return Decision(REFUSE, argv, found.path, message=f"{name} needs a command.")
+    if found.values.get("help") is True:
+        return Decision(RUN, argv, found.path)
+    rule = POLICY[found.path]
+    terminal = f"Quit and run it in a terminal: $ {shown(argv)}"
+    if rule.kind != RUN and _terminal_only(found, argv):
+        return Decision(TERMINAL, argv, found.path, message=terminal)
+    if rule.dry_run and found.values.get("dry_run") is True:
+        return Decision(RUN, argv, found.path)
+    if rule.kind == RUN:
+        if found.path == ("doctor",) and not set(CLIPBOARD) & set(argv):
+            argv = (*argv, "--no-clipboard")
+        return Decision(RUN, argv, found.path)
+    if rule.kind == DIALOG:
+        ignored = tuple(w for w in argv if _option(w) in DIALOG_DECIDES)
+        return Decision(DIALOG, argv, found.path, found.values, ignored=ignored)
+    if rule.kind == TERMINAL:
+        return Decision(TERMINAL, argv, found.path, message=terminal)
+    return Decision(REFUSE, argv, found.path, message=f"Not from here: {rule.why}.")
+
+
+def refused_secret(words: Sequence[str]) -> bool:
+    """`secrets set` with more than a key's name: a value typed after it, --stdin (there is
+    no stdin here) or a name that is no key's (perhaps the key itself). Never shown or kept;
+    --help adds no exception (`secrets set NAME --help VALUE` is refused too)."""
+    if tuple(words[:2]) != SECRET_SET:
+        return False
+    rest = words[2:]
+    names = [w for w in rest if not w.startswith("-")]
+    return (
+        len(names) > 1
+        or "--stdin" in rest
+        or any(common.looks_like_a_key(w) for w in rest)
+        or bool(names and names[0] not in config.secret_names())
+    )
+
+
+# --- Running a command ------------------------------------------------------------------------
+
+TIMEOUT = 120
+OUTPUT_CAP = 200_000
+CUT = f"[output cut at {OUTPUT_CAP // 1000} KB]"
+
+
+@dataclass(frozen=True)
+class Ran:
+    """A child's exit code (None: it timed out) and what it printed, stdout and stderr."""
+
+    exit_code: int | None
+    output: str
+
+
+Runner = Callable[[Sequence[str]], Ran]
+
+
+def _capped(output: str | bytes | None) -> str:
+    if isinstance(output, bytes):
+        output = output.decode("utf-8", errors="replace")
+    output = output or ""
+    if len(output) > OUTPUT_CAP:
+        return f"{output[:OUTPUT_CAP]}\n{CUT}"
+    return output
+
+
+def runnable(argv: Sequence[str]) -> bool:
+    """The last check before a child starts: a fresh parse of exactly ``argv`` decides RUN
+    for exactly ``argv``. A line that fails to parse, or that decide() would send to a
+    dialog, a terminal or a refusal, never runs."""
+    words = list(argv)
+    try:
+        found = resolve(words)
+    except UsageError:
+        loose = _loose(words)
+        if loose is None:
+            return False
+        found = loose
+    decision = decide(found, words)
+    return decision.kind == RUN and decision.argv == tuple(words)
+
+
+def run(argv: Sequence[str]) -> Ran:
+    """``promptmend argv`` in a child process, as in a terminal but without one: no stdin,
+    no colour, stderr with stdout, at most TIMEOUT seconds. Never a shell; ``-P``, so a
+    module in the working directory never runs."""
+    import os
+    import subprocess
+    import sys
+
+    if not runnable(argv):
+        raise ValueError(f"refused to run {shown(argv)}: the command line does not run it")
+    try:
+        done = subprocess.run(  # noqa: S603 - our own interpreter and module, an argv list
+            [sys.executable, "-P", "-m", "promptmend.cli", *argv],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            env={**os.environ, "NO_COLOR": "1", "PYTHONIOENCODING": "utf-8"},
+            timeout=TIMEOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return Ran(None, _capped(exc.output))
+    return Ran(done.returncode, _capped(done.stdout))
+
+
+@dataclass(frozen=True)
+class Transcript:
+    """A run as Home shows it: the command, each output line (redacted), the exit line."""
+
+    command: str
+    lines: tuple[str, ...]
+    status: str
+    error: bool
+
+    @property
+    def summary(self) -> str:
+        """The session log's line: the first line printed, else the exit line."""
+        return next((line.strip() for line in self.lines if line.strip()), self.status)
+
+
+def transcript(argv: Sequence[str], ran: Ran) -> Transcript:
+    lines = tuple(redact_words(line) for line in ran.output.splitlines())
+    timeout = f"timeout after {TIMEOUT} s"
+    status = timeout if ran.exit_code is None else f"exit {ran.exit_code}"
+    return Transcript(shown(argv), lines, status, ran.exit_code != 0)
+
+
+class Host(Protocol):
+    """Home: runs a line in the background and opens a dialog on another tab."""
+
+    running: bool
+
+    def run_line(self, argv: tuple[str, ...], runner: Runner) -> None: ...
+
+    def open_dialog(self, decision: Decision) -> str: ...
+
+
 class CommandSuggester(Suggester):
     """Completes the word being typed to the first candidate, in order; nothing after a
     space, or inside an open quote."""
@@ -272,7 +532,7 @@ HELP_RECIPES = 2
 
 
 def _recipes() -> Text:
-    text = Text("Tab or Right arrow completes; Enter shows the command, nothing runs yet. Try ")
+    text = Text("Tab or Right arrow completes; Enter runs it. Try ")
     shown = (f"$ {teach.equivalent(*r.argv)}" for r in teach.RECIPES[:HELP_RECIPES])
     text.append(" · ".join(shown), style="dim")
     return text
@@ -327,9 +587,24 @@ def describe(line: str, *, typing: bool = False) -> Text:
     return _error(error.format_message())
 
 
+def _loose(words: Sequence[str]) -> Resolved | None:
+    """A line the CLI would refuse that still goes somewhere: --help (`config set --help`),
+    or a dialog that asks for what is missing (`secrets remove`, `history prune
+    --older-than`)."""
+    try:
+        found = resolve(words, resilient=True)
+    except UsageError:
+        return None
+    if "--help" in words:
+        return found
+    rule = POLICY.get(found.path)
+    return found if rule is not None and rule.kind == DIALOG else None
+
+
 class CommandLine(Input):
     """Home's command line: completion, live help below it, Up/Down through what was entered
-    this session. Enter shows the command as it runs in a terminal; it runs nothing."""
+    this session. Enter does what decide() says: ``host`` (Home) runs the line through
+    ``runner`` (tests pass a fake) or opens its dialog; a refusal shows in the help line."""
 
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("up", "history(-1)", "Previous", show=False),
@@ -338,7 +613,9 @@ class CommandLine(Input):
         Binding("escape", "leave", "Leave"),
     ]
 
-    def __init__(self, help_line: Static, **kwargs: Any) -> None:
+    def __init__(
+        self, help_line: Static, host: Host, runner: Runner | None = None, **kwargs: Any
+    ) -> None:
         super().__init__(
             placeholder="Type a promptmend command (c)",
             suggester=CommandSuggester(),
@@ -346,6 +623,8 @@ class CommandLine(Input):
             **kwargs,
         )
         self.help_line = help_line
+        self.host = host
+        self.runner: Runner = runner or run
         self.history: list[str] = []
         self.position = 0
         # The help shows Enter's answer until the next edit, not the recipes the cleared
@@ -376,20 +655,33 @@ class CommandLine(Input):
         except ValueError as exc:
             self.help_line.update(_error(str(exc)))
             return
+        if refused_secret(words):
+            self._clear(Text(SECRET_NOTE))
+            return
         if not self.history or self.history[-1] != line:
             self.history.append(line)
             del self.history[:-HISTORY_SIZE]
         self.position = len(self.history)
+        found: Resolved | None
         try:
             found = resolve(words)
         except UsageError as exc:
-            # Kept, so Up brings it back to fix.
-            self._clear(_error(exc.format_message()))
-            return
-        answer = _command_help(found)
-        answer.append(f"\n{NOT_YET}\n")
-        answer.append(f"$ {teach.equivalent(*words)}", style="bold")
-        self._clear(answer)
+            found = _loose(words)
+            if found is None:
+                # Kept, so Up brings it back to fix.
+                self._clear(_error(exc.format_message()))
+                return
+        decision = decide(found, words)
+        if decision.kind == RUN and self.host.running:
+            # The line stays, to send once the run ends.
+            self.help_line.update(Text(RUNNING))
+        elif decision.kind == RUN:
+            self._clear(Text(f"Running $ {shown(decision.argv)} (output below)"))
+            self.host.run_line(decision.argv, self.runner)
+        elif decision.kind == DIALOG:
+            self._clear(Text(self.host.open_dialog(decision)))
+        else:
+            self._clear(Text(decision.message))
 
     def action_history(self, step: int) -> None:
         if not self.history:

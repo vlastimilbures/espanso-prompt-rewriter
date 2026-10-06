@@ -61,6 +61,19 @@ def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError(f"a test ran a real command: {argv}")
 
     monkeypatch.setattr(deploy, "run_command", refuse)
+    # ...nor start a real promptmend from the interface's command line (#111): Pilot tests
+    # pass a fake runner. Loaded only by the tui tests (collected before any test runs), so
+    # patched wherever it is loaded; the one --version smoke test calls the function it
+    # kept at import (test_tui_console.REAL_RUN) on purpose.
+    import sys
+
+    console = sys.modules.get("promptmend.tui.console")
+    if console is not None:
+
+        def no_child(argv: Sequence[str]) -> Any:
+            raise AssertionError(f"a test started a real promptmend {list(argv)}")
+
+        monkeypatch.setattr(console, "run", no_child)
     # The user patterns safe_repr() hides are set by every settings load: start each test
     # without the previous test's.
     from promptmend import redaction

@@ -6,24 +6,29 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
-from collections.abc import Awaitable, Callable, Iterator
+import sys
+from collections.abc import Awaitable, Callable, Iterator, Sequence
 from typing import Any
 
 import pytest
 from textual.pilot import Pilot
-from textual.widgets import Static, TabbedContent
+from textual.widgets import RichLog, Static, TabbedContent
 from typer._click.exceptions import UsageError
 from typer._types import TyperChoice
 from typer.core import TyperArgument, TyperGroup, TyperOption
 
 from promptmend import config, prompt_builder, smoke
-from promptmend.tui import console, teach
+from promptmend.tui import console, panes, teach
 from promptmend.tui.app import ManageApp
 
 # Built at runtime, so no key-shaped literal lands in the repo (gitleaks).
 KEY = "sk-or-v1-" + "ab12" * 16
 SETTINGS = set(config.env_names()) - set(config.secret_names())
 SECRETS = set(config.secret_names())
+# The real runner, kept before conftest's isolated_env replaces console.run with a refusal
+# in every test: only the runner tests (subprocess.run faked) and the one --version smoke
+# test call it, on purpose.
+REAL_RUN = console.run
 
 
 # --- Candidates -----------------------------------------------------------------------------
@@ -288,6 +293,18 @@ def _tab(app: ManageApp) -> str:
     return app.main.query_one(TabbedContent).active
 
 
+class FakeRun:
+    """A runner that records each argv and answers with ``ran``."""
+
+    def __init__(self, ran: console.Ran | None = None) -> None:
+        self.ran = ran or console.Ran(0, "fine\n")
+        self.calls: list[tuple[str, ...]] = []
+
+    def __call__(self, argv: Sequence[str]) -> console.Ran:
+        self.calls.append(tuple(argv))
+        return self.ran
+
+
 @pytest.fixture
 def nothing_runs(monkeypatch: pytest.MonkeyPatch) -> Callable[[], None]:
     """Once the state has loaded, any subprocess or smoke test fails the test."""
@@ -344,16 +361,16 @@ def test_typing_shows_suggestion_and_help() -> None:
     drive(scenario)
 
 
-def test_enter_runs_nothing_and_up_recalls(nothing_runs: Callable[[], None]) -> None:
+def test_enter_runs_it_and_up_recalls(nothing_runs: Callable[[], None]) -> None:
     async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
         nothing_runs()
         line = _line(app)
+        fake = FakeRun()
+        line.runner = fake
         await pilot.press("c", *"doctor --json", "enter")
         await settle(pilot)
         assert line.value == ""
-        shown = _help(app)
-        assert console.NOT_YET in shown
-        assert "$ promptmend doctor --json" in shown
+        assert fake.calls == [("doctor", "--json", "--no-clipboard")]
         assert line.history == ["doctor --json"]
         await pilot.press(*"stats", "enter", "up")
         assert line.value == "stats"
@@ -373,7 +390,12 @@ def test_enter_runs_nothing_and_up_recalls(nothing_runs: Callable[[], None]) -> 
         assert _help(app) == "error: No such command 'deplo'."
         await pilot.press("up")
         assert line.value == "espanso deplo"
-        assert app.session == []
+        await settle(pilot)
+        assert [e.command for e in app.session] == [
+            "promptmend doctor --json --no-clipboard",
+            "promptmend stats",
+        ]
+        assert fake.calls[1:] == [("stats",)]
 
     drive(scenario)
 
@@ -408,5 +430,398 @@ def test_the_history_is_capped() -> None:
             await line.action_submit()
         assert len(line.history) == console.HISTORY_SIZE
         assert line.history[-1] == f"stats --by {console.HISTORY_SIZE + 4}"
+
+    drive(scenario)
+
+
+# --- What Enter does --------------------------------------------------------------------------
+
+LEAVES = {
+    path
+    for path in PATHS
+    if not isinstance(console.resolve(path, resilient=True, partial=True).command, TyperGroup)
+}
+
+
+def test_every_visible_command_has_a_rule() -> None:
+    assert set(console.POLICY) == LEAVES
+    kinds = {console.RUN, console.DIALOG, console.TERMINAL, console.REFUSE}
+    assert {rule.kind for rule in console.POLICY.values()} == kinds
+    for path, rule in console.POLICY.items():
+        if rule.dry_run:
+            command = console.resolve(path, resilient=True).command
+            assert any(console.DRY_RUN in getattr(p, "opts", ()) for p in command.params), path
+
+
+def _decide(line: str) -> console.Decision:
+    words = console.split(line)
+    try:
+        found = console.resolve(words)
+    except UsageError:
+        loose = console._loose(words)
+        assert loose is not None, line
+        found = loose
+    return console.decide(found, words)
+
+
+@pytest.mark.parametrize(
+    ("line", "kind", "argv"),
+    [
+        ("doctor", console.RUN, ("doctor", "--no-clipboard")),
+        ("doctor --clipboard", console.RUN, ("doctor", "--clipboard")),
+        ("doctor --no-clipboard", console.RUN, ("doctor", "--no-clipboard")),
+        ("promptmend config show", console.RUN, ("config", "show")),
+        ("config set PROMPT_HISTORY false", console.RUN, None),
+        ("espanso status --diff", console.RUN, None),
+        ("history export --format csv", console.RUN, None),
+        ("espanso deploy", console.DIALOG, None),
+        ("espanso deploy --dry-run", console.RUN, None),
+        ("config migrate", console.DIALOG, None),
+        ("config migrate --dry-run", console.RUN, None),
+        ("config migrate --from /old", console.TERMINAL, None),
+        ("espanso deploy --espanso-dir /e", console.TERMINAL, None),
+        ("config rollback", console.TERMINAL, None),
+        ("config rollback --dry-run", console.RUN, None),
+        ("profiles migrate", console.TERMINAL, None),
+        ("profiles migrate --dry-run", console.RUN, None),
+        ("setup", console.TERMINAL, None),
+        ("secrets remove", console.DIALOG, None),
+        ("secrets set OPENROUTER_API_KEY", console.DIALOG, None),
+        ("history prune", console.DIALOG, None),
+        ("history reset --yes", console.DIALOG, None),
+        ("improve", console.REFUSE, None),
+        ("persona", console.REFUSE, None),
+        ("ui", console.REFUSE, None),
+        ("improve --help", console.RUN, ("improve", "--help")),
+        ("config set --help", console.RUN, ("config", "set", "--help")),
+        ("config --help", console.RUN, None),
+        ("--version", console.RUN, ("--version",)),
+    ],
+)
+def test_policy_decisions(line: str, kind: str, argv: tuple[str, ...] | None) -> None:
+    decision = _decide(line)
+    assert decision.kind == kind
+    if argv is not None:
+        assert decision.argv == argv
+    if kind == console.TERMINAL:
+        assert decision.message.startswith("Quit and run it in a terminal: $ promptmend ")
+    if kind == console.REFUSE:
+        assert decision.message.startswith("Not from here:")
+
+
+# --help or --dry-run taken as another option's value: the parser did not read them as
+# flags, so they decide nothing (review of #111 PR 5).
+BYPASSES = {
+    "improve --profile --help": console.REFUSE,
+    "persona --trigger-id --help": console.REFUSE,
+    "setup --migrate-from --help": console.TERMINAL,
+    "espanso deploy --launcher --help --yes": console.TERMINAL,
+    "espanso detach --espanso-dir --help --yes": console.TERMINAL,
+    "history prune --older-than --help --yes": console.DIALOG,
+    "espanso deploy --espanso-dir --dry-run --yes": console.TERMINAL,
+    "espanso deploy --launcher --dry-run --yes": console.TERMINAL,
+    "config migrate --from --dry-run --yes": console.TERMINAL,
+}
+
+
+@pytest.mark.parametrize("line", BYPASSES)
+def test_a_swallowed_help_or_dry_run_never_runs(line: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert _decide(line).kind == BYPASSES[line]
+    words = console.split(line)
+    assert not console.runnable(words)
+
+    def spawn(*_: Any, **__: Any) -> Any:
+        raise AssertionError("spawned")
+
+    monkeypatch.setattr(subprocess, "run", spawn)
+    with pytest.raises(ValueError, match="refused to run"):
+        REAL_RUN(words)
+
+
+def test_runnable_is_a_fresh_decision_on_the_exact_argv() -> None:
+    assert console.runnable(["doctor", "--no-clipboard"])
+    assert not console.runnable(["doctor"])  # decide() would add --no-clipboard
+    assert console.runnable(["--version"])
+    assert console.runnable(["config", "set", "--help"])
+    assert console.runnable(["espanso", "deploy", "--dry-run"])
+    for argv in (
+        ["improve"],
+        ["espanso", "deploy"],
+        ["espanso", "deploy", "--espanso-dir", "/e", "--dry-run"],
+        ["secrets", "set", "OPENROUTER_API_KEY"],
+        ["history", "reset", "--yes"],
+        ["ui"],
+        ["doctor", "extra"],
+        ["config"],
+    ):
+        assert not console.runnable(argv), argv
+
+
+def test_dialog_decisions_carry_values_and_ignored_options() -> None:
+    prune = _decide("history prune --older-than 9 -y")
+    assert prune.values["older_than"] == "9"
+    assert prune.ignored == ("-y",)
+    assert _decide("history prune --older-than").values.get("older_than") is None
+    assert _decide("espanso detach --remove-all").values["keep_static"] is False
+    deploy = _decide("espanso deploy --on-conflict=ours --no-restart")
+    assert deploy.ignored == ("--on-conflict=ours", "--no-restart")
+    assert _decide("secrets remove ANTHROPIC_API_KEY").values["name"] == "ANTHROPIC_API_KEY"
+    # A group with only its own options needs a command.
+    group = console.decide(console.resolve(["config"], partial=True), ["config"])
+    assert group.kind == console.REFUSE
+    assert group.message == "config needs a command."
+    assert console._loose(["doctor", "extra"]) is None
+    assert console._loose(["config", "set", "X"]) is None  # no --help, no dialog
+
+
+def test_secrets_set_takes_only_a_key_name() -> None:
+    assert not console.refused_secret(["secrets", "set"])
+    assert not console.refused_secret(["secrets", "set", "OPENROUTER_API_KEY"])
+    assert not console.refused_secret(["secrets", "set", "--help"])
+    assert not console.refused_secret(["config", "set", "A", "B"])
+    for rest in (
+        ["OPENROUTER_API_KEY", "value"],
+        ["OPENROUTER_API_KEY", "--stdin"],
+        ["not-a-key-name"],
+        [KEY],
+        ["OPENROUTER_API_KEY", "--help", "Hunter2xyz"],
+        ["--help", "Hunter2xyz"],
+    ):
+        assert console.refused_secret(["secrets", "set", *rest]), rest
+
+
+def test_shown_withholds_keys_and_the_persona() -> None:
+    assert console.shown(["config", "set", "X", KEY]) == f"promptmend config set X {teach.WITHHELD}"
+    assert console.shown(["config", "set", "PROMPT_PERSONA", "I am"]) == (
+        f"promptmend config set PROMPT_PERSONA {teach.WITHHELD}"
+    )
+    assert console.shown(["config", "get", "PROMPT_PERSONA"]) == (
+        "promptmend config get PROMPT_PERSONA"
+    )
+
+
+# --- The runner -------------------------------------------------------------------------------
+
+
+def test_the_runner_starts_this_cli_without_shell_stdin_or_colour(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: dict[str, Any] = {}
+
+    def fake(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        seen["args"], seen["kwargs"] = args, kwargs
+        return subprocess.CompletedProcess(args, 4, stdout="out\n")
+
+    monkeypatch.setattr(subprocess, "run", fake)
+    monkeypatch.setenv("SOMETHING", "kept")
+    ran = REAL_RUN(["doctor", "--no-clipboard"])
+    assert ran == console.Ran(4, "out\n")
+    assert seen["args"] == [
+        sys.executable,
+        "-P",
+        "-m",
+        "promptmend.cli",
+        "doctor",
+        "--no-clipboard",
+    ]
+    kwargs = seen["kwargs"]
+    assert "shell" not in kwargs
+    assert kwargs["stdin"] == subprocess.DEVNULL
+    assert kwargs["stdout"] == subprocess.PIPE
+    assert kwargs["stderr"] == subprocess.STDOUT
+    assert kwargs["timeout"] == console.TIMEOUT == 120
+    assert kwargs["env"]["NO_COLOR"] == "1"
+    assert kwargs["env"]["SOMETHING"] == "kept"
+    assert kwargs["text"] is True
+    assert kwargs["encoding"] == "utf-8"
+    assert kwargs["errors"] == "replace"
+
+
+def test_the_runner_reports_a_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    def slow(args: list[str], **kwargs: Any) -> Any:
+        raise subprocess.TimeoutExpired(args, kwargs["timeout"], output=b"half")
+
+    monkeypatch.setattr(subprocess, "run", slow)
+    ran = REAL_RUN(["stats"])
+    assert ran == console.Ran(None, "half")
+    shown = console.transcript(["stats"], ran)
+    assert shown.status == "timeout after 120 s"
+    assert shown.error
+    assert console._capped(None) == ""
+
+
+def test_the_runner_caps_the_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    big = "x" * (console.OUTPUT_CAP + 10)
+    monkeypatch.setattr(
+        subprocess, "run", lambda args, **_: subprocess.CompletedProcess(args, 0, stdout=big)
+    )
+    ran = REAL_RUN(["config", "show"])
+    assert ran.output.endswith("\n" + console.CUT)
+    assert len(ran.output) == console.OUTPUT_CAP + 1 + len(console.CUT)
+
+
+def test_the_transcript_redacts_each_line() -> None:
+    ran = console.Ran(0, f"\n  first line\nOPENROUTER_API_KEY={KEY}\n")
+    shown = console.transcript(["config", "show"], ran)
+    assert shown.command == "promptmend config show"
+    assert KEY not in "\n".join(shown.lines)
+    assert "<redacted" in shown.lines[2]
+    assert shown.summary == "first line"
+    assert shown.status == "exit 0"
+    assert not shown.error
+    assert console.transcript(["stats"], console.Ran(2, "")).summary == "exit 2"
+
+
+def test_a_real_child_prints_the_version() -> None:
+    from promptmend import __version__
+
+    ran = REAL_RUN(["--version"])
+    assert ran.exit_code == 0
+    assert __version__ in ran.output
+
+
+# --- Running from the interface ---------------------------------------------------------------
+
+
+def _output(app: ManageApp) -> str:
+    log = app.main.query_one("#home-output", RichLog)
+    return "\n".join(strip.text for strip in log.lines)
+
+
+def _home(app: ManageApp) -> panes.HomePane:
+    return app.main.query_one("#home-pane", panes.HomePane)
+
+
+def test_a_run_shows_its_output_logs_it_and_reloads() -> None:
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        assert not app.main.query_one("#home-output", RichLog).display
+        fake = FakeRun(console.Ran(1, f"first\nkey {KEY}\n"))
+        _line(app).runner = fake
+        before = app.generation
+        await pilot.press("c", *"config validate", "enter")
+        await settle(pilot)
+        assert fake.calls == [("config", "validate")]
+        assert app.main.query_one("#home-output", RichLog).display
+        shown = _output(app)
+        assert "$ promptmend config validate" in shown
+        assert "first" in shown
+        assert KEY not in shown
+        assert "exit 1" in shown
+        assert app.session[-1] == teach.Entry("promptmend config validate", "first", True)
+        assert app.generation > before
+        assert not _home(app).running
+
+    drive(scenario)
+
+
+def test_a_runner_that_fails_is_shown_as_output() -> None:
+    def broken(argv: Sequence[str]) -> console.Ran:
+        raise OSError("no interpreter")
+
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        _line(app).runner = broken
+        await pilot.press("c", *"stats", "enter")
+        await settle(pilot)
+        assert "error: no interpreter" in _output(app)
+        assert app.session[-1].error
+        assert not _home(app).running
+
+    drive(scenario)
+
+
+def test_enter_during_a_run_starts_nothing() -> None:
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        fake = FakeRun()
+        line = _line(app)
+        line.runner = fake
+        _home(app).running = True
+        await pilot.press("c", *"stats", "enter")
+        await settle(pilot)
+        assert fake.calls == []
+        assert _help(app) == console.RUNNING
+        assert line.value == "stats"
+        assert app.session == []
+
+    drive(scenario)
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        ("setup", "Quit and run it in a terminal: $ promptmend setup"),
+        ("config retire --from /old", "Quit and run it in a terminal: $ promptmend config"),
+        ("improve", "Not from here: the Espanso triggers run it"),
+        ("persona", "Not from here: the -p- trigger"),
+        ("ui", "Not from here: this is the interface"),
+    ],
+)
+def test_refused_lines_run_nothing(line: str, expected: str) -> None:
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        fake = FakeRun()
+        _line(app).runner = fake
+        await pilot.press("c", *line, "enter")
+        await settle(pilot)
+        assert fake.calls == []
+        assert _help(app).startswith(expected)
+        assert _line(app).history == [line]
+        assert app.session == []
+        assert _tab(app) == "home"
+
+    drive(scenario)
+
+
+@pytest.mark.parametrize("line", BYPASSES)
+def test_bypass_lines_start_nothing_from_the_interface(line: str) -> None:
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        fake = FakeRun()
+        _line(app).runner = fake
+        await pilot.press("c")
+        _line(app).value = line
+        await pilot.pause()
+        await pilot.press("enter")
+        await settle(pilot)
+        assert fake.calls == []
+        assert not _home(app).running
+
+    drive(scenario)
+
+
+def test_run_line_refuses_what_a_fresh_parse_would_not_run() -> None:
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        fake = FakeRun()
+        _home(app).run_line(("improve", "--profile", "--help"), fake)
+        await settle(pilot)
+        assert fake.calls == []
+        assert not _home(app).running
+        assert _home(app).last_message.startswith("error: refused to run")
+
+    drive(scenario)
+
+
+@pytest.mark.parametrize(
+    "rest",
+    [
+        "OPENROUTER_API_KEY my-value",
+        "OPENROUTER_API_KEY --stdin",
+        "hunter2",
+        KEY,
+        "OPENROUTER_API_KEY --help Hunter2xyz",
+    ],
+)
+def test_secrets_set_with_a_value_is_cleared_and_not_kept(rest: str) -> None:
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        line = _line(app)
+        await pilot.press("c")
+        line.value = f"secrets set {rest}"
+        await settle(pilot)
+        await pilot.press("enter")
+        await settle(pilot)
+        assert line.value == ""
+        assert line.history == []
+        assert rest not in _help(app)
+        assert teach.WITHHELD in _help(app) or "Providers & keys" in _help(app)
+        assert app.session == []
+        await pilot.press("up")
+        assert line.value == ""
 
     drive(scenario)
