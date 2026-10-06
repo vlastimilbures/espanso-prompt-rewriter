@@ -836,6 +836,13 @@ def test_num_ctx_reaches_ollama(monkeypatch: pytest.MonkeyPatch, fake_http: Fake
     assert "num_ctx" not in _local_body(fake_http, "ollama")["options"]
 
 
+# With no temperature and no --max-tokens, num_ctx alone makes up the options.
+def test_num_ctx_alone(monkeypatch: pytest.MonkeyPatch, fake_http: FakeHttp) -> None:
+    monkeypatch.setenv("OLLAMA_NUM_CTX", "8192")
+    monkeypatch.setenv("PROMPT_TEMPERATURE", "")
+    assert _local_body(fake_http, "ollama")["options"] == {"num_ctx": 8192}
+
+
 # A capped Ollama call that spent its budget before any text suggests --max-tokens.
 def test_ollama_capped_hint(fake_http: FakeHttp) -> None:
     fake_http.reply({"message": {"content": ""}, "done_reason": "length"})

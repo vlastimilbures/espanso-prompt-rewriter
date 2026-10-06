@@ -166,6 +166,7 @@ def test_ollama_num_ctx(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OLLAMA_NUM_CTX", "8192")
     settings = Settings()
     assert settings.ollama_num_ctx == 8192
+    assert settings.for_tier("pro").ollama_num_ctx == 8192
     assert settings.for_call("pro", provider="ollama").ollama_num_ctx == 8192
     assert settings.with_overrides(max_tokens="300", model="m").ollama_num_ctx == 8192
 

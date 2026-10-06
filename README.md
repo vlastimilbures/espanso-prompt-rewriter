@@ -753,15 +753,14 @@ short, does not look like a key and matches none of your `PROMPT_EXTRA_PATTERNS`
 | `PROMPTMEND_ENV`             | *(unset)*                      | Path of the `.env` to load, alone: no `config.toml` or `secrets.toml` (real environment only); `PROMPT_WORKFLOW_ENV` is its old name, still read when this one is not set |
 
 > [!NOTE]
-> **Ollama's context window.** Ollama shortens a prompt longer than its context window
-> without an error, so part of the instructions or the draft never reaches the model. Its default window
-> depends on the Ollama version and the model, and can be smaller than the `default` profile
-> (about 17,000 characters, several thousand tokens) plus your draft. The local triggers use
-> the much shorter `general` profile; `--provider ollama` with `default` is the exposed case.
-> If a rewrite ignores the template, set `OLLAMA_NUM_CTX`, for example `8192` for short
-> drafts and more for long ones (a 50,000-character draft alone is roughly 12,000 tokens of
-> English), within what the model supports. A larger window uses more memory, and changing it
-> makes Ollama reload the model.
+> **Ollama's context window.** Ollama may shorten a prompt longer than its window without
+> reporting an error. The `default` profile is much longer than `general`; the window must
+> hold the profile, the draft and the reply. Ollama's default window depends on its version,
+> the model and available memory. If rewrites through `--provider ollama` ignore the
+> template, set `OLLAMA_NUM_CTX` to a larger value the model supports; a larger window uses
+> more memory, and changing it reloads the model. It applies to models Ollama runs on this
+> machine; a cloud-tagged model uses its own context. LM Studio: set the context length when
+> loading the model.
 
 ## Profiles and persona
 
