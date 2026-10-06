@@ -82,7 +82,8 @@ the contested `quick-ceo`, `memo` and `outliers` review labels accepting either 
 | `google/gemini-3.5-flash-lite` @ `google-ai-studio/flex`, effort `minimal` (standard) | decontaminated | 23/24 | 76/84 | 23/24 | 128/128 | 0.62 | 3 | 2.5 s | 3.5 s | 0.0012 |
 | | first decontaminated draft | 23/24 | 75/84 | 18/24 | 129/129 | 0.61 | 33 | 2.3 s | 3.3 s | 0.0012 |
 | | #163 | 24/24 | 73/84 | 18/24 | 129/129 | 0.66 | 3 | 2.3 s | 3.3 s | 0.0012 |
-| `openai/gpt-6-luna` @ `openai`, effort `low` (pro) | first decontaminated draft | 24/24 | 83/84 | 23/24 | 129/129 | 0.80 | 0 | 6.8 s | 11.6 s | 0.0004 |
+| `openai/gpt-6-luna` @ `openai`, effort `low` (pro) | decontaminated | 24/24 | 82/84 | 22/24 | 129/129 | 0.91 | 0 | 7.5 s | 12.2 s | 0.0004 |
+| | first decontaminated draft | 24/24 | 83/84 | 23/24 | 129/129 | 0.80 | 0 | 6.8 s | 11.6 s | 0.0004 |
 | | #163 | 24/24 | 81/84 | 24/24 | 129/129 | 0.85 | 0 | 5.9 s | 10.2 s | 0.0004 |
 
 The first decontaminated draft made flash-lite close `CONTEXT` with `</GOAL>` in 33 of 132
@@ -92,8 +93,10 @@ examples differed from the shipped ones only on the surface ("quick recap … on
 it", "email Ms Lopez …, keep it brief: …", "Brief: a few sentences."); bringing their wording
 back to the #163 shape ("quick summary of my own notes …, only for me", "brief email to Ms
 Lopez … asking her to move …", "Keep it brief: a few sentences.") while still quoting no draft
-brought it back to 3, and that is the shipped prompt. gpt-6-luna was benched on the first
-draft only: the final change touches only the examples' wording, and it had no slips there.
+brought it back to 3, and that is the shipped prompt. A gpt-6-luna re-run on the shipped
+wording (2026-10-06, $0.047) is within noise of the first draft: its failures are the known
+`cap-thread` `.md` line (2 of 3) and `ho-wiki` given the other review branch (2 of 3), with no
+slips.
 
 By kind (132 runs per row), the shipped prompt against #163 on flash-lite: `struct` 131 of 131
 and 132, `branch` 116 of 122 and 118 of 123, `draft` 128 of 131 and 119 of 132 (one run of the
