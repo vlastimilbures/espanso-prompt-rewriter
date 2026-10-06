@@ -14,8 +14,8 @@ All notable changes to this project are documented here. The format follows
   the usage error the CLI would print. Up and Down go back through this session's lines;
   Escape leaves it. A line that looks like it holds a key is never shown back or kept in that
   history. The footer shows `c Command`.
-- Enter on that command line acts on the command (#111). A command that only reads or
-  previews (`doctor`, `config show|get|set|unset|validate`, `secrets status`, `profiles list`,
+- Enter on that command line acts on the command (#111). A command that reads, previews,
+  changes a setting or writes an export, asking nothing (`doctor`, `config show|get|set|unset|validate`, `secrets status`, `profiles list`,
   `stats`, `espanso status`, `history export`, any `--dry-run`, `--help` or `--version`) runs
   in a separate process, one at a time, with no input and at most 120 seconds; its output
   (keys redacted) and exit code appear below the line, and Home's session log lists it.

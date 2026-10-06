@@ -226,7 +226,8 @@ the suggestion: commands, options, setting names after `config set`, key names o
 below, or the error the CLI would print. Up and Down go back through what you entered.
 Escape leaves the line, so the tab keys work again. Enter:
 
-- runs a command that only reads or previews, and shows its output below the line
+- runs a command that reads, previews, changes a setting or writes an export (none asks
+  anything), and shows its output below the line
   (`$ promptmend …`, then what it printed, then `exit N`), and in Home's session log: `doctor`
   (without the clipboard check unless you pass `--clipboard`), `config show|get|set|unset|validate`,
   `secrets status`, `profiles list`, `stats`, `espanso status`, `history export`, any
