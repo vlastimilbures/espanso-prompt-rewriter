@@ -15,7 +15,9 @@ from textual.theme import Theme
 from textual.widgets import Footer, Header, TabbedContent, TabPane
 
 from .. import __version__
+from . import brand
 from .home import TAB_LABELS, pill
+from .intro import INTRO_SECONDS, AboutScreen, IntroScreen
 from .panes import (
     DiagnosticsPane,
     HistoryPane,
@@ -92,6 +94,7 @@ class MainScreen(Screen[None]):
             Binding(str(n), f"show('{tab}')", label, show=False)
             for n, (tab, (label, _)) in enumerate(TABS.items(), start=1)
         ),
+        Binding("a", "app.about", "About"),
         Binding("r", "app.reload", "Reload"),
         Binding("t", "app.toggle_contrast", "High contrast"),
         Binding("q", "app.quit", "Quit"),
@@ -110,15 +113,23 @@ class MainScreen(Screen[None]):
 
 
 class ManageApp(App[int]):
-    TITLE = "prompt-workflow"  # Plus the installed version, set in __init__ (#112).
+    TITLE = brand.NAME  # Plus the installed version, set in __init__ (#112).
     SUB_TITLE = "set up and manage"
     CSS = CSS
     # The palette would offer screenshots written to the working directory and other extras
     # with no headless counterpart.
     ENABLE_COMMAND_PALETTE = False
 
-    def __init__(self, *, loader: Callable[[str], State] = gather) -> None:
+    def __init__(
+        self,
+        *,
+        loader: Callable[[str], State] = gather,
+        intro_seconds: float | None = INTRO_SECONDS,
+    ) -> None:
         super().__init__()
+        # How long the intro stays (#112); None shows none (`ui --no-intro`,
+        # PROMPT_UI_INTRO=false, and the tests).
+        self.intro_seconds = intro_seconds
         # Read here, not at import, so the snapshot tests can pin it and a release changes none.
         self.title = f"{self.TITLE} {__version__}"
         self.loader = loader
@@ -136,6 +147,19 @@ class ManageApp(App[int]):
     def on_mount(self) -> None:
         self.push_screen(self.main)
         self.reload()
+        if self.intro_seconds is not None:
+            # Over the main screen while the state loads; the previous install offer waits
+            # until it closes.
+            self.push_screen(
+                IntroScreen(self.intro_seconds, __version__), lambda _: self._maybe_offer()
+            )
+
+    def action_about(self) -> None:
+        report = self.state.report if self.state else None
+        install = (
+            next((c.data for c in report.checks if c.id == "install"), None) if report else None
+        )
+        self.push_screen(AboutScreen(brand.about_facts(install, __version__)))
 
     def reload(self) -> None:
         """Read everything again (settings, doctor, plan, stats) and refill every tab."""
@@ -173,9 +197,16 @@ class ManageApp(App[int]):
         for screen in self.screen_stack:
             if isinstance(screen, PreviousInstallScreen) and screen.is_mounted:
                 screen.show(state)
-        if not self.offered and wants_offer(state.previous):
-            self.offered = True
-            self.open_previous()
+        self._maybe_offer()
+
+    def _maybe_offer(self) -> None:
+        """Open the previous install screen by itself, once per session, when the state found
+        one, and not while the intro is still showing (its close calls this again)."""
+        if self.state is None or self.offered or not wants_offer(self.state.previous):
+            return
+        if any(isinstance(s, IntroScreen) for s in self.screen_stack):
+            return
+        self.open_previous()
 
     def open_previous(self) -> None:
         """Show the switch from an earlier checkout install, unless it is already open."""

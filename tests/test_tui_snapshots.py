@@ -27,6 +27,7 @@ from prompt_workflow.config import ConfigLayers
 from prompt_workflow.history import StatsRow
 from prompt_workflow.prompt_builder import UserProfile
 from prompt_workflow.tui import app as app_module
+from prompt_workflow.tui import brand
 from prompt_workflow.tui.app import HIGH_CONTRAST, ManageApp
 from prompt_workflow.tui.state import State
 
@@ -61,6 +62,7 @@ _MESSAGES = {
     "previous_install": (doctor.OK, "settings are in place; nothing to look for"),
 }
 _DATA: dict[str, dict[str, Any]] = {
+    "install": {"channel": "uv", "launcher": LAUNCHER, "editable": False},
     "espanso": {"found": True, "running": True, "query_failed": False},
     "history": {"lost_writes": 0, "last_lost_utc": None, "tracking_incomplete": False},
     "sqlite": {"version": "3.51.3", "wal_reset_bug": False},
@@ -182,6 +184,8 @@ def fixed_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     """The paths a pane reads itself (the history file, the profile folder) are fixed too,
     and so is the version in the header."""
     monkeypatch.setattr(app_module, "__version__", VERSION)
+    # About's runtime line (#112) differs by CI runner.
+    monkeypatch.setattr(brand, "runtime", lambda: {"python": "3.14.0", "textual": "8.2.8"})
     monkeypatch.delenv("PROMPT_WORKFLOW_ENV")
     monkeypatch.setenv("XDG_CONFIG_HOME", f"{HOME}/.config")
     monkeypatch.setenv("XDG_DATA_HOME", f"{HOME}/.local/share")
@@ -212,8 +216,9 @@ def _shoot(
     theme: str | None = None,
     loader: Callable[[str], State] = fixed_state,
     size: tuple[int, int] = SIZE,
+    intro: float | None = None,
 ) -> str:
-    app = ManageApp(loader=loader)
+    app = ManageApp(loader=loader, intro_seconds=intro)
     # The active tab's underline slides into place; a snapshot must not catch it midway.
     app.animation_level = "none"
     shots: list[str] = []
@@ -260,3 +265,14 @@ def test_snapshot_previous_install() -> None:
 # Home on the smallest common terminal (#112): a row's text is cut, never wrapped.
 def test_snapshot_home_80_columns() -> None:
     _check("home-80", _shoot("1", size=(80, 24)))
+
+
+# The intro (#112), wide enough for the wordmark and on a narrow terminal (text only). It
+# stays up for the shot: its timer is far off and no key is pressed.
+@pytest.mark.parametrize(("name", "size"), [("intro", SIZE), ("intro-narrow", (64, 20))])
+def test_snapshot_intro(name: str, size: tuple[int, int]) -> None:
+    _check(name, _shoot(None, size=size, intro=600))
+
+
+def test_snapshot_about() -> None:
+    _check("about", _shoot("a"))

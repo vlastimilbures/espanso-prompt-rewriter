@@ -562,6 +562,9 @@ class Settings:
     history: bool = _env("PROMPT_HISTORY", "true", _bool)
     # Days a history record is kept; HistoryStore.prune() deletes older ones.
     history_retention_days: int = _env("PROMPT_HISTORY_RETENTION_DAYS", "365", _retention_days)
+    # The interface's intro as it opens (tui/intro.py, #112); false skips it, as
+    # `ui --no-intro` does. Only `ui` reads it; the triggers never do.
+    ui_intro: bool = _env("PROMPT_UI_INTRO", "true", _bool)
     # Not a setting (no env var, see setting_fields()): the --max-tokens of one call, for the
     # providers without a cap setting (Ollama num_predict, LM Studio max_tokens). None sends
     # them no cap, as before.

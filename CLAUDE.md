@@ -318,7 +318,15 @@ Rules for agents:
   history, `Output` (`PROMPT_OUTPUT`, #134: paste or clipboard), and
   the doctor counts; each a status word plus the tab that fixes it, and `headline()` names the
   worst (first of equals). `pill()` is the header's sub-title status (`ok` / `1 problem, 2
-  warnings`), set in `ManageApp._show()`.
+  warnings`), set in `ManageApp._show()`. `tui/intro.py`'s `IntroScreen` (#112; text from
+  `tui/brand.py`: `brand.NAME` is the one display name the header, intro, wordmark and About read, so a rename (#169) changes one line; ASCII wordmark, dropped at `brand.NARROW` columns or less, frame is a Textual
+  border) is pushed over `MainScreen` on every launch for `ManageApp(intro_seconds=0.8)`; any key
+  or click closes it and is consumed. `None` shows none: `ui --no-intro`, `PROMPT_UI_INTRO=false`
+  (read by `commands/ui.wants_intro()` in repair mode; the triggers never read it) and the
+  tests (`drive()` and `_shoot()` default to it). The previous install offer waits for the intro
+  (`_maybe_offer()`, called again when it closes). `a` opens `AboutScreen`
+  (`brand.about_facts()`: version, doctor's install channel, Python/Textual via
+  `brand.runtime()`, which the snapshots pin, the config and data dirs, licence, repo).
 - `doctor.py` — `run()` returns a `Report` of the fixed `CHECK_IDS` (JSON `schema_version` 1:
   only add ids/keys). Read-only: `espanso path config`/`espanso status` and the launcher lookup
   via `run_command`; keys as set/not set; the clipboard only as a length (never read when

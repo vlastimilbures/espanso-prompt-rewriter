@@ -38,6 +38,13 @@ All notable changes to this project are documented here. The format follows
   and the cut-off note still paste; if the clipboard cannot be written, the rewrite is pasted
   after a marker. `improve --output paste|clipboard` overrides the setting for one call. README
   "Clipboard output" (#134, #23).
+- The interface opens with a short intro: an ASCII wordmark (text only on a terminal of 70
+  columns or fewer), the name, version and a tagline (#112). It closes after 0.8 s or on any
+  key or click, and that key does nothing else. `prompt-workflow ui --no-intro`, or the new
+  setting `PROMPT_UI_INTRO=false` (default `true`; the triggers ignore it), skips it. When an
+  earlier checkout install is found, its screen opens once the intro has closed.
+- `a` in the interface opens an About screen: version, install channel, Python and Textual
+  versions, the settings and history folders, licence and repository (#112).
 
 ### Fixed
 - `prompt-workflow espanso deploy` finds Homebrew's stable `bin/` launcher also when Python

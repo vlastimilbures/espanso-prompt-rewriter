@@ -215,8 +215,11 @@ runs `improve` against a stub on `127.0.0.1` with a placeholder key.
 
 ![The Home tab of the prompt-workflow interface](docs/interface.svg)
 
-`1`-`6` switch tabs, `r` reloads, `t` switches to a high-contrast theme and `q` quits;
-`NO_COLOR` turns colour off. Scripts and screen readers can use the headless commands instead.
+It opens with a short intro (under a second; any key closes it). `prompt-workflow ui
+--no-intro`, or `PROMPT_UI_INTRO=false`, skips it.
+
+`1`-`6` switch tabs, `a` shows the version, install channel, folders and licence, `r` reloads,
+`t` switches to a high-contrast theme and `q` quits; `NO_COLOR` turns colour off. Scripts and screen readers can use the headless commands instead.
 Without a terminal, a bare `prompt-workflow` prints the help.
 
 Or answer a few questions instead: `prompt-workflow setup` asks for the provider and default
@@ -639,6 +642,7 @@ short, does not look like a key and matches none of your `PROMPT_EXTRA_PATTERNS`
 | `PROMPT_EXTRA_PATTERNS`      | *(empty)*                      | Your own `;`-separated regexes for the gate               |
 | `PROMPT_HISTORY`             | `true`                         | Keep a local [usage history](#usage-history) (metadata only); `false` keeps none |
 | `PROMPT_HISTORY_RETENTION_DAYS` | `365`                       | Days a usage-history record is kept before pruning (1 to 36500) |
+| `PROMPT_UI_INTRO`            | `true`                         | `false` skips the [interface](#first-run)'s intro, as `ui --no-intro` does |
 | `PROMPT_WORKFLOW_ENV`        | *(unset)*                      | Path of the `.env` to load, alone: no `config.toml` or `secrets.toml` (real environment only) |
 
 ## Profiles and persona
