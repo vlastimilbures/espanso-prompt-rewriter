@@ -317,11 +317,16 @@ Rules for agents:
   Textual; `tests/test_tui_home.py`): rows for `-i-`, `-ip-`, the match files/Espanso, the
   history, `Output` (`PROMPT_OUTPUT`, #134: paste or clipboard), and
   the doctor counts; each a status word plus the tab that fixes it, and `headline()` names the
-  worst (first of equals). `pill()` is the header's sub-title status (`ok` / `1 problem, 2
-  warnings`), set in `ManageApp._show()`. `tui/intro.py`'s `IntroScreen` (#112; text from
+  worst (first of equals; Markdown backticks stripped, #174). `pill()` is the header's
+  sub-title status (`ok` / `1 problem, 2 warnings`), set first (before "set up and manage", so
+  a narrow terminal keeps it, #174) in `ManageApp._show()`. The Providers and Diagnostics
+  tables show a settings file under the home folder as `~/…` via `common.short_label()`
+  (display only; headless `config show` keeps `source_label()`). `tui/intro.py`'s `IntroScreen` (#112; text from
   `tui/brand.py`: `brand.NAME` is the one display name the header, intro, wordmark and About read, so a rename (#169) changes one line; ASCII wordmark, dropped at `brand.NARROW` columns or less, frame is a Textual
-  border) is pushed over `MainScreen` on every launch for `ManageApp(intro_seconds=0.8)`; any key
-  or click closes it and is consumed. `None` shows none: `ui --no-intro`, `PROMPT_UI_INTRO=false`
+  border) is pushed over `MainScreen` on every launch for `ManageApp(intro=True)`; it has no
+  timer (#173): any key (Enter, Escape, …) or click closes it and is consumed. Its muted
+  `INTRO_HINT` names `teach.INTRO_OFF` (`config set PROMPT_UI_INTRO false`, parsed by the
+  drift test). `intro=False` shows none: `ui --no-intro`, `PROMPT_UI_INTRO=false`
   (read by `commands/ui.wants_intro()` in repair mode; the triggers never read it) and the
   tests (`drive()` and `_shoot()` default to it). The previous install offer waits for the intro
   (`_maybe_offer()`, called again when it closes). `a` opens `AboutScreen`

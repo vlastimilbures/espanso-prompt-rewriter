@@ -11,6 +11,7 @@ import functools
 import os
 import sys
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, NoReturn
 
 import typer
@@ -192,6 +193,20 @@ def source_label(source: str) -> str:
     if source == ENV_SOURCE:
         return "environment"
     return source.removeprefix("file:")
+
+
+def short_label(source: str) -> str:
+    """``source_label()`` for the interface (#174): a file under the home folder reads
+    ``~/…``, so a narrow column keeps its name. Display only; ``config show`` prints the
+    full path."""
+    label = source_label(source)
+    if not source.startswith("file:"):
+        return label
+    try:
+        rest = Path(label).relative_to(Path.home())
+    except ValueError:
+        return label
+    return f"~/{rest.as_posix()}" if rest.parts else "~"
 
 
 def shown_value(name: str, entry: Entry) -> str:

@@ -57,8 +57,20 @@ All notable changes to this project are documented here. The format follows
   reports the formula's virtualenv through Homebrew's `opt/<formula>` link rather than its
   Cellar path; before, it fell back to the running script, labelled `script` instead of
   `homebrew` (#95).
+- Interface: the header puts the status (`ok`, `1 problem, 2 warnings`) before "set up and
+  manage", so a narrow terminal cuts the tagline instead of the status (#174).
+- Interface: the Diagnostics settings table and the Providers & keys key table show a file
+  under your home folder as `~/…` (in "From", "Also set in" and the "overrides …" and
+  "invalid value in …" notes), so the column keeps the file name; `config show` still prints
+  the full path (#174).
+- Interface: Home's headline no longer shows a check's Markdown backticks around a command
+  (#174).
 
 ### Changed
+- Interface: the intro no longer closes by itself after 0.8 s; it stays until you press
+  Enter, Escape or any other key, or click, and that key does nothing else (#173). A muted
+  line under it says so and names the command that turns it off:
+  `prompt-workflow config set PROMPT_UI_INTRO false`. `ui --no-intro` still skips it once.
 - README "CLI" documents the `[prompt-workflow: …]` marker as the stable way for a script to
   tell a failed `improve` run from a rewrite, since the exit code is always 0 (#32).
 - The `default` prompt's two examples now open `CONTEXT` with your `PROMPT_PERSONA` (a new

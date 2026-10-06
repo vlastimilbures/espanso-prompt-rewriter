@@ -90,8 +90,8 @@ async def settle(pilot: Pilot[int]) -> None:
 
 
 def drive(scenario: Callable[[ManageApp, Pilot[int]], Awaitable[None]], **kwargs: Any) -> ManageApp:
-    # No intro unless a test asks for one (#112): it would sit over every screen for 0.8 s.
-    kwargs.setdefault("intro_seconds", None)
+    # No intro unless a test asks for one (#112): it would sit over every screen until a key.
+    kwargs.setdefault("intro", False)
     app = ManageApp(**kwargs)
 
     async def main() -> None:
@@ -232,9 +232,10 @@ def test_header_shows_the_name_and_installed_version(
         seen.append(pill(app.state.report))
 
     drive(scenario)
-    # Then the status pill (#112): the espanso fixture leaves the key unset, a problem.
+    # Then the status pill (#112), first so a narrow terminal cuts the tagline, not the status
+    # (#174): the espanso fixture leaves the key unset, a problem.
     assert "problem" in seen[-1]
-    assert seen[:2] == [f"prompt-workflow 9.8.7 — set up and manage · {seen[-1]}"] * 2
+    assert seen[:2] == [f"prompt-workflow 9.8.7 — {seen[-1]} · set up and manage"] * 2
 
 
 def test_a_failing_load_is_shown_not_raised(espanso: FakeRunner) -> None:
@@ -1092,6 +1093,47 @@ def test_diagnostics_on_a_broken_config(espanso: FakeRunner, tmp_path: Path) -> 
     drive(scenario)
 
 
+def test_files_under_home_show_as_tilde(
+    monkeypatch: pytest.MonkeyPatch, espanso: FakeRunner
+) -> None:
+    # #174: display only, so the From column keeps the file name on a narrow terminal.
+    monkeypatch.delenv("PROMPT_WORKFLOW_ENV")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(Path.home() / ".config"))
+    config_store.save_secret("OPENROUTER_API_KEY", KEY)
+    folder = config_store.config_dir()
+    (folder / "config.toml").write_text('PROMPT_PROFILE = "general"\n', encoding="utf-8")
+    monkeypatch.setenv("PROMPT_PROFILE", "default")
+    monkeypatch.setenv("OPENROUTER_API_KEY", KEY)
+
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        keys = table_rows(app, "providers", "#keys")
+        assert keys["OPENROUTER_API_KEY"][2:4] == [
+            "environment",
+            "~/.config/prompt-workflow/secrets.toml",
+        ]
+        await pilot.press("6")
+        rows = table_rows(app, "diagnostics", "#settings")
+        assert rows["PROMPT_PROFILE"][2:4] == [
+            "environment",
+            "overrides ~/.config/prompt-workflow/config.toml",
+        ]
+        assert rows["PROMPT_HISTORY"][2] == "default"
+
+    drive(scenario)
+
+
+def test_short_label_only_shortens_files_under_home(monkeypatch: pytest.MonkeyPatch) -> None:
+    from prompt_workflow.commands import common
+
+    home = Path.home()
+    assert common.short_label(f"file:{home / 'a' / 'b.toml'}") == "~/a/b.toml"
+    assert common.short_label(f"file:{home}") == "~"
+    elsewhere = str(Path("/elsewhere/config.toml").resolve())
+    assert common.short_label(f"file:{elsewhere}") == elsewhere
+    assert common.short_label(config.ENV_SOURCE) == "environment"
+    assert common.short_label(config.DEFAULT_SOURCE) == "default"
+
+
 def test_import_check_runs_a_fresh_interpreter() -> None:
     found = doctor.import_check()
     assert found.ok, found.message
@@ -1166,7 +1208,7 @@ def terminal(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
     def run(self: ManageApp, *args: Any, **kwargs: Any) -> None:
         state["launched"] += 1
-        state["intro"] = self.intro_seconds
+        state["intro"] = self.intro
         self._return_code = state["code"]
 
     monkeypatch.setattr(ManageApp, "run", run)
@@ -1732,26 +1774,38 @@ def test_previous_install_entered_path_that_is_no_checkout(
 # --- Intro and About (#112) ---------------------------------------------------------------
 
 
-# The timer is captured and fired by hand: a slow runner can take longer than any real
-# delay just to start the app.
-def test_intro_shows_on_launch_and_closes_by_itself(
-    espanso: FakeRunner, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from prompt_workflow.tui.intro import IntroScreen
-
-    timers: list[tuple[float, Callable[[], None]]] = []
-    monkeypatch.setattr(
-        IntroScreen, "set_timer", lambda self, delay, callback: timers.append((delay, callback))
-    )
+def test_intro_stays_until_a_key(espanso: FakeRunner) -> None:
+    from prompt_workflow.tui.intro import INTRO_HINT, IntroScreen
 
     async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
         assert isinstance(app.screen, IntroScreen)
-        assert [delay for delay, _ in timers] == [0.8]
-        timers[0][1]()
+        await pilot.pause(1.2)  # longer than the old 0.8 s timer (#173)
         await settle(pilot)
-        assert not isinstance(app.screen, IntroScreen)
+        assert isinstance(app.screen, IntroScreen)
+        shown = str(app.screen.query_one("#intro").render())
+        assert INTRO_HINT in shown
+        assert "prompt-workflow config set PROMPT_UI_INTRO false" in shown
 
-    drive(scenario, intro_seconds=0.8)
+    drive(scenario, intro=True)
+
+
+@pytest.mark.parametrize("key", ["enter", "escape", "q"])
+def test_intro_closes_on_enter_escape_or_any_key_and_nothing_else(
+    espanso: FakeRunner, key: str
+) -> None:
+    from textual.widgets import TabbedContent
+
+    from prompt_workflow.tui.intro import IntroScreen
+
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        assert isinstance(app.screen, IntroScreen)
+        await pilot.press(key)
+        await settle(pilot)
+        assert app.screen_stack[-1] is app.main
+        assert app.is_running
+        assert app.main.query_one(TabbedContent).active == "home"
+
+    drive(scenario, intro=True)
 
 
 def test_intro_any_key_closes_it_and_is_consumed(espanso: FakeRunner) -> None:
@@ -1766,13 +1820,13 @@ def test_intro_any_key_closes_it_and_is_consumed(espanso: FakeRunner) -> None:
         await pilot.press("q")  # closes the intro, does not quit
         await settle(pilot)
         assert not isinstance(app.screen, IntroScreen)
-        intro.close()  # its timer firing late changes nothing
+        intro.close()  # a second close changes nothing
         await settle(pilot)
         assert app.screen is app.main
         assert app.is_running
         assert app.main.query_one(TabbedContent).active == "home"
 
-    drive(scenario, intro_seconds=60)
+    drive(scenario, intro=True)
 
 
 def test_intro_click_closes_it(espanso: FakeRunner) -> None:
@@ -1784,7 +1838,7 @@ def test_intro_click_closes_it(espanso: FakeRunner) -> None:
         await settle(pilot)
         assert not isinstance(app.screen, IntroScreen)
 
-    drive(scenario, intro_seconds=60)
+    drive(scenario, intro=True)
 
 
 def test_intro_digit_does_not_switch_tabs(espanso: FakeRunner) -> None:
@@ -1797,7 +1851,7 @@ def test_intro_digit_does_not_switch_tabs(espanso: FakeRunner) -> None:
         await pilot.press("6")
         assert app.main.query_one(TabbedContent).active == "diagnostics"
 
-    drive(scenario, intro_seconds=60)
+    drive(scenario, intro=True)
 
 
 def test_previous_install_offer_waits_for_the_intro(previous: Path) -> None:
@@ -1813,7 +1867,7 @@ def test_previous_install_offer_waits_for_the_intro(previous: Path) -> None:
         await settle(pilot)
         assert isinstance(app.screen, PreviousInstallScreen)
 
-    drive(scenario, intro_seconds=60)
+    drive(scenario, intro=True)
 
 
 def test_about_lists_version_runtime_and_folders(
@@ -1870,12 +1924,12 @@ def test_about_before_the_state_is_read(espanso: FakeRunner) -> None:
 @pytest.mark.parametrize(
     ("args", "environ", "intro"),
     [
-        (("ui",), {}, 0.8),
-        ((), {}, 0.8),
-        (("ui", "--no-intro"), {}, None),
-        (("ui",), {"PROMPT_UI_INTRO": "false"}, None),
+        (("ui",), {}, True),
+        ((), {}, True),
+        (("ui", "--no-intro"), {}, False),
+        (("ui",), {"PROMPT_UI_INTRO": "false"}, False),
         # A value the strict parser rejects falls back to the default in repair mode.
-        (("ui",), {"PROMPT_UI_INTRO": "maybe"}, 0.8),
+        (("ui",), {"PROMPT_UI_INTRO": "maybe"}, True),
     ],
 )
 def test_intro_opt_out(
@@ -1883,7 +1937,7 @@ def test_intro_opt_out(
     monkeypatch: pytest.MonkeyPatch,
     args: tuple[str, ...],
     environ: dict[str, str],
-    intro: float | None,
+    intro: bool,
 ) -> None:
     for name, value in environ.items():
         monkeypatch.setenv(name, value)

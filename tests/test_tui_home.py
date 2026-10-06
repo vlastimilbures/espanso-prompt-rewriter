@@ -240,3 +240,19 @@ def test_checks_row_and_pill_count_every_check() -> None:
     assert headline(rows) == ("Not ready: keys: keys says so.", "diagnostics")
     assert pill(report) == "1 problem, 2 warnings"
     assert pill(_report(state, keys=doctor.FAIL, sqlite=doctor.FAIL)) == "2 problems"
+
+
+def test_headline_shows_no_markdown_backticks() -> None:
+    # Doctor marks a command with backticks; the headline is plain text (#174).
+    state = ready()
+    message = "the deployed launcher is gone; run `prompt-workflow espanso deploy`."
+    report = doctor.Report(
+        tuple(
+            dataclasses.replace(c, status=doctor.FAIL, message=message) if c.id == "launcher" else c
+            for c in state.report.checks
+        )
+    )
+    rows = home_rows(dataclasses.replace(state, report=report))
+    text, _ = headline(rows)
+    assert "`" not in text
+    assert text == "Not ready: the deployed launcher is gone; run prompt-workflow espanso deploy."

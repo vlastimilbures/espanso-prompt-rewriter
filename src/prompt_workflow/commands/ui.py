@@ -40,8 +40,7 @@ def ui(
             common.NEEDS_TERMINAL,
         )
     from ..tui.app import ManageApp
-    from ..tui.intro import INTRO_SECONDS
 
-    interface = ManageApp(intro_seconds=None if no_intro or not wants_intro() else INTRO_SECONDS)
+    interface = ManageApp(intro=not no_intro and wants_intro())
     interface.run()
     sys.exit(interface.return_code or 0)

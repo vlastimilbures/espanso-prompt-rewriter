@@ -304,8 +304,8 @@ class ProvidersPane(Pane):
                 keys,
                 name,
                 "set" if entry.value else "not set",
-                common.source_label(entry.source) if entry.value else "",
-                ", ".join(map(common.source_label, entry.shadows)),
+                common.short_label(entry.source) if entry.value else "",
+                ", ".join(map(common.short_label, entry.shadows)),
             )
         cfg = state.settings
         policy = (
@@ -1080,15 +1080,15 @@ class DiagnosticsPane(Pane):
             entry = layers.entries[name]
             notes = []
             if entry.shadows:
-                notes.append("overrides " + ", ".join(map(common.source_label, entry.shadows)))
+                notes.append("overrides " + ", ".join(map(common.short_label, entry.shadows)))
             if entry.rejected:
-                bad = ", ".join(map(common.source_label, entry.rejected))
+                bad = ", ".join(map(common.short_label, entry.rejected))
                 notes.append(f"invalid value in {bad} ignored")
             _add_row(
                 table,
                 name,
                 common.shown_value(name, entry),
-                common.source_label(entry.source),
+                common.short_label(entry.source),
                 "; ".join(notes),
                 key=name,
             )

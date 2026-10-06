@@ -77,6 +77,9 @@ RECIPES = (
     Recipe(("stats", "--by", "model"), "usage by model"),
 )
 
+# The intro's hint (#173): the command that turns the intro off.
+INTRO_OFF = ("config", "set", "PROMPT_UI_INTRO", "false")
+
 
 def equivalent(*argv: str) -> str:
     """The command line for ``argv``, quoted for a POSIX shell; placeholders as they are."""
