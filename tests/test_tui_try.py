@@ -194,6 +194,9 @@ def test_gate_blocks_a_key_before_the_stub_is_called() -> None:
             f"[promptmend: Input is too long ({MAX_DRAFT_CHARS + 1} chars, max {MAX_DRAFT_CHARS})]",
         ),
     ],
+    # Short ids: pytest puts the test id in PYTEST_CURRENT_TEST, and Windows caps an
+    # environment variable at 32767 characters.
+    ids=["empty", "blank", "too-long"],
 )
 @pytest.mark.usefixtures("loopback_only")
 def test_empty_or_too_long_draft(draft: str, marker: str) -> None:
