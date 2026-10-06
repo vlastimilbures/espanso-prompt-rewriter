@@ -594,7 +594,7 @@ short, does not look like a key and matches none of your `PROMPT_EXTRA_PATTERNS`
 | `LMSTUDIO_MODEL`             | `local-model`                  |                                                           |
 | `ALLOW_CLOUD_OVERRIDE`       | `false`                        | `true` lets flagged drafts reach cloud providers          |
 | `PROMPT_LOCAL_ONLY`          | `false`                        | `true` refuses every provider that can send the draft off this machine |
-| `PROMPT_GATE_LOCAL`          | `false`                        | `true` runs the gate for Ollama / LM Studio on `localhost` too (a local relay to a cloud API) |
+| `PROMPT_GATE_LOCAL`          | `false`                        | `true` runs the gate for Ollama / LM Studio on `localhost` too (a local relay to a cloud API, or an `ollama cp` alias of a cloud model) |
 | `PROMPT_EXTRA_PATTERNS`      | *(empty)*                      | Your own `;`-separated regexes for the gate               |
 | `PROMPT_HISTORY`             | `true`                         | Keep a local [usage history](#usage-history) (metadata only); `false` keeps none |
 | `PROMPT_HISTORY_RETENTION_DAYS` | `365`                       | Days a usage-history record is kept before pruning (1 to 36500) |
@@ -682,9 +682,18 @@ Every call that can send the draft off your machine first runs through a regex g
 ([`redaction.py`](src/prompt_workflow/redaction.py)): OpenRouter and Anthropic always, and
 Ollama or LM Studio when their base URL is not `localhost` (or `127.0.0.1`, `::1`) or the Ollama
 model is a cloud model (a `:cloud` or `-cloud` tag in any letter case, also with an
-`@sha256:…` digest, which the local daemon forwards to ollama.com; a model copied under another
-name with `ollama cp` is not detected). With `PROMPT_GATE_LOCAL=true` the gate also covers
-Ollama and LM Studio on `localhost`. The gate blocks drafts containing:
+`@sha256:…` digest, which the local daemon forwards to ollama.com). With `PROMPT_GATE_LOCAL=true`
+the gate also covers Ollama and LM Studio on `localhost`.
+
+Only the model name is checked, so a local alias of a cloud model escapes it: after
+`ollama cp gpt-oss:120b-cloud my-model`, `OLLAMA_MODEL=my-model` has no `cloud` tag and counts as
+local, although Ollama still forwards the draft to ollama.com. A model built from a Modelfile
+whose `FROM` names a cloud model may do the same. The gate then does not run for `-il-`, and
+`PROMPT_LOCAL_ONLY=true` does not refuse it. If you use such an alias, set
+`PROMPT_GATE_LOCAL=true`, which gates every Ollama call, whatever the model name (it does not make
+`PROMPT_LOCAL_ONLY` refuse them), or use the model under its `cloud`-tagged name.
+
+The gate blocks drafts containing:
 
 - payment card numbers (Luhn-checked, also when split by double spaces, tabs, dashes or one line
   break), IBANs (checksum-validated) and email addresses

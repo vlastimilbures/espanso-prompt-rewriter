@@ -46,6 +46,10 @@ All notable changes to this project are documented here. The format follows
   knowledge if you can run one, otherwise review as an independent expert in that domain
   would: …", so it also works in a plain chat; "validate them with me" is kept. The `-p-`
   snippet carries both wordings. docs/benchmark.md has the before/after results.
+- README "Privacy and data protection" and `.env.example` explain that a local alias of an
+  Ollama cloud model (`ollama cp gpt-oss:120b-cloud my-model`) has no `cloud` tag, so it counts
+  as local: the gate does not run and `PROMPT_LOCAL_ONLY` does not refuse it. Set
+  `PROMPT_GATE_LOCAL=true` to gate it (#33).
 
 ### Removed
 - The static `-prompt-` form ("Act as {{role}}", objective, context, constraints, output) in
