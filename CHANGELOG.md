@@ -26,6 +26,25 @@ All notable changes to this project are documented here. The format follows
   `profiles migrate` say to run them in a terminal; `improve`, `persona` and `ui` are
   refused. `secrets set` with a value (or `--stdin`) after the key's name is cleared, not
   run or kept.
+- The interface has a seventh tab, Try (#111, key `7`): type a draft, pick Local stub or Real
+  provider, the provider, profile ("as configured" by default, as a trigger) and tier, and
+  press Run to see the rewrite a trigger would paste. It never reads or writes the clipboard
+  and runs in process, so the draft never goes into a command line. It reads the settings as
+  a trigger does (an invalid one stops it with the marker), every run goes through the
+  data-protection gate (a stub run exactly as its real call would), and a blocked draft
+  shows the trigger's marker with nothing sent. Local stub (the default) answers on
+  `127.0.0.1` with a placeholder key, calls no provider and records nothing. Real provider asks
+  first (provider, model, base URL) and is recorded in the usage history as a direct call;
+  Home's session log shows it as
+  `promptmend improve --provider openrouter --source argument --text '<draft withheld>'`
+  (with its profile and tier too). A line under the result gives the time, requests, tokens and the cost as
+  reported, `unknown` or `not applicable`, never 0 for a cost nobody reported. The command
+  line's refusal of `improve` now points at the Try tab, and the set-up smoke test's stub
+  replies report token counts.
+
+### Changed
+- The interface's second tab is now labelled "2 Providers" (it was "Providers & keys"), so
+  all seven tabs fit on an 80-column terminal. It still holds the keys.
 
 ## 0.19.0 - 2026-10-06
 

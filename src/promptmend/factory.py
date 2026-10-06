@@ -70,6 +70,18 @@ def _require_https(url: str, env_name: str) -> str:
     raise GateBlocked(f"{env_name} must be an https:// URL")
 
 
+# The providers make_provider() builds through _require_https(): they send a key.
+_HTTPS_ONLY = {"openrouter": "OPENROUTER_BASE_URL", "anthropic": "ANTHROPIC_BASE_URL"}
+
+
+def check_base_url(name: str, cfg: Settings) -> None:
+    """The base-URL check make_provider() applies to ``name``, without building anything: the
+    Try tab's stub runs check the real URL before pointing the settings at the stub."""
+    setting = _HTTPS_ONLY.get(name)
+    if setting is not None:
+        _require_https(getattr(cfg, f"{name}_base_url"), setting)
+
+
 def _is_ollama_cloud(model: str) -> bool:
     """Ollama forwards models tagged `cloud` or `*-cloud` (e.g. gpt-oss:120b-cloud) to
     ollama.com instead of running them locally. Ollama's names are case-insensitive and a
@@ -168,6 +180,7 @@ def make_provider(
     on_response: Callable[[dict[str, object]], None] | None = None,
     title: str = APP_TITLE,
     observer: UsageObserver | None = None,
+    force_remote: bool = False,
 ) -> Provider:
     """Build the named provider from settings. Anything that can send the draft off this
     machine (see _leaves_machine) comes wrapped in the data-protection gate, and with
@@ -188,10 +201,16 @@ def make_provider(
     HTTP attempt (providers/usage.py); a draft the gate blocks makes no attempt, so no record.
     A loopback Ollama or LM Studio that is not a cloud model reports cost ``not_applicable``.
 
+    ``force_remote`` treats the provider as leaving this machine even when ``cfg`` says it
+    stays: the interface's Try tab builds against the stub on 127.0.0.1 (``cfg`` points
+    there) but gates, and refuses under PROMPT_LOCAL_ONLY, as the real settings would (it
+    passes _leaves_machine() of those). It only ever adds the gate, never removes it; every
+    other caller leaves it False.
+
     The ``-> Provider`` return type is also what makes mypy check that every provider class
     conforms to the Provider protocol.
     """
-    remote = _leaves_machine(name, cfg)
+    remote = _leaves_machine(name, cfg) or force_remote
     if remote and cfg.local_only:
         raise GateBlocked(f"PROMPT_LOCAL_ONLY=true: {name} would send the draft off this machine")
     if name == "ollama":

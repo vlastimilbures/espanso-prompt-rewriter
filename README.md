@@ -204,14 +204,15 @@ Windows, use uv.
 ## First run
 
 Run `promptmend` in a terminal (or `promptmend ui`) for a full-screen interface with
-six tabs: Home, Providers & keys, Profiles, Triggers, History and Diagnostics. Home says in one
+seven tabs: Home, Providers, Profiles, Triggers, History, Diagnostics and Try. Home says in one
 line whether you are ready (or names the most urgent problem and the tab that fixes it), then
 shows what `-i-` and `-ip-` run, the match files and Espanso, the usage history, the output mode and the
 `doctor` checks, each with a status word (ok, warn, FAIL); the header shows the same status
 (`ok`, or `1 problem, 2 warnings`). It does what the [management commands](#management-commands) do, through the same
 code. Keys are shown only as set or not set, removing a key, deploying, detaching, migrating or
 deleting history asks first, and no provider is called except by the Test call button, which
-runs `improve` against a stub on `127.0.0.1` with a placeholder key.
+runs `improve` against a stub on `127.0.0.1` with a placeholder key, and by a Try tab run you
+confirm.
 
 ![The Home tab of the promptmend interface](docs/interface.svg)
 
@@ -242,19 +243,37 @@ Escape leaves the line, so the tab keys work again. Enter:
 - says to quit and run it in a terminal for what asks as it goes: `setup`,
   `config rollback`, `config retire`, `profiles migrate`, and a dialog's command given
   `--espanso-dir`, `--launcher` or `--from`;
-- refuses `improve` and `persona` (the triggers run them, and `improve` reads the clipboard)
-  and `ui`.
+- refuses `improve` and `persona` (the triggers run them, and `improve` reads the clipboard;
+  the Try tab rewrites a typed draft instead) and `ui`.
 
 A line that looks like it holds a key, or `secrets set` with anything after the key's name,
-is never run, shown back or kept: it is cleared, and keys go in Providers & keys. A key in
+is never run, shown back or kept: it is cleared, and keys go in Providers. A key in
 a command's output is shown as `<redacted, N chars>`.
+
+The Try tab (`7`) rewrites a draft you type into it, the way `-i-` would, so you can see the
+result before a trigger pastes one. Pick where it runs (Local stub or Real provider), the
+provider, the profile and the tier, then press Run. The profile starts at "as configured",
+which uses `PROMPT_PROFILE` (or `PROMPT_PRO_PROFILE`, if set, on the pro tier) exactly as a
+trigger does. The clipboard is never read or written, and the draft never goes into a
+command line. The settings are read as a trigger reads them, so an invalid one stops the run
+with its marker. Every run goes through the
+[data-protection gate](#privacy-and-data-protection), so a draft the gate blocks shows the
+same `[promptmend: …]` marker a trigger would paste, and nothing is sent; a stub run is
+gated (and refused under `PROMPT_LOCAL_ONLY`) exactly as the real call would be. Local stub (the
+default) answers on `127.0.0.1` with a placeholder key: no provider is called and nothing is
+recorded. Real provider first asks, naming the provider, model and base URL; a confirmed call
+may be charged and is recorded in the [usage history](#usage-history) as a direct call (no
+trigger), like `promptmend improve` typed in a terminal, which Home's session log shows with
+the draft withheld. Under the result, a line gives the time, the requests, the tokens in and
+out and the cost: as reported, `unknown` when the provider did not say, or
+`not applicable` for the stub and local models, never a made-up 0. One run at a time.
 
 It opens with a short intro that stays until you press Enter (or any other key, or click);
 that key does nothing else. Its last line says how to turn it off for good:
 `promptmend config set PROMPT_UI_INTRO false`. `promptmend ui --no-intro` skips it
 once.
 
-`1`-`6` switch tabs, `c` opens Home's command line, `a` shows the version, install channel, folders and licence, `r` reloads,
+`1`-`7` switch tabs, `c` opens Home's command line, `a` shows the version, install channel, folders and licence, `r` reloads,
 `t` switches to a high-contrast theme and `q` quits; `NO_COLOR` turns colour off. Scripts and screen readers can use the headless commands instead.
 Without a terminal, a bare `promptmend` prints the help.
 
@@ -485,7 +504,7 @@ By default every improve trigger pastes the rewrite in place of the trigger. Wit
 `PROMPT_OUTPUT=clipboard` the rewrite goes on the clipboard instead:
 
 ```bash
-promptmend config set PROMPT_OUTPUT clipboard   # or Change setting under Providers & keys in `promptmend ui`
+promptmend config set PROMPT_OUTPUT clipboard   # or Change setting under Providers in `promptmend ui`
 promptmend config set PROMPT_OUTPUT paste       # back to pasting
 ```
 

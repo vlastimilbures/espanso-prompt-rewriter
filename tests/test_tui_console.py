@@ -412,7 +412,7 @@ def test_a_key_line_is_cleared_and_never_recalled(nothing_runs: Callable[[], Non
         await settle(pilot)
         assert line.value == ""
         assert line.history == []
-        assert "Providers & keys" in _help(app)
+        assert "Providers" in _help(app)
         assert KEY not in _help(app)
         await pilot.press("up")
         assert line.value == ""
@@ -819,7 +819,7 @@ def test_secrets_set_with_a_value_is_cleared_and_not_kept(rest: str) -> None:
         assert line.value == ""
         assert line.history == []
         assert rest not in _help(app)
-        assert teach.WITHHELD in _help(app) or "Providers & keys" in _help(app)
+        assert teach.WITHHELD in _help(app) or "Providers" in _help(app)
         assert app.session == []
         await pilot.press("up")
         assert line.value == ""

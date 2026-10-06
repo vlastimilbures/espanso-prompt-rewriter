@@ -6,6 +6,9 @@ A child process runs `python -m promptmend.cli improve --provider <name> ...` (t
 code a trigger runs) with every provider base URL pointed at the stub and a placeholder key
 in place of the real one, set as environment variables, which outrank every settings file.
 The usage history is switched off the same way: a health check is not usage (#116).
+
+The interface's Try tab (#111) runs its stub rewrites against the same stub, in process:
+stub_server() starts it and stub_settings() points a Settings at it as stub_env() does.
 """
 
 from __future__ import annotations
@@ -15,10 +18,14 @@ import os
 import subprocess
 import sys
 import threading
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from dataclasses import dataclass, field, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .config import Settings
 
 # What the stub answers, and so what improve must print.
 REPLY = "promptmend setup check: ok"
@@ -26,6 +33,9 @@ DRAFT = "Check that promptmend can rewrite a draft end to end."
 # Sent instead of the real key, which never reaches even the stub.
 PLACEHOLDER_KEY = "setup-check-placeholder"
 TIMEOUT = 60
+# The token counts every stub reply reports, so a stub run shows a usage line.
+INPUT_TOKENS = 42
+OUTPUT_TOKENS = 7
 
 # Runs argv with env; returns (exit code, stdout). Tests may replace it.
 Runner = Callable[[Sequence[str], Mapping[str, str]], tuple[int, bytes]]
@@ -40,11 +50,23 @@ def run_cli(argv: Sequence[str], env: Mapping[str, str]) -> tuple[int, bytes]:
 
 def _reply(path: str) -> dict[str, Any]:
     if path.endswith("/api/chat"):  # Ollama
-        return {"message": {"content": REPLY}, "done_reason": "stop"}
+        return {
+            "message": {"content": REPLY},
+            "done_reason": "stop",
+            "prompt_eval_count": INPUT_TOKENS,
+            "eval_count": OUTPUT_TOKENS,
+        }
     if path.endswith("/v1/messages"):  # Anthropic
-        return {"content": [{"type": "text", "text": REPLY}], "stop_reason": "end_turn"}
-    # OpenAI-compatible: OpenRouter, LM Studio.
-    return {"choices": [{"message": {"content": REPLY}, "finish_reason": "stop"}]}
+        return {
+            "content": [{"type": "text", "text": REPLY}],
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": INPUT_TOKENS, "output_tokens": OUTPUT_TOKENS},
+        }
+    # OpenAI-compatible: OpenRouter, LM Studio. No cost: the stub charges nothing.
+    return {
+        "choices": [{"message": {"content": REPLY}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": INPUT_TOKENS, "completion_tokens": OUTPUT_TOKENS},
+    }
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -70,6 +92,33 @@ class _StubServer(ThreadingHTTPServer):
 
 
 @dataclass(frozen=True)
+class Stub:
+    """A running stub: its port on 127.0.0.1 and the path of each request it answered."""
+
+    port: int
+    paths: list[str] = field(default_factory=list)
+
+    @property
+    def requests(self) -> int:
+        return len(self.paths)
+
+
+@contextmanager
+def stub_server() -> Iterator[Stub]:
+    """Run the stub on 127.0.0.1 (a free port) while the block runs, then stop it."""
+    server = _StubServer(("127.0.0.1", 0), _Handler)
+    server.paths = []
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield Stub(int(server.server_address[1]), server.paths)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+@dataclass(frozen=True)
 class SmokeResult:
     ok: bool
     output: str
@@ -92,14 +141,25 @@ def stub_env(port: int, environ: Mapping[str, str]) -> dict[str, str]:
     }
 
 
+def stub_settings(cfg: Settings, port: int) -> Settings:
+    """``cfg`` pointed at the stub as stub_env() points the environment: every provider's
+    base URL, placeholder keys and no history."""
+    base = f"http://127.0.0.1:{port}"
+    return replace(
+        cfg,
+        openrouter_base_url=f"{base}/api/v1",
+        anthropic_base_url=base,
+        ollama_base_url=base,
+        lmstudio_base_url=f"{base}/v1",
+        openrouter_api_key=PLACEHOLDER_KEY,
+        anthropic_api_key=PLACEHOLDER_KEY,
+        history=False,
+    )
+
+
 def run(provider: str, *, runner: Runner | None = None) -> SmokeResult:
     """Run improve with ``provider`` against the stub; ok when it printed the stub's reply."""
-    server = _StubServer(("127.0.0.1", 0), _Handler)
-    server.paths = []
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        port = server.server_address[1]
+    with stub_server() as stub:
         argv = [
             sys.executable,
             # The working directory stays off sys.path: a planted module never runs.
@@ -117,16 +177,12 @@ def run(provider: str, *, runner: Runner | None = None) -> SmokeResult:
             "20",
         ]
         try:
-            code, out = (runner or run_cli)(argv, stub_env(int(port), os.environ))
+            code, out = (runner or run_cli)(argv, stub_env(stub.port, os.environ))
         except (OSError, subprocess.SubprocessError) as exc:
-            return SmokeResult(False, "", len(server.paths), f"could not run the CLI: {exc}")
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
+            return SmokeResult(False, "", stub.requests, f"could not run the CLI: {exc}")
     output = out.decode("utf-8", "replace")
-    if code == 0 and output == REPLY and server.paths:
+    if code == 0 and output == REPLY and stub.paths:
         return SmokeResult(
-            True, output, len(server.paths), "improve reached the stub and printed its reply"
+            True, output, stub.requests, "improve reached the stub and printed its reply"
         )
-    return SmokeResult(False, output, len(server.paths), output or f"exit code {code}, no output")
+    return SmokeResult(False, output, stub.requests, output or f"exit code {code}, no output")

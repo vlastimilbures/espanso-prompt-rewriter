@@ -6,6 +6,7 @@ import re
 import sys
 import unicodedata
 from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -42,6 +43,7 @@ if TYPE_CHECKING:
     from typer._click import Command, Context
 
     from .deploy import Plan
+    from .providers.usage import UsageObserver
 
 # The management commands (#92) and the interface (#93), each in a module under commands/:
 # command name -> (module, its Typer app). Loaded only when that command runs or --help lists
@@ -333,6 +335,66 @@ def _failure(exc: Exception, rec: recorder.Recorder) -> str:
     return recorder.ERROR_MARKER
 
 
+@dataclass
+class Rewrite:
+    """How far a rewrite() got, kept when it raises: the profile it resolved (the history's
+    profile_id) and the provider it built (for the sent-despite note of a failed call)."""
+
+    profile_id: str | None = None
+    built: object = None
+
+
+def rewrite(
+    raw: str,
+    provider: str,
+    cfg: Settings,
+    profile: str | None,
+    ran: Rewrite,
+    *,
+    allow_flagged: bool = False,
+    observer: UsageObserver | None = None,
+    force_remote: bool = False,
+) -> str:
+    """Rewrite the draft ``raw`` with ``provider`` on ``cfg`` (the call's settings), as improve
+    does once it has read its input; the interface's Try tab calls it too. Raises on any
+    failure (marker() words it), with what was known by then kept in ``ran``.
+    ``force_remote`` is make_provider()'s, for the Try tab's stub runs only; improve never
+    passes it."""
+    # Checked before cleaning, which would otherwise run over a pasted multi-megabyte log.
+    if len(raw) > MAX_DRAFT_CHARS:
+        raise ProviderError(f"Input is too long ({len(raw)} chars, max {MAX_DRAFT_CHARS})")
+    draft = _clean(raw)
+    if not draft.strip():
+        raise ProviderError("Input is empty")
+
+    # Data-protection gate: make_provider wraps anything that can send the draft off this
+    # machine in GatedProvider, so it cannot be bypassed.
+    name = profile or cfg.profile
+    system = system_prompt(name, cfg.persona, cfg.profile_overrides)
+    ran.profile_id = name if name in PROFILES else ALIASES.get(name, name)
+    if not force_remote:  # improve: built exactly as it always has been
+        built = make_provider(provider, cfg, allow_flagged=allow_flagged, observer=observer)
+    else:
+        built = make_provider(
+            provider, cfg, allow_flagged=allow_flagged, observer=observer, force_remote=True
+        )
+    ran.built = built
+    result = built.generate(draft, system)
+    # Cleaned first, so an invisible character cannot hide a fence from the strip. A reply
+    # wrapped in one code fence would be pasted with the fence (flash-lite wrapped 16 of 36
+    # with the old general profile).
+    result = strip_outer_fence(_clean(result))
+    if TEMPLATE_MARKER in system:
+        result = repair_template_tags(result)
+    return result
+
+
+def marker(exc: Exception) -> str:
+    """The bracketed marker printed in place of a rewrite that failed with ``exc``."""
+    expected = isinstance(exc, ProviderError | ValueError)
+    return f"[promptmend: {'' if expected else 'unexpected error: '}{exc}]"
+
+
 # Set only by the managed Espanso matches, each to its own literal value; hidden from --help.
 _TRIGGER_ID = typer.Option(
     None,
@@ -389,7 +451,7 @@ def improve(
 ) -> None:
     """Improve a draft prompt. Errors are printed inline so Espanso shows them."""
     rec = recorder.Recorder("improve", trigger_id)
-    built: object = None
+    ran = Rewrite()
     try:
         loaded = Settings.load()
         rec.track(loaded)
@@ -407,43 +469,27 @@ def improve(
         if provider in PROVIDER_NAMES:
             openrouter_only(provider, tier, effort)
         raw = _read_input(source, text)
-        # Checked before cleaning, which would otherwise run over a pasted multi-megabyte log.
-        if len(raw) > MAX_DRAFT_CHARS:
-            raise ProviderError(f"Input is too long ({len(raw)} chars, max {MAX_DRAFT_CHARS})")
-        draft = _clean(raw)
-        if not draft.strip():
-            raise ProviderError("Input is empty")
-
-        # Data-protection gate: make_provider wraps anything that can send the draft off this
-        # machine in GatedProvider, so it cannot be bypassed. The result is cleaned here too
-        # because --copy and clipboard output put it on the clipboard.
-        name = profile or cfg.profile
-        system = system_prompt(name, cfg.persona, cfg.profile_overrides)
-        rec.profile_id = name if name in PROFILES else ALIASES.get(name, name)
-        built = make_provider(provider, cfg, allow_flagged=allow_flagged, observer=rec.observer)
-        result = built.generate(draft, system)
-        # Cleaned first, so an invisible character cannot hide a fence from the strip. A reply
-        # wrapped in one code fence would be pasted with the fence (flash-lite wrapped 16 of 36
-        # with the old general profile).
-        result = strip_outer_fence(_clean(result))
-        if TEMPLATE_MARKER in system:
-            result = repair_template_tags(result)
+        # The rewrite comes back cleaned, which matters here too: --copy and clipboard output
+        # put it on the clipboard.
+        result = rewrite(
+            raw, provider, cfg, profile, ran, allow_flagged=allow_flagged, observer=rec.observer
+        )
         clipboard_output = cfg.output == CLIPBOARD
         if copy and not clipboard_output:
             _clipboard(pyperclip.copy, result)
     except Exception as exc:
         # Nothing may traceback or exit nonzero: Espanso cannot surface stderr, so emit a
         # visible bracketed marker instead of a blank expansion.
-        expected = isinstance(exc, ProviderError | ValueError)
-        error = f"[promptmend: {'' if expected else 'unexpected error: '}{exc}]"
-        _emit(_sent_despite_note(built) + error)
+        _emit(_sent_despite_note(ran.built) + marker(exc))
         rec.emitted()
+        rec.profile_id = ran.profile_id
         rec.outcome = _failure(exc, rec)
         # After the paste text is out, so history can never change it (see recorder.py).
         rec.finish()
         raise typer.Exit(0) from None
 
-    note = _sent_despite_note(built)
+    rec.profile_id = ran.profile_id
+    note = _sent_despite_note(ran.built)
     _emit(_deliver(result, note, rec) if clipboard_output else note + result)
     rec.emitted()
     rec.finish()

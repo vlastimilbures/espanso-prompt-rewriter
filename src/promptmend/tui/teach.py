@@ -44,12 +44,28 @@ BUTTONS: dict[str, tuple[tuple[str, ...], ...]] = {
     "previous-profiles": (("profiles", "migrate", "--checkout", CHECKOUT),),
     "previous-deploy": (("espanso", "deploy"),),
     "previous-retire": (("config", "retire", "--from", CHECKOUT),),
+    "try-run": (
+        (
+            "improve",
+            "--provider",
+            "<PROVIDER>",
+            "--profile",
+            "<NAME>",
+            "--tier",
+            "<TIER>",
+            "--source",
+            "argument",
+            "--text",
+            "<DRAFT>",
+        ),
+    ),
 }
 # What a button's command does not cover, said in its tooltip.
 NOTES = {
     "smoke": "Its last step, the smoke test against a stub on 127.0.0.1.",
     "edit-profile": "Shows where each profile is; open the file in your editor.",
     "export": "Or --format csv.",
+    "try-run": "Local stub runs it against a stub on 127.0.0.1 instead; no provider is called.",
 }
 # Buttons with no command of their own: they move around the interface or measure it.
 NO_COMMAND = {

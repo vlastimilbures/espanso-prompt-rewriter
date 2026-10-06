@@ -197,8 +197,8 @@ def test_digits_switch_tabs_and_t_toggles_contrast(espanso: FakeRunner) -> None:
         from textual.widgets import TabbedContent
 
         for key, tab in zip(
-            "654321",
-            ("diagnostics", "history", "triggers", "profiles", "providers", "home"),
+            "7654321",
+            ("try", "diagnostics", "history", "triggers", "profiles", "providers", "home"),
             strict=True,
         ):
             await pilot.press(key)
@@ -210,7 +210,7 @@ def test_digits_switch_tabs_and_t_toggles_contrast(espanso: FakeRunner) -> None:
         await pilot.press("q")
 
     drive(scenario)
-    assert seen == [True] * 8
+    assert seen == [True] * 9
 
 
 def test_header_shows_the_name_and_installed_version(
@@ -328,7 +328,7 @@ def test_home_shows_doctor_and_checks_again(espanso: FakeRunner) -> None:
         assert "Not ready: OPENROUTER_API_KEY is not set, so -i- cannot rewrite." in shown
         assert "fail  Rewrites" not in shown  # the label is FAIL, as in Diagnostics
         assert "FAIL  Rewrites" in shown
-        assert "-> 2 Providers & keys" in shown
+        assert "-> 2 Providers" in shown
         await press(app, pilot, "#home-reload")
         await pilot.press("r")
         await settle(pilot)
@@ -364,7 +364,7 @@ def test_home_warns_of_a_persona_matching_the_patterns(
     drive(scenario)
 
 
-# --- Providers & keys ---------------------------------------------------------------------
+# --- Providers ----------------------------------------------------------------------------
 
 
 def test_providers_set_a_key_never_shows_it(saved: Path, espanso: FakeRunner) -> None:

@@ -259,6 +259,7 @@ def _shoot(
         ("triggers", "4"),
         ("history", "5"),
         ("diagnostics", "6"),
+        ("try", "7"),
     ],
 )
 def test_snapshot(name: str, key: str) -> None:
