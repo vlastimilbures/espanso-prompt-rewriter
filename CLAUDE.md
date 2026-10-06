@@ -186,7 +186,8 @@ Rules for agents:
   `validation_failed`, else `error_marker`. Off, it never imports `history`/`sqlite3`
   (`tests/test_trigger_contract.py` runs both ways).
 - `prompt_builder.py` — `PROFILES` maps a profile name (`default`, `general`) to a system
-  prompt used to instruct the rewrite; `ALIASES` keeps the retired `default-pro` resolving to `default`. `render()` fills the `{{PERSONA_RULE}}` token from
+  prompt used to instruct the rewrite; `ALIASES` keeps the retired `default-pro` resolving to `default`. `render()` fills the `{{PERSONA_RULE}}` token (and
+  `{{PERSONA_OPENING}}`, which opens both examples' CONTEXT, #49) in one pass from
   `PROMPT_PERSONA` (also printed by the `persona` subcommand for the `-p-` snippet). `default` (the
   `PROMPT_PROFILE` fallback) rewrites the draft into the golden template kept in
   `espanso/match/prompts-template.yml` (`CONTEXT / GOAL / INSTRUCTIONS / CONSTRAINTS / INPUTS / OUTPUTS`),

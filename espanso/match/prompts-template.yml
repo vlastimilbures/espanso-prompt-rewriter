@@ -28,10 +28,10 @@ matches:
       [pick one 1a/1b:]
       1a/ Plan the task thoroughly, list any assumptions and open questions, and validate the plan with me before executing.
       1b/ Execute, but state assumptions up front.
-      2/ Load and validate all inputs. If anything is missing, ambiguous, or contradictory, ask me up to 5 targeted questions before drafting.
+      2/ Load and validate all inputs. If anything is missing, ambiguous, or contradictory, ask me up to 5 targeted questions before drafting; if step 1 says execute, state your assumption instead and ask only about a gap that blocks the task.
       3/ [step — the substantive work]
       [pick one 4a/4b:]
-      4a/ Spin up an independent agent with [XXX] domain knowledge and perform a critical review, check for errors, and ensure the output is complete and accurate, review formatting and clarity, and ensure the output is well structured and easy to read; summarize all issues and improvement points, validate them with me before implementing any changes.
+      4a/ Use a separate agent with [XXX] domain knowledge if you can run one, otherwise review as an independent expert in that domain would: perform a critical review, check for errors, and ensure the output is complete and accurate, review formatting and clarity, and ensure the output is well structured and easy to read; summarize all issues and improvement points, validate them with me before implementing any changes.
       4b/ Review your own output against these checks, then list issues found and fixes made:
         - Accuracy: every factual claim traces to an input or a cited source. Mark anything unverifiable as [not in source]. Separate evidence from opinion (label opinions "assumption" or "view").
         - Completeness: all parts of the goal addressed.

@@ -36,7 +36,8 @@ write a short board update on why customer churn went up last quarter, use the a
 
 Pasted in its place (real output of v0.7.0 on its default model, `google/gemini-3.5-flash-lite`,
 no persona configured; today's prompt differs in detail, for example it asks the step that
-writes the update, step 4 here, to name the update's sections):
+writes the update, step 4 here, to name the update's sections, and words steps 2 and 5
+differently):
 
 ```text
 <CONTEXT>
@@ -830,15 +831,15 @@ An estimate is stored with the table's `version` and always shown apart from rep
 The default models and prompt were chosen with a benchmark
 ([`scripts/bench_models.py`](scripts/bench_models.py)) that scores every rewrite mechanically
 for template fidelity, prompt injection and language edge cases, latency and real cost. With the
-prompt of v0.14.0 (unchanged since):
+prompt of v0.19.0:
 
 - `-i-` (standard tier): `google/gemini-3.5-flash-lite` on `google-ai-studio/flex`, effort
-  `minimal`: 30/30 core and 102/120 edge runs passed, 2.0 s median and 3.2 s p95.
-- `-ip-` (pro tier): `openai/gpt-6-luna` on `openai`, effort `low`: 23/24 core and 98/99 edge
-  runs passed, 5.6 s median and 9.2 s p95.
+  `minimal`: 24/24 core and 75/84 edge runs passed, 2.0 s median and 2.9 s p95.
+- `-ip-` (pro tier): `openai/gpt-6-luna` on `openai`, effort `low`: 23/24 core and 81/84 edge
+  runs passed, 5.8 s median and 10.8 s p95.
 
-These runs predate the bench's persona and "None"/`[REVIEW` checks and its `INPUTS`-free
-`kept` (#48), so a later run is not directly comparable. Prices change quickly, so re-run it before relying on these numbers.
+Both opened `CONTEXT` with the configured persona in all 105 runs scored on it (the v0.14.0
+prompt: 100 and 96). Prices change quickly, so re-run it before relying on these numbers.
 The method, all result tables (with cost per rewrite), the older prompts' results and how to
 run it are in [docs/benchmark.md](docs/benchmark.md).
 

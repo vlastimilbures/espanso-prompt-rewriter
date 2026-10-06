@@ -683,7 +683,7 @@ MANDATORY = {
 }
 PLAN_FIRST = "Plan the task thoroughly"
 EXECUTE_NOW = "Execute, but state assumptions up front"
-INDEPENDENT = "Spin up an independent agent"
+INDEPENDENT = "Use a separate agent with"
 SELF_REVIEW = "Review your own output against these checks"
 DEFAULT_OUTPUTS = "structured .md, well formatted with clear headings/subheadings"
 

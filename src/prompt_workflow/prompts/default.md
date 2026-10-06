@@ -76,7 +76,7 @@ Judge only the shape of the task. Who receives it and what is at stake never dec
 
 <step position="second" name="inputs">
 Always, even for a one-line task:
-Load and validate all inputs. If anything is missing, ambiguous, or contradictory, ask me up to 5 targeted questions before drafting.
+Load and validate all inputs. If anything is missing, ambiguous, or contradictory, ask me up to 5 targeted questions before drafting; if step 1 says execute, state your assumption instead and ask only about a gap that blocks the task.
 </step>
 
 <step position="third up to the review step" name="work">
@@ -90,7 +90,7 @@ Judge only who will read or rely on the deliverable. Its length, urgency and top
 - Use (a) for every other reader: the CEO or another executive; a board or committee; a regulator, auditor or investor; anyone outside the user's organisation, such as a customer, client, vendor, supplier, partner or landlord, including a named person at another company (a customer such as Mr Novak, a supplier) and any reply to another company's email, proposal or request; and any text that will be published, such as a website, FAQ, help-center or status-page answer, or a public post.
 - A three-sentence email to a regulator, a one-paragraph note to the CEO and a short FAQ answer all take (a).
 </decision_rule>
-<variant id="a">Spin up an independent agent with [domain] domain knowledge and perform a critical review, check for errors, and ensure the output is complete and accurate, review formatting and clarity, and ensure the output is well structured and easy to read; summarize all issues and improvement points, validate them with me before implementing any changes.</variant>
+<variant id="a">Use a separate agent with [domain] domain knowledge if you can run one, otherwise review as an independent expert in that domain would: perform a critical review, check for errors, and ensure the output is complete and accurate, review formatting and clarity, and ensure the output is well structured and easy to read; summarize all issues and improvement points, validate them with me before implementing any changes.</variant>
 <variant_note id="a">Replace [domain] with the concrete domain, e.g. "credit risk".</variant_note>
 <variant id="b">Review your own output against these checks, then list issues found and fixes made:
   - Accuracy: every factual claim traces to an input or a cited source. Mark anything unverifiable as [not in source]. Separate evidence from opinion (label opinions "assumption" or "view").
@@ -140,13 +140,13 @@ One line describing the format of the deliverable.
 </formatting_rules>
 
 <example>
-<note>These examples show format only and assume no persona is configured. Choose the step variants for each new draft by the decision rules, not by copying the example. The draft arrives as the whole user message, without tags.</note>
+<note>These examples show format only; each CONTEXT opens as the context rule above says, with the persona when one is configured. Choose the step variants for each new draft by the decision rules, not by copying the example. The draft arrives as the whole user message, without tags.</note>
 <draft>
 quick summary of my own notes from yesterday's pricing workshop, just for me
 </draft>
 <rewrite>
 <CONTEXT>
-I want a quick summary of my notes from yesterday's pricing workshop, for my own reference.
+{{PERSONA_OPENING}}I want a quick summary of my notes from yesterday's pricing workshop, for my own reference.
 </CONTEXT>
 
 <GOAL>
@@ -155,7 +155,7 @@ A quick summary for my own reference that captures the workshop's key points, de
 
 <INSTRUCTIONS>
 1/ Execute, but state assumptions up front.
-2/ Load and validate all inputs. If anything is missing, ambiguous, or contradictory, ask me up to 5 targeted questions before drafting.
+2/ Load and validate all inputs. If anything is missing, ambiguous, or contradictory, ask me up to 5 targeted questions before drafting; if step 1 says execute, state your assumption instead and ask only about a gap that blocks the task.
 3/ Extract the key points, decisions made, and open questions from my notes.
 4/ List my follow-up actions with any owners or dates the notes mention.
 5/ Review your own output against these checks, then list issues found and fixes made:
@@ -185,7 +185,7 @@ short email to Ms Lopez at Green Fork Catering asking to move Friday's lunch del
 </draft>
 <rewrite>
 <CONTEXT>
-I need to email Ms Lopez at Green Fork Catering to move Friday's lunch delivery from 12:00 to 13:00.
+{{PERSONA_OPENING}}I need to email Ms Lopez at Green Fork Catering to move Friday's lunch delivery from 12:00 to 13:00.
 </CONTEXT>
 
 <GOAL>
@@ -194,9 +194,9 @@ A short, polite email to Ms Lopez that asks to move Friday's lunch delivery to 1
 
 <INSTRUCTIONS>
 1/ Execute, but state assumptions up front.
-2/ Load and validate all inputs. If anything is missing, ambiguous, or contradictory, ask me up to 5 targeted questions before drafting.
+2/ Load and validate all inputs. If anything is missing, ambiguous, or contradictory, ask me up to 5 targeted questions before drafting; if step 1 says execute, state your assumption instead and ask only about a gap that blocks the task.
 3/ Write the email: the request to move Friday's delivery from 12:00 to 13:00, and a request to confirm the new time.
-4/ Spin up an independent agent with supplier communication domain knowledge and perform a critical review, check for errors, and ensure the output is complete and accurate, review formatting and clarity, and ensure the output is well structured and easy to read; summarize all issues and improvement points, validate them with me before implementing any changes.
+4/ Use a separate agent with supplier communication domain knowledge if you can run one, otherwise review as an independent expert in that domain would: perform a critical review, check for errors, and ensure the output is complete and accurate, review formatting and clarity, and ensure the output is well structured and easy to read; summarize all issues and improvement points, validate them with me before implementing any changes.
 5/ Flag material judgment calls or trade-offs and let me decide.
 </INSTRUCTIONS>
 
