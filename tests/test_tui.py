@@ -1732,22 +1732,26 @@ def test_previous_install_entered_path_that_is_no_checkout(
 # --- Intro and About (#112) ---------------------------------------------------------------
 
 
-def test_intro_shows_on_launch_and_closes_by_itself(espanso: FakeRunner) -> None:
+# The timer is captured and fired by hand: a slow runner can take longer than any real
+# delay just to start the app.
+def test_intro_shows_on_launch_and_closes_by_itself(
+    espanso: FakeRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from prompt_workflow.tui.intro import IntroScreen
 
-    app = ManageApp(intro_seconds=0.3)
-    seen = []
+    timers: list[tuple[float, Callable[[], None]]] = []
+    monkeypatch.setattr(
+        IntroScreen, "set_timer", lambda self, delay, callback: timers.append((delay, callback))
+    )
 
-    async def main() -> None:
-        async with app.run_test(size=SIZE) as pilot:
-            await pilot.pause()
-            seen.append(isinstance(app.screen, IntroScreen))
-            await asyncio.sleep(0.6)
-            await settle(pilot)
-            seen.append(isinstance(app.screen, IntroScreen))
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        assert isinstance(app.screen, IntroScreen)
+        assert [delay for delay, _ in timers] == [0.8]
+        timers[0][1]()
+        await settle(pilot)
+        assert not isinstance(app.screen, IntroScreen)
 
-    asyncio.run(main())
-    assert seen == [True, False]
+    drive(scenario, intro_seconds=0.8)
 
 
 def test_intro_any_key_closes_it_and_is_consumed(espanso: FakeRunner) -> None:
