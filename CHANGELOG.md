@@ -66,6 +66,20 @@ All notable changes to this project are documented here. The format follows
   knowledge if you can run one, otherwise review as an independent expert in that domain
   would: …", so it also works in a plain chat; "validate them with me" is kept. The `-p-`
   snippet carries both wordings. docs/benchmark.md has the before/after results.
+- The `default` prompt no longer quotes the bench's own drafts (#48): its two examples are new
+  situations (a summary of training notes, a catering delivery time), and its decision rules
+  name other readers and lengths ("a brief letter to a tax office" instead of "a quick email
+  to a regulator"; no "Herr Maier", landlord, help-center, "two-line" or "one-paragraph").
+  The rules themselves are unchanged. On the bench (docs/benchmark.md) flash-lite passed 122
+  of 132 runs (before: 115), with 3 `<CONTEXT>…</GOAL>` slips as before, and copied pasted
+  material in every `pasted` run (before: none).
+- Bench (`scripts/bench_models.py`, #48): a frozen `holdout` suite of 8 new drafts no prompt
+  was tuned on (`--suite holdout`, not part of `all`); a test that fails when a profile or the
+  `-p-` template quotes any bench draft (a three-word phrase or a name) or any holdout
+  specific; the contested review labels of `quick-ceo`, `memo` and `outliers` accept either
+  answer; and the report adds the mean `[REVIEW: …]` count per rewrite for each draft.
+- README's example output was regenerated with the v0.19.0 prompt on the default standard
+  model, without a persona, and is labelled with both (#40).
 - README "Privacy and data protection" and `.env.example` explain that a local alias of an
   Ollama cloud model (`ollama cp gpt-oss:120b-cloud my-model`) has no `cloud` tag, so it counts
   as local: the gate does not run and `PROMPT_LOCAL_ONLY` does not refuse it. Set

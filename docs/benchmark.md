@@ -11,7 +11,10 @@ were chosen with [`scripts/bench_models.py`](../scripts/bench_models.py) rather 
 execute now* (task complexity) and *independent or self review* (who reads the result). The
 `edge` suite (`--suite edge` or `--suite all`) adds 28 drafts that probe the rest: prompt
 injection, questions, pasted emails, Czech, German and Spanish drafts, a draft stating its own
-role, code, and outside readers that are only implied. Every response is scored mechanically:
+role, code, and outside readers that are only implied. The `holdout` suite (`--suite holdout`,
+not part of `all`) is 8 drafts frozen on 2026-10-06 that no prompt was tuned on; it estimates
+how a prompt does on drafts it was not shaped on, and a test keeps every profile from quoting
+it or any other bench draft (#48). Every response is scored mechanically:
 all six sections present and correctly closed, mandatory steps verbatim, `1/ 2/ 3/` numbering,
 both branch choices right, no leaked scaffolding or `[domain]` placeholder, the draft's language
 and role respected, the configured persona in `CONTEXT` (unless the draft states its own role;
@@ -20,7 +23,8 @@ start, middle and end of pasted material copied word for word into `INPUTS`, no 
 `OUTPUTS` that opens with "None" and then asks for something with `[REVIEW: …]`, no
 third-person context, no degeneration. Each check's name starts with its kind: `struct:` (the
 template's form and fixed wordings, the same for every draft), `branch:` (the plan and review
-choice, scored only on drafts with a label, none where either variant is defensible, and
+choice, scored only on drafts with a label, none where either variant is defensible (the
+contested `quick-ceo`, `memo` and `outliers` review choices among them), and
 only on rewrites that chose exactly one variant of that step; a missing or doubled variant is
 a `struct:` failure, never a branch pass) or `draft:` (what the draft's role, language,
 deliverable and pasted material call for, the configured persona, and how `INPUTS` and
@@ -31,7 +35,9 @@ choice on a few borderline drafts, so compare two runs per kind and against the 
 `kept` column reports the share of the draft's specifics carried over, found at the start of a
 word (an all-caps key only in capitals). It leaves `INPUTS` out unless the draft pastes
 material: otherwise `INPUTS` is often the draft quoted as is (a non-English draft's original),
-and a key found only there was not carried into the rewrite. `rep` counts how many rewrites had a `<CONTEXT>…</GOAL>` slip (seen on flash-lite), which the CLI repairs
+and a key found only there was not carried into the rewrite. A `[REVIEW] flags per rewrite by
+draft` table gives the mean number of `[REVIEW: …]` flags per rewrite, a metric to read for
+too few or too many flags rather than a check. `rep` counts how many rewrites had a `<CONTEXT>…</GOAL>` slip (seen on flash-lite), which the CLI repairs
 before pasting; those are scored on the repaired text. Cost and token counts come from
 OpenRouter's own usage data. Every HTTP attempt's reported cost counts against `--budget`,
 failed and retried ones included; an attempt that reports no cost is counted apart and never
@@ -63,17 +69,54 @@ between releases a heading spans; a release that changes it gets new results.
 
 ### Current: prompt of v0.19.0
 
-Run on 2026-10-06 with `--suite all --runs 3 --persona example --max-tokens 2400`, the new
-prompt and the v0.14.0 prompt (shipped until v0.18.0) side by side on the same bench. The
-prompt now opens both examples' `CONTEXT` with the configured persona (#49), tells the inputs
-step to state an assumption instead of asking when step 1 says execute (#46), and words the
-independent review so it can run without a separate agent (#46):
+The prompt's examples and wordings no longer quote the bench's drafts (#48): the examples are
+new situations, and the decision rules name other readers and lengths than the drafts do
+("a brief letter to a tax office" instead of "a quick email to a regulator", no "Herr
+Maier", landlord, help-center, "two-line" or "one-paragraph"). Run on 2026-10-06 with
+`--suite all` plus `--suite holdout`, `--runs 3 --persona example --max-tokens 2400`, the
+decontaminated prompt against the first v0.19.0 wording (#163, below) on the same bench, with
+the contested `quick-ceo`, `memo` and `outliers` review labels accepting either answer:
+
+| Setup | Prompt | core | edge | holdout | persona in `CONTEXT` | `[REVIEW]` per rewrite | `rep` | p50 | p95 | $ per rewrite |
+|-------|--------|------|------|---------|----------------------|------------------------|-------|-----|-----|---------------|
+| `google/gemini-3.5-flash-lite` @ `google-ai-studio/flex`, effort `minimal` (standard) | decontaminated | 23/24 | 76/84 | 23/24 | 128/128 | 0.62 | 3 | 2.5 s | 3.5 s | 0.0012 |
+| | first decontaminated draft | 23/24 | 75/84 | 18/24 | 129/129 | 0.61 | 33 | 2.3 s | 3.3 s | 0.0012 |
+| | #163 | 24/24 | 73/84 | 18/24 | 129/129 | 0.66 | 3 | 2.3 s | 3.3 s | 0.0012 |
+| `openai/gpt-6-luna` @ `openai`, effort `low` (pro) | first decontaminated draft | 24/24 | 83/84 | 23/24 | 129/129 | 0.80 | 0 | 6.8 s | 11.6 s | 0.0004 |
+| | #163 | 24/24 | 81/84 | 24/24 | 129/129 | 0.85 | 0 | 5.9 s | 10.2 s | 0.0004 |
+
+The first decontaminated draft made flash-lite close `CONTEXT` with `</GOAL>` in 33 of 132
+rewrites (every run of `quick-external`, `quick-ceo`, `memo`, `slack` and `supplier`), against
+3 with the #163 prompt. The CLI repairs that slip before pasting, but it was a regression. Its
+examples differed from the shipped ones only on the surface ("quick recap … only I will read
+it", "email Ms Lopez …, keep it brief: …", "Brief: a few sentences."); bringing their wording
+back to the #163 shape ("quick summary of my own notes …, only for me", "brief email to Ms
+Lopez … asking her to move …", "Keep it brief: a few sentences.") while still quoting no draft
+brought it back to 3, and that is the shipped prompt. gpt-6-luna was benched on the first
+draft only: the final change touches only the examples' wording, and it had no slips there.
+
+By kind (132 runs per row), the shipped prompt against #163 on flash-lite: `struct` 131 of 131
+and 132, `branch` 116 of 122 and 118 of 123, `draft` 128 of 131 and 119 of 132 (one run of the
+shipped prompt ended in an HTTP 400 from the provider and is counted as a failure, not scored
+by kind). On gpt-6-luna, the first draft against #163: `struct` 132 and 130, `branch` 122 and
+123 of 123, `draft` 131 and 131. Every interval overlaps. The new `draft:` checks catch
+flash-lite on pasted material: with the #163 prompt it summarised `pasted` instead of copying
+it in 3 of 3 runs, and `ho-signing` (the holdout's pasted email) in 3 of 3; with the shipped
+prompt it copied both in 3 of 3. The other failures are the known gaps: flash-lite gives
+`long-thread` the self-review (3 of 3) and `cap-thread` the `.md` line (3 of 3).
+
+The first v0.19.0 wording (#163) was run earlier on 2026-10-06 with `--suite all --runs 3
+--persona example --max-tokens 2400`, against the v0.14.0 prompt (shipped until v0.18.0) on
+the same bench, before the contested labels were relaxed. It opens both examples' `CONTEXT`
+with the configured persona (#49), tells the inputs step to state an assumption instead of
+asking when step 1 says execute (#46), and words the independent review so it can run
+without a separate agent (#46):
 
 | Setup | Tier | Prompt | core | edge | persona in `CONTEXT` | `rep` | kept | p50 | p95 | $ per rewrite |
 |-------|------|--------|------|------|----------------------|-------|------|-----|-----|---------------|
-| `google/gemini-3.5-flash-lite` @ `google-ai-studio/flex`, effort `minimal` | standard (default) | v0.19.0 | 24/24 | 75/84 | 105/105 | 2 | 0.99 | 2.0 s | 2.9 s | 0.0012 |
+| `google/gemini-3.5-flash-lite` @ `google-ai-studio/flex`, effort `minimal` | standard (default) | #163 | 24/24 | 75/84 | 105/105 | 2 | 0.99 | 2.0 s | 2.9 s | 0.0012 |
 | | | v0.14.0 | 23/24 | 69/84 | 100/105 | 7 | 1.00 | 2.0 s | 3.1 s | 0.0012 |
-| `openai/gpt-6-luna` @ `openai`, effort `low` | pro (default) | v0.19.0 | 23/24 | 81/84 | 105/105 | 0 | 1.00 | 5.8 s | 10.8 s | 0.0004 |
+| `openai/gpt-6-luna` @ `openai`, effort `low` | pro (default) | #163 | 23/24 | 81/84 | 105/105 | 0 | 1.00 | 5.8 s | 10.8 s | 0.0004 |
 | | | v0.14.0 | 22/24 | 74/84 | 96/105 | 0 | 1.00 | 6.5 s | 10.7 s | 0.0003 |
 
 By kind (all 108 runs per row; Wilson 95% intervals in the report), the new prompt against

@@ -97,16 +97,115 @@ def test_bench_phrases_match_static_template() -> None:
 # The core suite covers all four branch combinations, so coupling the branches cannot pass.
 def test_drafts_span_all_branch_combinations() -> None:
     core = [bench.DRAFTS[name] for name in bench.suite_drafts("core")]
-    combos = {(d.plan, d.independent) for d in core}
+    combos = {(d.plan, d.independent) for d in core} - {(False, None)}  # quick-ceo, contested
     assert combos == {(True, True), (True, False), (False, True), (False, False)}
 
 
-# core stays the 8 model-choice drafts (and the default); edge adds the probing drafts.
+# core stays the 8 model-choice drafts (and the default); edge adds the probing drafts; the
+# frozen holdout drafts are never part of `all` (#48).
 def test_suites() -> None:
-    core, edge, every = (bench.suite_drafts(s) for s in ("core", "edge", "all"))
+    core, edge, every, holdout = (bench.suite_drafts(s) for s in ("core", "edge", "all", "holdout"))
     assert len(core) == 8
     assert len(edge) == 28
+    assert len(holdout) == 8
     assert every == core + edge
+    assert set(bench.SUITES) == {"core", "edge", "all", "holdout"}
+    assert {d.suite for d in bench.DRAFTS.values()} == {"core", "edge", "holdout"}
+
+
+# The holdout drafts estimate how a prompt does on drafts it was not shaped on, so each has a
+# label the decision rules settle (none is contested) and specifics to carry over.
+@pytest.mark.parametrize("name", bench.suite_drafts("holdout"))
+def test_holdout_drafts_are_labelled(name: str) -> None:
+    draft = bench.DRAFTS[name]
+    assert draft.plan is not None
+    assert draft.independent is not None
+    assert draft.keys
+
+
+_REPO = Path(__file__).parents[1]
+# What a draft and the prompt may share without the prompt quoting the draft: everyday
+# three-word phrases, and capitalised words that are not names (a sentence start, a title, a
+# weekday or month; all-caps roles and acronyms such as CEO are skipped as well).
+_COMMON_TRIGRAMS = {"for my own", "i want to", "part of the"}
+_NOT_NAMES = {
+    "Mr",
+    "Ms",
+    "Mrs",
+    *("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"),
+    *("January", "February", "March", "April", "May", "June", "July", "August"),
+    *("September", "October", "November", "December"),
+}
+
+
+def _prompt_texts() -> dict[str, str]:
+    """Every shipped profile and the -p- template: what a rewrite can be shaped by."""
+    texts = {
+        path.name: path.read_text(encoding="utf-8")
+        for path in sorted((_REPO / "src/prompt_workflow/prompts").glob("*.md"))
+    }
+    texts["prompts-template.yml"] = (_REPO / "espanso/match/prompts-template.yml").read_text(
+        encoding="utf-8"
+    )
+    return texts
+
+
+def _words(text: str) -> list[str]:
+    return re.findall(r"[a-z0-9]+(?:[-'][a-z0-9]+)*", text.lower())
+
+
+def _trigrams(text: str) -> set[str]:
+    words = _words(text)
+    return {" ".join(words[i : i + 3]) for i in range(len(words) - 2)}
+
+
+def _names(text: str) -> set[str]:
+    """Capitalised words that do not start a sentence or a line: the draft's own names."""
+    found = re.finditer(r"(?<![\w-])[A-Z][a-z][\w-]*", text)
+    return {
+        m.group()
+        for m in found
+        if not re.search(r"(?:\A|[.!?:]\s|\n)[\s*-]*\Z", text[: m.start()])
+        and m.group() not in _NOT_NAMES
+    }
+
+
+def _quoted(word: str, text: str) -> bool:
+    return re.search(r"(?<![\w-])" + re.escape(word) + r"(?![\w-])", text) is not None
+
+
+# The prompt must not quote any bench draft (#48): an example worded like a draft teaches
+# that draft's answer and inflates its pass rate. No three-word phrase of a draft (beyond
+# everyday ones) and none of its names may appear in a profile or the -p- template.
+@pytest.mark.parametrize("name", list(bench.DRAFTS))
+def test_prompts_quote_no_bench_draft(name: str) -> None:
+    draft = bench.DRAFTS[name].text
+    for source, text in _prompt_texts().items():
+        shared = (_trigrams(draft) & _trigrams(text)) - _COMMON_TRIGRAMS
+        assert not shared, f"{source} quotes draft {name!r}: {sorted(shared)}"
+        names = sorted(w for w in _names(draft) if _quoted(w, text))
+        assert not names, f"{source} names {names} from draft {name!r}"
+
+
+# The holdout drafts are stricter: none of their specifics may appear in any prompt, at a word
+# boundary and in any case, nor any of their three-word phrases, everyday ones included.
+@pytest.mark.parametrize("name", bench.suite_drafts("holdout"))
+def test_holdout_not_in_prompts(name: str) -> None:
+    draft = bench.DRAFTS[name]
+    # Matched at the start of a word only, like key_found(), so an inflected form ("invoices"
+    # for "invoice") counts as a leak too: stricter than a whole-word match.
+    probes = [key.strip() for alts in draft.keys for key in alts if len(key.strip()) > 3]
+    for source, text in _prompt_texts().items():
+        shared = sorted(_trigrams(draft.text) & _trigrams(text))
+        assert not shared, f"{source} quotes holdout draft {name!r}: {shared}"
+        leaked = [p for p in probes if re.search(r"(?<![\w-])" + re.escape(p), text, re.IGNORECASE)]
+        assert not leaked, f"{source} contains {leaked} from holdout draft {name!r}"
+
+
+def test_leak_checks_catch_a_quote() -> None:
+    assert "regulator's inspector" in " ".join(_trigrams("the regulator's inspector confirmed"))
+    assert _names("short reply to Herrn Maier. Thanks") == {"Herrn", "Maier"}
+    assert _names("Friday. Then call Mr Tran") == {"Tran"}
 
 
 # A bench draft the data-protection gate blocks would fail on every run for a reason
@@ -976,6 +1075,38 @@ def test_report_splits_pass_by_kind(capsys: pytest.CaptureFixture[str]) -> None:
         *("2/3", "0.21-0.94"),  # draft
         *("1/4", "0.05-0.70"),  # all, the pass column with its interval
     ]
+
+
+# The report gives the mean [REVIEW] count per rewrite for each draft and model, over the runs
+# that answered; a run that errored or was skipped is left out (#48).
+def test_report_review_counts_by_draft(capsys: pytest.CaptureFixture[str]) -> None:
+    def made(model: str, draft: str, run: int, **kwargs: Any) -> bench.Result:
+        return bench.Result(model, draft, run, 1.0, 10, 20, **kwargs)
+
+    results = [
+        made("a/b", "board", 1, reviews=1),
+        made("a/b", "board", 2, reviews=2),
+        made("a/b", "board", 3, error="boom", reviews=9),
+        made("c/d", "board", 1, reviews=0),
+        made("a/b", "light", 1, skipped=True, error="budget exhausted"),
+        made("c/d", "light", 1, reviews=3),
+    ]
+    out, _ = _report_rows(capsys, results, bench.Budget(1.0))
+    table = out.split("[REVIEW] flags per rewrite by draft")[1].split("\n\n")[0]
+    rows = {ln.split()[0]: ln.split()[1:] for ln in table.splitlines()[2:]}
+    assert rows == {"board": ["1.5", "0.0"], "light": ["-", "3.0"]}
+
+
+def test_run_one_counts_review_flags(
+    fake_http: FakeHttp, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k")
+    flagged = GOOD.replace(
+        "</INPUTS>", "- Data [REVIEW: attach it]\n- Plan [REVIEW: which]\n</INPUTS>"
+    )
+    fake_http.reply({"choices": [{"message": {"content": flagged}}]})
+    result = bench.run_one(Settings(), "a/b", "board", 1, tmp_path, bench.Budget(1.0))
+    assert result.reviews == 2
 
 
 # A kind no run scored shows "-".

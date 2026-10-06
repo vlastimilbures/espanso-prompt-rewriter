@@ -23,7 +23,9 @@ OpenRouter's reasoning effort (none/minimal/low/medium/high).
 The `core` suite (default) is the 8 drafts the model choice was made on. The `edge` suite adds
 28 drafts that probe what `core` cannot: prompt injection, questions, pasted material,
 non-English drafts, a draft stating its own role, code, and outside readers that are only
-implied. `edge` is not expected to pass in full; see CONTRIBUTING.md for its known gaps.
+implied. `edge` is not expected to pass in full; see CONTRIBUTING.md for its known gaps. The
+`holdout` suite is 8 frozen drafts no prompt was tuned on (not part of `all`): run it at a
+release to estimate how a prompt does on new drafts.
 """
 
 from __future__ import annotations
@@ -339,10 +341,12 @@ DRAFTS: dict[str, Draft] = {
         ),
         outputs="message",
     ),
+    # Contested review label (#48): the prompt sends the CEO to the independent review, but a
+    # one-paragraph internal note could defensibly get the self-review. Either is accepted.
     "quick-ceo": Draft(
         QUICK_CEO,
         False,
-        True,
+        None,
         keys=(
             ("CEO",),
             ("collections cost",),
@@ -427,11 +431,13 @@ DRAFTS: dict[str, Draft] = {
             "Could you also send over your current rate card",
         ),
     ),
+    # Contested review label (#48): a memo to the user's own team takes the self-review by the
+    # prompt's rule, but a team-wide process change could defensibly get the independent one.
     "memo": Draft(
         "one-page memo to my team explaining the new month-end close checklist and what changes "
         "for them from next month",
         False,
-        False,
+        None,
         "edge",
         keys=(("month-end close",), ("checklist",), ("next month",), ("team",)),
     ),
@@ -612,11 +618,13 @@ DRAFTS: dict[str, Draft] = {
         keys=(("Jana",), ("backtesting",), ("lunch",), ("2pm", "2 pm", "14:00")),
         outputs="message",
     ),
+    # Contested review label (#48): a script for the user's own use takes the self-review by the
+    # prompt's rule, but an expert review of the statistics is defensible too. Either is accepted.
     "outliers": Draft(
         "pandas script for me that flags outliers in daily disbursement amounts per branch using "
         "a rolling 30-day median and MAD, and writes the flagged rows to a CSV",
         None,
-        False,
+        None,
         "edge",
         keys=(("pandas",), ("30-day", "30 day"), ("MAD", "median absolute deviation"), ("CSV",)),
         outputs="code",
@@ -673,8 +681,101 @@ DRAFTS: dict[str, Draft] = {
         keys=(("status page",), ("login", "log in", "sign in"), ("this morning",)),
         outputs="message",
     ),
+    # --- holdout suite (#48) ---
+    # Frozen 2026-10-06, written before the decontaminated prompt was benched and never used to
+    # tune it. Not part of `all`: run them with --suite holdout to estimate how a prompt does on
+    # drafts it was not shaped on, and do not change a prompt to pass one of them. Once a
+    # holdout result has decided a prompt change, the suite is spent: freeze new drafts and move
+    # these to `edge`. tests/test_bench.py checks that no profile quotes them. Every label is
+    # one the decision rules settle on their own.
+    "ho-freight": Draft(
+        "write to Kestrel Freight that the 40 pallets due on the 9th must now reach our Brno "
+        "warehouse by the 12th at the latest, and ask them to confirm a slot",
+        False,
+        True,
+        "holdout",
+        keys=(("Kestrel",), ("40 pallets", "40 pallet"), ("Brno",), ("12th", "12 ")),
+        outputs="message",
+    ),
+    "ho-press": Draft(
+        "draft a short press statement announcing that our Ostrava branch reopens on 2 March "
+        "after the flood repairs",
+        False,
+        True,
+        "holdout",
+        keys=(("press statement",), ("Ostrava",), ("2 March", "March 2"), ("flood",)),
+    ),
+    "ho-wiki": Draft(
+        "add two lines to our team wiki's onboarding checklist telling new analysts where to "
+        "request database access and who approves it",
+        False,
+        False,
+        "holdout",
+        keys=(("wiki",), ("onboarding",), ("database access",), ("approv",)),
+    ),
+    "ho-regex": Draft(
+        "regex for me that pulls invoice numbers like INV-2024-00731 out of a messy text export",
+        False,
+        False,
+        "holdout",
+        keys=(("regex", "regular expression"), ("invoice",), ("INV-",)),
+        outputs="code",
+    ),
+    "ho-migration": Draft(
+        "work out how we should move our 14 scheduled Excel reports to Power BI over the next two "
+        "quarters: which to rebuild first, what to retire, training for the finance users, and "
+        "the risks; the plan goes to the steering committee for sign-off",
+        True,
+        True,
+        "holdout",
+        keys=(
+            ("14",),
+            ("Excel",),
+            ("Power BI",),
+            ("two quarters", "2 quarters"),
+            ("retire",),
+            ("finance users",),
+            ("steering committee",),
+        ),
+        outputs="doc",
+    ),
+    "ho-finances": Draft(
+        "plan in phases how I should get my personal finances in order over the next year: an "
+        "emergency fund, paying off the car loan, and a monthly review routine; nobody else will "
+        "see it",
+        True,
+        False,
+        "holdout",
+        keys=(("emergency fund",), ("car loan",), ("monthly review",), ("next year",)),
+    ),
+    "ho-hotel": Draft(
+        "escribe un correo breve a nuestro cliente Hotel Mirador confirmando la reserva de la "
+        "sala de conferencias para el 18 de mayo",
+        False,
+        True,
+        "holdout",
+        keys=(("Mirador",), ("18 May", "May 18"), ("conference",)),
+        outputs="message",
+        language="Spanish",
+    ),
+    "ho-signing": Draft(
+        "answer this, yes to Tuesday, but we need the final contract by Monday to read it first:"
+        "\n\n---\nFrom: Leon Hartmann (Vela Legal)\nSubject: Signing meeting\n\n"
+        "Hello, could we hold the signing meeting next Tuesday at 10:00 at our office?\n"
+        "We would send the final contract the evening before.\n"
+        "Kind regards,\nLeon\n---",
+        False,
+        True,
+        "holdout",
+        keys=(("Hartmann", "Leon"), ("Tuesday",), ("Monday",), ("final contract",)),
+        outputs="message",
+        material=(
+            "could we hold the signing meeting next Tuesday at 10:00 at our office?",
+            "We would send the final contract the evening before.",
+        ),
+    ),
 }
-SUITES = ("core", "edge", "all")
+SUITES = ("core", "edge", "all", "holdout")
 
 TAGS = ["CONTEXT", "GOAL", "INSTRUCTIONS", "CONSTRAINTS", "INPUTS", "OUTPUTS"]
 MANDATORY = {
@@ -708,7 +809,10 @@ def bench_persona(mode: str, cfg: Settings) -> str:
 
 
 def suite_drafts(suite: str) -> list[str]:
-    return [name for name, d in DRAFTS.items() if suite in ("all", d.suite)]
+    """The drafts of a suite; `all` is core and edge, never the holdout drafts."""
+    if suite == "all":
+        return [name for name, d in DRAFTS.items() if d.suite in ("core", "edge")]
+    return [name for name, d in DRAFTS.items() if d.suite == suite]
 
 
 def scaffold_tags(system_prompt: str) -> frozenset[str]:
@@ -1020,6 +1124,7 @@ class Result:
     repaired: bool = False  # the CLI's tag repair changed the text (counted, not failed)
     fenced: bool = False  # the CLI stripped a code fence around the reply (counted, not failed)
     retention: float = 0.0
+    reviews: int = 0  # [REVIEW: ...] flags in the scored text (a metric, not a check)
     failed: list[str] = field(default_factory=list)
     scored: list[str] = field(default_factory=list)  # the KINDS this run was scored on
     error: str | None = None
@@ -1289,6 +1394,7 @@ def _run_one(
         repaired=text != unfenced,
         fenced=fenced,
         retention=retention(text, draft),
+        reviews=text.count("[REVIEW"),
         failed=failed,
         scored=scored,
     )
@@ -1485,6 +1591,17 @@ def report(results: list[Result], budget: Budget, meta: dict[str, object] | None
             cells.append(f"{sum(r.ok for r in ds)}/{len(ds)}" if ds else "-")
         print(f"{d[:18]:18s}" + "".join(f"{c:>7s}" for c in cells))
 
+    # Too few flags leave a gap the other assistant fills by guessing; too many make the user
+    # answer what the draft already says. Mean per rewrite, over the runs that answered.
+    print("\n[REVIEW] flags per rewrite by draft (mean; models numbered as above):")
+    print(f"{'':18s}" + "".join(f"{f'[{i}]':>7s}" for i in range(1, len(labels) + 1)))
+    for d in dict.fromkeys(r.draft for r in results):
+        cells = []
+        for model in labels:
+            flags = [r.reviews for r in by_model[model] if r.draft == d and r.error is None]
+            cells.append(f"{statistics.mean(flags):.1f}" if flags else "-")
+        print(f"{d[:18]:18s}" + "".join(f"{c:>7s}" for c in cells))
+
     # Read a delta per kind and against its interval: most failures are one branch choice on
     # a few borderline drafts, and at 3 to 6 runs per draft an interval spans tens of points.
     # Each kind counts only the runs scored on it; `all` is the pass column.
@@ -1549,7 +1666,8 @@ def main() -> None:
         choices=SUITES,
         default="core",
         help="core: the 8 model-choice drafts; edge: 28 injection, language, pasted-material "
-        "and audience drafts; all: both",
+        "and audience drafts; all: both; holdout: 8 frozen drafts no prompt was tuned on (not in "
+        "all)",
     )
     parser.add_argument("--drafts", nargs="*", help="run these drafts instead of a suite")
     parser.add_argument("--runs", type=int, default=3)

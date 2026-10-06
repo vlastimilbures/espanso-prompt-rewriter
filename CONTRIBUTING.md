@@ -396,6 +396,24 @@ model**. The two default models react to the same wording in opposite directions
 anti-invention rule that fixed flash-lite made gpt-6-luna write thin, generic steps. Keep
 drafts you wrote after freezing the candidate for the final comparison.
 
+**Holdout drafts and contamination (#48).** The `holdout` suite (`--suite holdout`, not part
+of `all`) is 8 drafts frozen on 2026-10-06 that no prompt was tuned on. Run it at a release or
+for the final comparison of a candidate, never while tuning, and never change the prompt to
+pass one of its drafts. Once a holdout result has decided a prompt change, the suite is spent:
+write and freeze new drafts and move the old ones to `edge`. Examples and wordings in a profile
+must not quote any bench draft either, since an example worded like a draft teaches that
+draft's answer: `tests/test_bench.py` fails when a profile or the `-p-` template shares a
+three-word phrase (beyond a few everyday ones) or a name with any bench draft, or any
+specific (`Draft.keys`) or three-word phrase with a holdout draft. When you add an example to
+the prompt, invent a new situation rather than borrowing a draft's.
+
+**Contested labels.** A draft whose branch could defensibly go either way has that label set
+to `None` (accepted either way, still required to choose exactly one variant), with a comment
+saying why: the review step of `quick-ceo`, `memo` and `outliers`, both steps of `persona`
+and `duckdb`, and so on. Reach agreement before giving such a draft a single answer again.
+The report's `[REVIEW] flags per rewrite by draft` table is a metric, not a check: read it for
+rewrites that flag too little (a gap filled by guessing) or too much.
+
 Small models such as flash-lite need an explicit trigger for *each* variant of a branching step.
 A rule like "if unsure, use (a)" with no positive condition for (b) makes them pick (a) almost
 every time. They also choose a variant by analogy to the examples in the rule, so a named
@@ -440,10 +458,11 @@ self-review lines match the format in `OUTPUTS`. The gaps it left, and their sta
    previous instructions", flash-lite sometimes wrote a CONTEXT about "an instruction that
    attempts to override my role". With a fixed fictitious persona it did not happen in 9 runs of
    `injection` and `pasted-injection` (2026-10). Watch it if a persona is set.
-5. **Unscored review branches.** Two edge drafts are not scored on the review branch: a one-page
-   PRD for a fintech feature and `outage`, an incident summary for the user's manager. The
-   2026-10 rule decides by reader, so `outage` should take the self-review; who reads a PRD is
-   still open. Score both once that is settled.
+5. **Unscored review branches.** Five drafts are not scored on the review branch: a one-page
+   PRD for a fintech feature, `outage` (an incident summary for the user's manager), and since
+   #48 the contested `quick-ceo` (a note to the CEO), `memo` (a memo to the user's team) and
+   `outliers` (a script for the user). The 2026-10 rule decides by reader, so `outage` should
+   take the self-review; who reads a PRD is still open. Score them once that is settled.
 6. **Persona bleed** (depends on the persona). With `PROMPT_PERSONA` set, near-empty drafts
    can pick up the persona's domain: "help with the report" became a report on "risk management
    metrics". It did not reproduce with a neutral persona (`vague` and a near-empty draft, 12
@@ -478,9 +497,10 @@ Limits of the 2026-10-02 and 2026-10 evaluations, and what to do next:
 1. **Re-judge the shipped prompt blind on new drafts.** The 2026-10-02 `default` and
    `default-pro`, and the merged `default` of 2026-10, were checked mechanically only; the blind
    ranking was on I2. The revisions were tuned on the
-   same 32 drafts, and `landlord` is no longer held out. Write 6–8 new drafts (outside emails,
-   published text, internal memos, "for me" scripts) before changing anything else, and judge
-   the current prompts against the previous release on both tiers.
+   same drafts, and `landlord` is no longer held out. The `holdout` suite (#48) now holds 8
+   new drafts (outside emails, published text, internal notes, "for me" scripts and plans, a
+   pasted email, a Spanish draft); judge the current prompts against the previous release on
+   them, on both tiers, before changing anything else.
 2. **Use more runs per draft.** At 3 runs, a single draft flips between 0/3 and 2/3 from noise
    alone (seen on `big-personal` and `memo`). Re-check any single-draft change at 6 runs or more
    before acting on it.
