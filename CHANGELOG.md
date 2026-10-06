@@ -26,6 +26,14 @@ All notable changes to this project are documented here. The format follows
   GitHub Release, and Homebrew (the PyPI and Homebrew channels start with 0.19.0), with the
   tap trust note and how to switch channels (#96). Scoop and WinGet are no longer planned.
 
+- Clipboard output: with `PROMPT_OUTPUT=clipboard` (`prompt-workflow config set PROMPT_OUTPUT
+  clipboard`, or the interface) the improve triggers put the rewrite on the clipboard and paste
+  nothing, so the trigger just vanishes and you paste when ready; switching windows during a
+  long wait no longer sends the paste elsewhere. Error markers, the `-iok-` "sent despite" note
+  and the cut-off note still paste; if the clipboard cannot be written, the rewrite is pasted
+  after a marker. `improve --output paste|clipboard` overrides the setting for one call. README
+  "Clipboard output" (#134, #23).
+
 ### Fixed
 - `prompt-workflow espanso deploy` finds Homebrew's stable `bin/` launcher also when Python
   reports the formula's virtualenv through Homebrew's `opt/<formula>` link rather than its

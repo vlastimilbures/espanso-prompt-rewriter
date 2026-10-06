@@ -105,6 +105,23 @@ def test_improve_sent_despite_note_with_error(monkeypatch):
     _golden([*FLAGGED, "--text", DRAFT], NOTE + b"[prompt-workflow: upstream down]")
 
 
+# Clipboard output (PROMPT_OUTPUT=clipboard, #134): a success prints nothing at all, the note
+# alone is printed without its blank line, and error markers are unchanged.
+def test_improve_clipboard_output(monkeypatch, stub_provider):
+    monkeypatch.setattr("prompt_workflow.cli.pyperclip.copy", lambda text: None)
+    monkeypatch.setenv("PROMPT_OUTPUT", "clipboard")
+    _golden(IMPROVE, b"")
+    stub_provider.exc = ProviderError("Ollama request failed")
+    _golden(IMPROVE, b"[prompt-workflow: Ollama request failed]")
+
+
+def test_improve_clipboard_output_sent_despite(monkeypatch, fake_http):
+    monkeypatch.setattr("prompt_workflow.cli.pyperclip.copy", lambda text: None)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    fake_http.reply({"choices": [{"message": {"content": "rewrite"}}]})
+    _golden([*FLAGGED, "--output", "clipboard", "--text", DRAFT], NOTE.rstrip(b"\n"))
+
+
 def test_persona_set(monkeypatch):
     monkeypatch.setenv("PROMPT_PERSONA", "I am a risk analyst at Česká banka.")
     _golden(["persona"], "I am a risk analyst at Česká banka.".encode())
@@ -127,7 +144,8 @@ def test_persona_when_settings_fail(monkeypatch, tmp_path):
 
 # Runs the trigger commands in a fresh interpreter, the way Espanso does, with the real
 # provider and gate over httpx.MockTransport, then lists every module they imported. Each
-# scenario takes a different branch (clipboard, gate, provider error, settings error), since a
+# scenario takes a different branch (clipboard, gate, provider error, settings error, clipboard
+# output), since a
 # heavy import can hide in any of them. The clipboard and its concealed-item probe are stubbed:
 # a test never touches the real clipboard.
 _TRIGGER_RUN = """
@@ -164,7 +182,8 @@ httpx.Client = client
 base._sleep = lambda seconds: None
 cli.is_concealed = lambda: None
 cli.pyperclip.paste = lambda: "rewrite this draft"
-cli.pyperclip.copy = lambda text: None
+copied = []
+cli.pyperclip.copy = copied.append
 
 local = ["improve", "--provider", "ollama", "--source", "argument", "--text", "x"]
 cloud = ["improve", "--provider", "openrouter", "--source", "clipboard"]
@@ -175,10 +194,12 @@ scenarios = [
     (cloud, {"PROMPT_LOCAL_ONLY": "maybe"}, 200),
     (["persona"], {}, 200),
     (["persona"], {"PROMPT_LOCAL_ONLY": "maybe"}, 200),
+    (cloud, {"PROMPT_OUTPUT": "clipboard"}, 200),
 ]
 codes = []
 for argv, env, code in scenarios:
     os.environ.pop("PROMPT_LOCAL_ONLY", None)
+    os.environ.pop("PROMPT_OUTPUT", None)
     os.environ.update(env)
     status[0] = code
     try:
@@ -189,6 +210,7 @@ for argv, env, code in scenarios:
     sys.stdout.flush()
 result = {
     "codes": codes,
+    "copied": copied,
     "added": sorted(set(sys.modules) - started),
     "loaded": sorted(sys.modules),
 }
@@ -263,18 +285,20 @@ def trigger_run(request, tmp_path_factory):
 # with tracking on and off.
 def test_trigger_run_output(trigger_run):
     outputs, data = trigger_run
-    local, cloud, cloud_error, settings_error, persona, persona_fallback, rest = outputs
-    assert (local, cloud, persona, persona_fallback, rest) == (
+    local, cloud, cloud_error, settings_error, persona, persona_fallback, copied, rest = outputs
+    assert (local, cloud, persona, persona_fallback, copied, rest) == (
         b"local" + EOL + b"line",
         b"cloud",
         PLACEHOLDER,
         PLACEHOLDER,
         b"",
+        b"",
     )
     assert cloud_error.startswith(b"[prompt-workflow: ")
     assert cloud_error.endswith(b"]")
     assert settings_error == SETTINGS_ERROR
-    assert data["codes"] == [0] * 6
+    assert data["codes"] == [0] * 7
+    assert data["copied"] == ["cloud"]
 
 
 # Checked against everything loaded, not only what the run added, so a module loaded before

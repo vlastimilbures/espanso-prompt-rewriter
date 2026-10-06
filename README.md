@@ -390,7 +390,40 @@ While a rewrite runs (about 2 s for `-i-`, about 6 s median for `-ip-`, at most 
 limit, see `PROMPT_TIMEOUT_SECONDS`), do not type or switch windows: Espanso pastes the result
 wherever the focus is when the answer arrives, and other triggers do not expand until it
 finishes. Writing the [usage history](#usage-history) adds up to 0.25 s after the output (1 s
-once, for the write that creates the file).
+once, for the write that creates the file). [Clipboard output](#clipboard-output) removes the
+misplaced paste: nothing is pasted on success, so switching windows during a long wait is safe
+(Espanso still erases the trigger where the focus is, so do not type).
+
+### Clipboard output
+
+By default every improve trigger pastes the rewrite in place of the trigger. With
+`PROMPT_OUTPUT=clipboard` the rewrite goes on the clipboard instead:
+
+```bash
+prompt-workflow config set PROMPT_OUTPUT clipboard   # or Change setting under Providers & keys in `prompt-workflow ui`
+prompt-workflow config set PROMPT_OUTPUT paste       # back to pasting
+```
+
+It applies to every improve trigger at once, with no redeploy. Type the trigger as usual: after
+the wait the trigger text vanishes and nothing is pasted, and the rewrite is on the clipboard.
+Press Cmd+V / Ctrl+V where you want it. Everything that is not the rewrite still pastes, so you
+see it where you typed: every error marker, the `[prompt-workflow: sent despite: …]` note of
+`-iok-` (the clipboard then holds only the rewrite, without the note), and the cut-off note of
+a reply that hit its output limit (the clipboard holds the partial rewrite). If the clipboard
+cannot be written, the rewrite is pasted after a `[prompt-workflow: Clipboard unavailable: …]`
+marker, so it is never lost. `-p-` and the other static snippets are unaffected; for one call,
+`improve --output paste|clipboard` overrides the setting.
+
+- **Privacy:** the rewrite replaces your draft on the clipboard, so a clipboard-history manager,
+  Universal Clipboard / Handoff and the Windows cloud clipboard see it, as they saw the draft
+  you copied.
+- **Knowing when it is ready:** a clipboard manager that notifies you of a new item tells you
+  the rewrite has arrived, for example [Vorssaint](https://github.com/vorssaint/vorssaint-utils)
+  (free, open source, macOS 14 or later).
+- **Espanso setting:** it relies on Espanso restoring your clipboard after it inserts the
+  (empty) output, which is the default. `preserve_clipboard: false` in Espanso's
+  `config/default.yml` can leave what Espanso inserted on the clipboard in place of the rewrite:
+  leave that setting out or set it to `true`.
 
 In a checkout ([Development](#development)), you enable `-ic-` by uncommenting it in
 [`espanso/match/prompts-llm.yml`](espanso/match/prompts-llm.yml) and running
@@ -444,7 +477,8 @@ prompt-workflow persona          # prints PROMPT_PERSONA (used by -p-)
 | `--timeout`  | `PROMPT_TIMEOUT_SECONDS` (`PROMPT_PRO_TIMEOUT_SECONDS` with `--tier pro`) | Time limit in seconds for this call, retry included |
 | `--source`   | `clipboard`                 | `clipboard`, `stdin` or `argument`              |
 | `--text`     | —                           | The draft, with `--source argument`             |
-| `--copy`     | off                         | Also copy the result to the clipboard           |
+| `--output`   | `PROMPT_OUTPUT` (`paste`)   | `paste` prints the rewrite; `clipboard` copies it and prints only markers, see [clipboard output](#clipboard-output) |
+| `--copy`     | off                         | With `paste` output, also copy the result to the clipboard (no effect with `clipboard`) |
 
 `--tier pro` and `--effort` (other than `default`) with any provider but OpenRouter are
 refused with a `[prompt-workflow: …]` marker, and no call is made: no other provider has a pro
@@ -459,7 +493,8 @@ at its output limit, the partial rewrite is pasted with
 For scripts, the exit code says nothing: `improve` exits 0 whether or not it rewrote. A run failed
 when its whole output is one `[prompt-workflow: …]` marker. A rewrite starts with a marker only
 after `--allow-flagged` (`[prompt-workflow: sent despite: …]`) and ends with one only when it is
-cut off. This prefix is stable.
+cut off. This prefix is stable. With `clipboard` output a successful run prints nothing, or only
+those markers, and the rewrite is on the clipboard.
 
 #### Management commands
 
@@ -487,7 +522,8 @@ dashboard for what you were charged. Read it with these caveats:
   never converted to USD; a BYOK call's upstream cost (USD) is kept in the history and its
   export but not added to the totals. Estimates from `prices.toml` are shown apart.
 - An unknown cost is counted as unknown (`N attempt(s) with an unknown cost`), never as 0.
-- A call counts once the CLI rendered its output, which does not mean it was pasted.
+- A call counts once the CLI rendered its output, which does not mean it was pasted (with
+  [clipboard output](#clipboard-output), that the rewrite was copied).
 - Triggers that name a provider (`-i-`, `-ip-`, `-if-`, `-iok-`, `-il-`, `-ilm-`) ignore
   `PROMPT_PROVIDER`, so changing it does not move their calls to another provider.
 
@@ -566,6 +602,7 @@ short, does not look like a key and matches none of your `PROMPT_EXTRA_PATTERNS`
 | `PROMPT_PROVIDER`            | `openrouter`                   | Provider when `--provider` is not given (the bare CLI; every trigger passes its own) |
 | `PROMPT_PROFILE`             | `default`                      | Profile when `--profile` is not given (`-i-`, and `-if-` on a non-pro model) |
 | `PROMPT_PERSONA`             | *(empty)*                      | Your first-person role, see [persona](#profiles-and-persona) |
+| `PROMPT_OUTPUT`              | `paste`                        | `clipboard` puts the rewrite on the clipboard instead of pasting it, see [clipboard output](#clipboard-output) |
 | `PROMPT_TIMEOUT_SECONDS`     | `30`                           | Time limit for one call, retry included                   |
 | `PROMPT_TEMPERATURE`         | `0.2`                          | Kept low so fixed template wording survives; empty (`PROMPT_TEMPERATURE=`, or `config set PROMPT_TEMPERATURE ""`) sends no temperature, for models that reject it, while unset keeps `0.2` |
 | `OPENROUTER_API_KEY`         | —                              | Required for OpenRouter                                   |

@@ -15,7 +15,16 @@ from typer.core import TyperGroup
 
 from . import recorder
 from .clipboard_guard import is_concealed
-from .config import EFFORTS, KEEP, TIERS, ConfigLayers, Settings, openrouter_only
+from .config import (
+    CLIPBOARD,
+    EFFORTS,
+    KEEP,
+    OUTPUTS,
+    TIERS,
+    ConfigLayers,
+    Settings,
+    openrouter_only,
+)
 from .factory import PROVIDER_NAMES, make_provider
 from .gate import GateBlocked, GatedProvider
 from .prompt_builder import (
@@ -26,7 +35,7 @@ from .prompt_builder import (
     strip_outer_fence,
     system_prompt,
 )
-from .providers.base import ProviderError
+from .providers.base import FILTERED_NOTE, TRUNCATED_NOTE, ProviderError
 from .redaction import DEFAULT_IGNORABLE, redact_words
 
 if TYPE_CHECKING:
@@ -228,6 +237,38 @@ def _sent_despite_note(built: object) -> str:
     return ""
 
 
+# The notes a provider appends to a reply that stopped early (providers/base.py). In clipboard
+# mode they are split off: the clipboard gets the partial rewrite, stdout the note.
+_STOP_NOTE = re.compile(
+    f"(?:{re.escape(TRUNCATED_NOTE)}"
+    f"|{re.escape(FILTERED_NOTE).replace(re.escape('{reason}'), '[a-z_]+')})\\Z"
+)
+
+
+def _split_stop_note(result: str) -> tuple[str, str]:
+    """(rewrite, note) for a result that may end with a provider's stop note; note is ""
+    when the reply ended normally, else the bare marker."""
+    match = _STOP_NOTE.search(result)
+    if match is None:
+        return result, ""
+    return result[: match.start()], match.group().lstrip("\n")
+
+
+def _deliver(result: str, note: str, rec: recorder.Recorder) -> str:
+    """Clipboard output (#134): copy the rewrite and return what to print, which is only the
+    markers (the sent-despite ``note``, a stop note), so a plain success prints nothing and
+    Espanso just erases the trigger. If the copy fails, the rewrite is printed after the
+    error marker instead, so it is pasted rather than lost (outcome clipboard_failed)."""
+    rewrite, stop = _split_stop_note(result)
+    try:
+        pyperclip.copy(rewrite)
+    except Exception as exc:  # any failure: this runs after improve's guard, and must not lose it
+        rec.outcome = recorder.CLIPBOARD_FAILED
+        error = f"[prompt-workflow: Clipboard unavailable: {exc}; the rewrite is pasted instead]"
+        return f"{note}{error}\n\n{result}"
+    return "\n\n".join(marker for marker in (note.rstrip("\n"), stop) if marker)
+
+
 def _failure(exc: Exception, rec: recorder.Recorder) -> str:
     """The history outcome of a run that printed a marker for ``exc``."""
     if isinstance(exc, ConcealedClipboard):
@@ -279,8 +320,16 @@ def improve(
     timeout: str | None = typer.Option(None, help=f"Request timeout in seconds, or {KEEP}"),
     source: str = typer.Option("clipboard", help="clipboard, stdin, or argument"),
     text: str | None = typer.Option(None, help="Input when source is argument"),
+    output: str | None = typer.Option(
+        None,
+        "--output",
+        help=f"{' or '.join(OUTPUTS)}: paste the rewrite, or copy it and print only markers; "
+        "default: PROMPT_OUTPUT",
+    ),
     copy: bool = typer.Option(
-        False, help="Also copy output to clipboard (overwrites --source clipboard's draft)"
+        False,
+        help="With paste output, also copy it to the clipboard (overwrites --source "
+        "clipboard's draft)",
     ),
     allow_flagged: bool = typer.Option(
         False,
@@ -304,6 +353,7 @@ def improve(
             effort=effort,
             max_tokens=max_tokens,
             timeout=timeout,
+            output=output,
         )
         # An unknown name is left to make_provider(), which reports it as such.
         if provider in PROVIDER_NAMES:
@@ -318,7 +368,7 @@ def improve(
 
         # Data-protection gate: make_provider wraps anything that can send the draft off this
         # machine in GatedProvider, so it cannot be bypassed. The result is cleaned here too
-        # because --copy puts it on the clipboard.
+        # because --copy and clipboard output put it on the clipboard.
         name = profile or cfg.profile
         system = system_prompt(name, cfg.persona, cfg.profile_overrides)
         rec.profile_id = name if name in PROFILES else ALIASES.get(name, name)
@@ -330,7 +380,8 @@ def improve(
         result = strip_outer_fence(_clean(result))
         if TEMPLATE_MARKER in system:
             result = repair_template_tags(result)
-        if copy:
+        clipboard_output = cfg.output == CLIPBOARD
+        if copy and not clipboard_output:
             _clipboard(pyperclip.copy, result)
     except Exception as exc:
         # Nothing may traceback or exit nonzero: Espanso cannot surface stderr, so emit a
@@ -344,7 +395,8 @@ def improve(
         rec.finish()
         raise typer.Exit(0) from None
 
-    _emit(_sent_despite_note(built) + result)
+    note = _sent_despite_note(built)
+    _emit(_deliver(result, note, rec) if clipboard_output else note + result)
     rec.emitted()
     rec.finish()
 

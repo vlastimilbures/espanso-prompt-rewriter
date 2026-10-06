@@ -34,7 +34,8 @@ ERROR_MARKER = "error_marker"
 GATE_BLOCKED = "gate_blocked"
 # A 2xx reply whose content was then rejected (malformed, empty, cut off by an error).
 VALIDATION_FAILED = "validation_failed"
-# The clipboard could not be read, or --copy could not write it.
+# The clipboard could not be read, or --copy or clipboard output (PROMPT_OUTPUT) could not
+# write it (clipboard output then pastes the rewrite after the marker instead).
 CLIPBOARD_FAILED = "clipboard_failed"
 # The clipboard held a password-manager item, which was cleared and not sent.
 CONCEALED_REFUSED = "concealed_refused"
