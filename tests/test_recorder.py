@@ -8,7 +8,7 @@ import contextlib
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NoReturn
 
 import pyperclip
 import pytest
@@ -426,15 +426,17 @@ def test_retention_setting_drives_the_prune(
 
 # Clipboard output (#134): a success is still `ok`; a failed copy, whose rewrite is pasted
 # after the marker instead, is `clipboard_failed` with the charge kept.
-def test_clipboard_output_outcomes(monkeypatch, cloud, fake_http, history_rows):
+def test_clipboard_output_outcomes(
+    monkeypatch: pytest.MonkeyPatch, cloud: None, fake_http: FakeHttp, history_rows: HistoryRows
+) -> None:
     monkeypatch.setenv("PROMPT_OUTPUT", "clipboard")
-    copied = []
+    copied: list[str] = []
     monkeypatch.setattr(pyperclip, "copy", copied.append)
     fake_http.reply(REPLY)
     assert _run(CLOUD) == ""
     assert copied == ["rewrite"]
 
-    def broken(text):
+    def broken(text: str) -> NoReturn:
         raise pyperclip.PyperclipException("no clipboard")
 
     monkeypatch.setattr(pyperclip, "copy", broken)

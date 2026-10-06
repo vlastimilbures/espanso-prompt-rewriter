@@ -116,7 +116,9 @@ def test_improve_sent_despite_note_with_error(monkeypatch: pytest.MonkeyPatch) -
 
 # Clipboard output (PROMPT_OUTPUT=clipboard, #134): a success prints nothing at all, the note
 # alone is printed without its blank line, and error markers are unchanged.
-def test_improve_clipboard_output(monkeypatch, stub_provider):
+def test_improve_clipboard_output(
+    monkeypatch: pytest.MonkeyPatch, stub_provider: StubProvider
+) -> None:
     monkeypatch.setattr("prompt_workflow.cli.pyperclip.copy", lambda text: None)
     monkeypatch.setenv("PROMPT_OUTPUT", "clipboard")
     _golden(IMPROVE, b"")
@@ -124,7 +126,9 @@ def test_improve_clipboard_output(monkeypatch, stub_provider):
     _golden(IMPROVE, b"[prompt-workflow: Ollama request failed]")
 
 
-def test_improve_clipboard_output_sent_despite(monkeypatch, fake_http):
+def test_improve_clipboard_output_sent_despite(
+    monkeypatch: pytest.MonkeyPatch, fake_http: FakeHttp
+) -> None:
     monkeypatch.setattr("prompt_workflow.cli.pyperclip.copy", lambda text: None)
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     fake_http.reply({"choices": [{"message": {"content": "rewrite"}}]})

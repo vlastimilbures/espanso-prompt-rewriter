@@ -869,14 +869,14 @@ def test_rejected_value_matching_a_user_pattern_is_redacted(
 # PROMPT_OUTPUT (#134): paste by default, paste or clipboard in any case, anything else names
 # the variable.
 @pytest.mark.parametrize(("raw", "expected"), [("paste", "paste"), ("CLIPBOARD", "clipboard")])
-def test_output_parsing(monkeypatch, raw, expected):
+def test_output_parsing(monkeypatch: pytest.MonkeyPatch, raw: str, expected: str) -> None:
     assert Settings().output == "paste"
     monkeypatch.setenv("PROMPT_OUTPUT", raw)
     assert Settings().output == expected
 
 
 @pytest.mark.parametrize("raw", ["", "copy", "both"])
-def test_output_parsing_rejects_other_values(monkeypatch, raw):
+def test_output_parsing_rejects_other_values(monkeypatch: pytest.MonkeyPatch, raw: str) -> None:
     monkeypatch.setenv("PROMPT_OUTPUT", raw)
     with pytest.raises(
         ValueError, match=f"^PROMPT_OUTPUT must be paste or clipboard, got '{raw}'$"
@@ -885,7 +885,7 @@ def test_output_parsing_rejects_other_values(monkeypatch, raw):
 
 
 # --output beats PROMPT_OUTPUT either way; None and `default` keep it; a bad value is refused.
-def test_output_override(monkeypatch):
+def test_output_override(monkeypatch: pytest.MonkeyPatch) -> None:
     assert Settings().for_call("standard", output="clipboard").output == "clipboard"
     monkeypatch.setenv("PROMPT_OUTPUT", "clipboard")
     settings = Settings()

@@ -1023,25 +1023,25 @@ def _your_files(espanso: Path) -> None:
 
 
 # #38 (O2): status also names the user's own match files; nothing else lists or touches them.
-def test_plan_lists_your_match_files(espanso):
+def test_plan_lists_your_match_files(espanso: Path) -> None:
     _your_files(espanso)
     assert [p.name for p in _plan(espanso).yours] == ["base.yml", "work.YAML"]
     deploy.apply(_plan(espanso))  # our files now exist too: still not listed
     assert [p.name for p in _plan(espanso).yours] == ["base.yml", "work.YAML"]
 
 
-def test_plan_lists_nothing_without_a_match_folder(tmp_path):
+def test_plan_lists_nothing_without_a_match_folder(tmp_path: Path) -> None:
     assert deploy.plan(tmp_path / "none", LAUNCHER, deploy.Manifest.load()).yours == []
 
 
-def test_legacy_base_is_not_listed_as_yours(espanso):
+def test_legacy_base_is_not_listed_as_yours(espanso: Path) -> None:
     (espanso / "match" / "base.yml").write_text('trigger: "-p-" prompt-workflow', "utf-8")
     the_plan = _plan(espanso)
     assert the_plan.legacy == espanso / "match" / "base.yml"
     assert the_plan.yours == []
 
 
-def test_symlinked_match_file_is_listed_as_yours(tmp_path, espanso):
+def test_symlinked_match_file_is_listed_as_yours(tmp_path: Path, espanso: Path) -> None:
     real = tmp_path / "dotfiles" / "mine.yml"
     real.parent.mkdir()
     real.write_text("matches: []\n", "utf-8")
@@ -1052,7 +1052,9 @@ def test_symlinked_match_file_is_listed_as_yours(tmp_path, espanso):
     assert "  yours     mine.yml (not managed, a link; never touched" in result.stdout
 
 
-def test_cli_status_lists_yours_and_deploy_detach_leave_them(espanso, fake_run):
+def test_cli_status_lists_yours_and_deploy_detach_leave_them(
+    espanso: Path, fake_run: FakeRunner
+) -> None:
     _your_files(espanso)
     before = _tree(espanso)
     result = _cli("status", *_where(espanso))

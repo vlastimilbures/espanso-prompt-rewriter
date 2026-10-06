@@ -7,7 +7,7 @@ import sys
 import time
 import unicodedata
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NoReturn
 
 import pyperclip
 import pytest
@@ -929,16 +929,18 @@ ARG = ("--source", "argument", "--text", "draft")
 
 
 @pytest.fixture
-def copied(monkeypatch):
-    items = []
-    monkeypatch.setattr(cli.pyperclip, "copy", items.append)
+def copied(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    items: list[str] = []
+    monkeypatch.setattr(pyperclip, "copy", items.append)
     return items
 
 
 # A success prints nothing, so Espanso only erases the trigger, and the clipboard holds the
 # rewrite exactly as paste output would print it (cleaned, unfenced).
 @pytest.mark.parametrize("how", ["setting", "option"])
-def test_clipboard_output_prints_nothing(monkeypatch, stub_provider, copied, how):
+def test_clipboard_output_prints_nothing(
+    monkeypatch: pytest.MonkeyPatch, stub_provider: StubProvider, copied: list[str], how: str
+) -> None:
     stub_provider.result = "```\nWrite\x1b[201~ it.\n```"
     if how == "setting":
         monkeypatch.setenv("PROMPT_OUTPUT", "clipboard")
@@ -951,14 +953,18 @@ def test_clipboard_output_prints_nothing(monkeypatch, stub_provider, copied, how
 
 
 # --output paste beats PROMPT_OUTPUT=clipboard for one call, and the clipboard is untouched.
-def test_output_paste_overrides_the_setting(monkeypatch, stub_provider, copied):
+def test_output_paste_overrides_the_setting(
+    monkeypatch: pytest.MonkeyPatch, stub_provider: StubProvider, copied: list[str]
+) -> None:
     monkeypatch.setenv("PROMPT_OUTPUT", "clipboard")
     assert improve("--output", "paste", *ARG).stdout == "improved"
     assert copied == []
 
 
 # A bad value, as option or setting, is a marker; nothing is copied or sent.
-def test_bad_output_reports_inline(monkeypatch, stub_provider, copied):
+def test_bad_output_reports_inline(
+    monkeypatch: pytest.MonkeyPatch, stub_provider: StubProvider, copied: list[str]
+) -> None:
     result = improve("--output", "copy", *ARG)
     assert result.stdout == (
         "[prompt-workflow: --output must be paste or clipboard or default, got 'copy']"
@@ -973,13 +979,13 @@ def test_bad_output_reports_inline(monkeypatch, stub_provider, copied):
 
 
 # --copy adds nothing in clipboard output: one copy, nothing printed.
-def test_copy_flag_with_clipboard_output(stub_provider, copied):
+def test_copy_flag_with_clipboard_output(stub_provider: StubProvider, copied: list[str]) -> None:
     assert improve("--output", "clipboard", "--copy", *ARG).stdout == ""
     assert copied == ["improved"]
 
 
 # Error markers still print, and nothing is copied.
-def test_clipboard_output_error_marker(stub_provider, copied):
+def test_clipboard_output_error_marker(stub_provider: StubProvider, copied: list[str]) -> None:
     stub_provider.exc = ProviderError("Ollama request failed")
     result = improve("--output", "clipboard", *ARG)
     assert result.stdout == "[prompt-workflow: Ollama request failed]"
@@ -994,14 +1000,16 @@ def test_clipboard_output_error_marker(stub_provider, copied):
         "[prompt-workflow: the model stopped early (refusal); the rewrite may be incomplete]",
     ],
 )
-def test_clipboard_output_stop_note(stub_provider, copied, printed):
+def test_clipboard_output_stop_note(
+    stub_provider: StubProvider, copied: list[str], printed: str
+) -> None:
     stub_provider.result = "<CONTEXT>\nhalf a prompt\n\n" + printed
     assert improve("--output", "clipboard", *ARG).stdout == printed
     assert copied == ["<CONTEXT>\nhalf a prompt"]
 
 
 # Paste output keeps the note after the rewrite, as before.
-def test_paste_output_keeps_stop_note(stub_provider, copied):
+def test_paste_output_keeps_stop_note(stub_provider: StubProvider, copied: list[str]) -> None:
     note = "\n\n[prompt-workflow: the reply hit the model's output limit and is cut off]"
     stub_provider.result = "half" + note
     assert improve(*ARG).stdout == "half" + note
@@ -1010,7 +1018,9 @@ def test_paste_output_keeps_stop_note(stub_provider, copied):
 
 # With --allow-flagged, stdout is only the sent-despite marker (no trailing blank line) and
 # the clipboard only the rewrite; with a cut-off reply both markers print.
-def test_clipboard_output_sent_despite(monkeypatch, fake_http, copied):
+def test_clipboard_output_sent_despite(
+    monkeypatch: pytest.MonkeyPatch, fake_http: FakeHttp, copied: list[str]
+) -> None:
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     monkeypatch.setenv("PROMPT_OUTPUT", "clipboard")
     fake_http.reply({"choices": [{"message": {"content": "rewrite"}}]})
@@ -1030,11 +1040,13 @@ def test_clipboard_output_sent_despite(monkeypatch, fake_http, copied):
 # A copy that fails, with any exception, prints the marker and then the rewrite, so it is
 # pasted instead of lost; never a traceback.
 @pytest.mark.parametrize("error", [pyperclip.PyperclipException("no clipboard"), OSError("gone")])
-def test_clipboard_output_copy_failure_pastes_the_rewrite(monkeypatch, stub_provider, error):
-    def broken(text):
+def test_clipboard_output_copy_failure_pastes_the_rewrite(
+    monkeypatch: pytest.MonkeyPatch, stub_provider: StubProvider, error: Exception
+) -> None:
+    def broken(text: str) -> NoReturn:
         raise error
 
-    monkeypatch.setattr(cli.pyperclip, "copy", broken)
+    monkeypatch.setattr(pyperclip, "copy", broken)
     result = improve("--output", "clipboard", *ARG)
     assert result.exit_code == 0
     assert result.stdout == (
@@ -1045,7 +1057,9 @@ def test_clipboard_output_copy_failure_pastes_the_rewrite(monkeypatch, stub_prov
 
 # The concealed-clipboard refusal is unchanged in clipboard output: cleared, marker printed,
 # nothing else copied.
-def test_clipboard_output_concealed_refusal(monkeypatch, stub_provider, copied):
+def test_clipboard_output_concealed_refusal(
+    monkeypatch: pytest.MonkeyPatch, stub_provider: StubProvider, copied: list[str]
+) -> None:
     monkeypatch.setattr(cli, "is_concealed", lambda: True)
     result = improve("--output", "clipboard", "--provider", "ollama", "--source", "clipboard")
     assert "password-manager item" in result.stdout
@@ -1054,15 +1068,19 @@ def test_clipboard_output_concealed_refusal(monkeypatch, stub_provider, copied):
 
 
 # The draft read from the clipboard is replaced by the rewrite.
-def test_clipboard_output_replaces_the_draft(monkeypatch, stub_provider, copied):
-    monkeypatch.setattr(cli.pyperclip, "paste", lambda: "summarise the minutes")
+def test_clipboard_output_replaces_the_draft(
+    monkeypatch: pytest.MonkeyPatch, stub_provider: StubProvider, copied: list[str]
+) -> None:
+    monkeypatch.setattr(pyperclip, "paste", lambda: "summarise the minutes")
     assert improve("--output", "clipboard", "--source", "clipboard").stdout == ""
     assert stub_provider.calls[0]["prompt"] == "summarise the minutes"
     assert copied == ["improved"]
 
 
 # persona ignores PROMPT_OUTPUT: the -p- snippet still pastes.
-def test_persona_ignores_clipboard_output(monkeypatch, copied):
+def test_persona_ignores_clipboard_output(
+    monkeypatch: pytest.MonkeyPatch, copied: list[str]
+) -> None:
     monkeypatch.setenv("PROMPT_OUTPUT", "clipboard")
     monkeypatch.setenv("PROMPT_PERSONA", "I am a tester.")
     assert runner.invoke(app, ["persona"]).stdout == "I am a tester."
@@ -1070,9 +1088,11 @@ def test_persona_ignores_clipboard_output(monkeypatch, copied):
 
 
 # A failed copy after --allow-flagged keeps each marker on its own line, then the rewrite.
-def test_clipboard_output_copy_failure_with_sent_despite(monkeypatch, fake_http):
+def test_clipboard_output_copy_failure_with_sent_despite(
+    monkeypatch: pytest.MonkeyPatch, fake_http: FakeHttp
+) -> None:
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
-    monkeypatch.setattr(cli.pyperclip, "copy", _no_clipboard)
+    monkeypatch.setattr(pyperclip, "copy", _no_clipboard)
     fake_http.reply({"choices": [{"message": {"content": "rewrite"}}]})
     args = ("--provider", "openrouter", "--allow-flagged", "--output", "clipboard")
     result = improve(*args, "--source", "argument", "--text", "Output is CONFIDENTIAL")
