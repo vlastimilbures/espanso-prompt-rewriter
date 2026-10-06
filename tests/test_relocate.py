@@ -206,7 +206,7 @@ def test_marker_paths_follow_the_move_and_rollback_still_works(folders: Folders)
     (folders.old_config / ".env").write_text(env_text, encoding="utf-8")
     config_store.apply_migration(consent=config_store.plan_migration().token)
     marker = folders.old_config / config_store.MARKER_FILE
-    assert str(folders.old_config) in marker.read_text("utf-8")
+    assert json.loads(marker.read_text("utf-8"))["backup"].startswith(str(folders.old_config))
 
     relocate.migrate_folders()
     record = json.loads((folders.config / config_store.MARKER_FILE).read_text("utf-8"))
