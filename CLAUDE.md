@@ -77,7 +77,8 @@ Rules for agents:
   (Espanso's restore would put it back unmarked); `None` (Linux, a probe error) reads as before. `tests/conftest.py` stubs it so tests never probe the real clipboard.
 - `factory.py` — `make_provider(name, cfg)` builds a provider from `Settings`; `PROVIDER_NAMES`
   lists the valid names. `cli.py` and `scripts/bench_models.py` both build through it. For
-  OpenRouter it adds the endpoint pin (`OPENROUTER_PROVIDER`) and
+  OpenRouter it adds the endpoint pin (`OPENROUTER_PROVIDER`), `provider.data_collection`
+  when `OPENROUTER_DATA_COLLECTION` is set (both tiers; empty sends no field) and
   `reasoning: {effort, exclude: true}` (`OPENROUTER_REASONING_EFFORT`; empty omits it).
   An optional `observer=` is passed to every provider, inside the gate (no request, no record).
 - `providers/usage.py` — `AttemptUsage` (frozen) and the `UsageObserver` protocol. With an

@@ -18,13 +18,18 @@ PROVIDER_NAMES = ("ollama", "lmstudio", "openrouter", "anthropic")
 APP_TITLE = "espanso-prompt-rewriter"
 
 
-def openrouter_routing(pin: str, allow_fallbacks: bool) -> dict[str, object]:
-    """OpenRouter `provider` preferences pinning one endpoint tag; {} for blended routing."""
-    if not pin:
-        return {}
-    routing: dict[str, object] = {"order": [pin]}
-    if not allow_fallbacks:
-        routing["allow_fallbacks"] = False
+def openrouter_routing(
+    pin: str, allow_fallbacks: bool, data_collection: str = ""
+) -> dict[str, object]:
+    """OpenRouter `provider` preferences: one pinned endpoint tag (none: blended routing) and
+    the `data_collection` policy if set; {} when neither applies."""
+    routing: dict[str, object] = {}
+    if pin:
+        routing["order"] = [pin]
+        if not allow_fallbacks:
+            routing["allow_fallbacks"] = False
+    if data_collection:
+        routing["data_collection"] = data_collection
     return routing
 
 
@@ -34,7 +39,9 @@ def openrouter_body(cfg: Settings) -> dict[str, object]:
     `exclude`: the reasoning trace is billed but never returned as text to paste.
     """
     body: dict[str, object] = {}
-    routing = openrouter_routing(cfg.openrouter_provider, cfg.openrouter_allow_fallbacks)
+    routing = openrouter_routing(
+        cfg.openrouter_provider, cfg.openrouter_allow_fallbacks, cfg.openrouter_data_collection
+    )
     if routing:
         body["provider"] = routing
     if cfg.openrouter_reasoning_effort:

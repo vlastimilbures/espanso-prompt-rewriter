@@ -523,6 +523,7 @@ short, does not look like a key and matches none of your `PROMPT_EXTRA_PATTERNS`
 | `OPENROUTER_PROVIDER`        | `google-ai-studio/flex`        | Pin a serving endpoint; empty = OpenRouter's own routing  |
 | `OPENROUTER_REASONING_EFFORT` | `minimal`                     | `none`…`high`; empty omits it (models without the control) |
 | `OPENROUTER_ALLOW_FALLBACKS` | `true`                         | `false` makes the pin binding                             |
+| `OPENROUTER_DATA_COLLECTION` | *(empty)*                      | `deny` routes every OpenRouter call (both tiers) only to endpoints that do not store or train on requests; `allow` permits them; empty sends nothing, so your OpenRouter account setting applies. See [What is sent](#what-is-sent-and-to-whom) |
 | `OPENROUTER_MAX_TOKENS`      | `2400`                         | Output cap (cost control), for both tiers unless `OPENROUTER_PRO_MAX_TOKENS` is set |
 | `OPENROUTER_BASE_URL`        | `https://openrouter.ai/api/v1` |                                                           |
 | `OPENROUTER_PRO_MODEL`       | `openai/gpt-6-luna`            | Model for `--tier pro` / `-ip-`                   |
@@ -728,7 +729,7 @@ Who receives it:
 
 | Provider | Recipients |
 |---|---|
-| OpenRouter (`-i-`, `-iok-`, `-ip-`, `-if-`) | OpenRouter (`OPENROUTER_BASE_URL`), and the upstream endpoint that serves the model: the one pinned by `OPENROUTER_PROVIDER` (`OPENROUTER_PRO_PROVIDER` for `-ip-`, the form's pick for `-if-`), or another endpoint serving the same model when OpenRouter falls back, which `OPENROUTER_ALLOW_FALLBACKS` allows by default (`false` makes the pin binding). An empty pin leaves the choice to OpenRouter. The request also carries an `X-Title: espanso-prompt-rewriter` header, which attributes the calls to this app in OpenRouter's dashboard (the benchmark script sends `espanso-prompt-rewriter-bench`). |
+| OpenRouter (`-i-`, `-iok-`, `-ip-`, `-if-`) | OpenRouter (`OPENROUTER_BASE_URL`), and the upstream endpoint that serves the model: the one pinned by `OPENROUTER_PROVIDER` (`OPENROUTER_PRO_PROVIDER` for `-ip-`, the form's pick for `-if-`), or another endpoint serving the same model when OpenRouter falls back, which `OPENROUTER_ALLOW_FALLBACKS` allows by default (`false` makes the pin binding). An empty pin leaves the choice to OpenRouter. With `OPENROUTER_DATA_COLLECTION=deny` the request asks OpenRouter to use only endpoints that do not store or train on requests (its `provider.data_collection` routing field), for both tiers. The request also carries an `X-Title: espanso-prompt-rewriter` header, which attributes the calls to this app in OpenRouter's dashboard (the benchmark script sends `espanso-prompt-rewriter-bench`). |
 | Anthropic (`-ic-`, commented out) | Anthropic (`ANTHROPIC_BASE_URL`). |
 | Ollama / LM Studio on `localhost` (`-il-`, `-ilm-`) | Nobody else, as long as the server on this machine runs the model itself (a `localhost` relay that forwards to a cloud API is not detected, see above; a `cloud`-tagged Ollama model is the next row). These triggers use the `general` profile, which has no persona. |
 | Ollama / LM Studio at another address, or an Ollama `cloud` model | The configured server (`OLLAMA_BASE_URL`/`api/chat` or `LMSTUDIO_BASE_URL`); for a cloud model that Ollama server also forwards the request to ollama.com (this tool sends no key there). With an `http://` URL anyone on the network path can read the draft too. The gate applies as for the cloud providers. |
@@ -740,7 +741,16 @@ that inspects TLS sees the whole request, the key header included.
 How long each recipient keeps the request and whether it may train on it is set by them, not by
 this tool: see OpenRouter's privacy and data settings for your account (they cover which
 upstream endpoints it may route to) and the privacy terms of the upstream provider or of
-Anthropic.
+Anthropic. To make the request itself carry that choice, set `OPENROUTER_DATA_COLLECTION=deny`
+(empty, the default, sends no such field): OpenRouter then skips every endpoint whose data
+policy allows storing or training on requests. That can mean fewer endpoints. The default pin,
+`google-ai-studio/flex`, served a `deny` call when this was checked (2026-10-06), but
+OpenRouter's endpoint policies can change: if the pinned endpoint (or the `-ip-`/`-if-` one)
+does not qualify, OpenRouter falls back to another endpoint that does while
+`OPENROUTER_ALLOW_FALLBACKS=true`, and otherwise the trigger pastes an error marker instead of
+a rewrite, typically `[prompt-workflow: OpenRouter returned HTTP 404: not found…]` followed by
+OpenRouter's reason. Pick another endpoint (`OPENROUTER_PROVIDER`, `OPENROUTER_PRO_PROVIDER`)
+or clear the setting.
 
 What never leaves this machine: the usage history (below), your settings files and keys (a key
 only as the authentication header of its own provider), and anything else on the clipboard
@@ -848,7 +858,7 @@ run it are in [docs/benchmark.md](docs/benchmark.md).
 | `[prompt-workflow: OpenRouter returned HTTP 401: check the API key…]` | Wrong key. Replace it in `.env`. |
 | `[prompt-workflow: OpenRouter returned HTTP 402: out of credits…]` | Add credits to your OpenRouter account. |
 | `[prompt-workflow: … returned HTTP 429: rate limited…]`, `… HTTP 5xx: provider unavailable…` or `… returned an error (code …)` | The provider is busy or down. A rate limit (unless it asks to wait more than 3 s), a 502/503/504/529 or a refused connection to another machine was already retried once within the time limit. Trigger again in a moment, or pick another endpoint in `-if-`. The text after the hint is the provider's own reason. |
-| `[prompt-workflow: … HTTP 400: bad request…]` or `… HTTP 404: not found…` | Check the model slug, the endpoint pin and the base URL; the provider's reason follows the hint. |
+| `[prompt-workflow: … HTTP 400: bad request…]` or `… HTTP 404: not found…` | Check the model slug, the endpoint pin and the base URL; the provider's reason follows the hint. With `OPENROUTER_DATA_COLLECTION=deny`, a 404 can also mean no endpoint for that model meets the data policy (see [What is sent](#what-is-sent-and-to-whom)). |
 | `[prompt-workflow: …_API_KEY contains a non-ASCII or invisible character…]` | The key was pasted with a smart quote or an invisible character. Paste it again as plain text. |
 | `[prompt-workflow: OPENROUTER_REASONING_EFFORT must be empty or one of …]` | Fix the value in `.env` (`OPENROUTER_PRO_REASONING_EFFORT` likewise). |
 | `… the model stopped early (content_filter)]` at the end, or `… declined the request (refusal)` | A content filter or the model's safety policy stopped the rewrite. Rephrase the draft or use another model. |

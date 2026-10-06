@@ -376,6 +376,53 @@ def test_openrouter_extra_body_on_response_and_title(monkeypatch):
 )
 def test_openrouter_routing(pin, allow, expected):
     assert openrouter_routing(pin, allow) == expected
+    assert openrouter_routing(pin, allow, "") == expected
+
+
+# data_collection joins the routing object, also without a pin (blended routing).
+@pytest.mark.parametrize(
+    ("pin", "allow", "policy", "expected"),
+    [
+        ("", True, "deny", {"data_collection": "deny"}),
+        ("a/b", True, "allow", {"order": ["a/b"], "data_collection": "allow"}),
+        (
+            "a/b",
+            False,
+            "deny",
+            {"order": ["a/b"], "allow_fallbacks": False, "data_collection": "deny"},
+        ),
+    ],
+)
+def test_openrouter_routing_data_collection(pin, allow, policy, expected):
+    assert openrouter_routing(pin, allow, policy) == expected
+
+
+# OPENROUTER_DATA_COLLECTION reaches the request body of both tiers, and an @auto pick
+# (no pin) still carries it; unset leaves the body exactly as before.
+@pytest.mark.parametrize("policy", ["deny", "allow"])
+def test_make_provider_openrouter_data_collection(monkeypatch, policy):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.delenv("OPENROUTER_PROVIDER", raising=False)
+    monkeypatch.setenv("OPENROUTER_DATA_COLLECTION", policy)
+    standard = make_provider("openrouter", Settings())._inner.extra_body["provider"]
+    assert standard == {"order": ["google-ai-studio/flex"], "data_collection": policy}
+    pro = make_provider("openrouter", Settings().for_call("pro"))._inner.extra_body["provider"]
+    assert pro == {"order": ["openai"], "data_collection": policy}
+    auto = Settings().for_call("pro", model="openai/gpt-6-luna@auto")
+    assert make_provider("openrouter", auto)._inner.extra_body["provider"] == {
+        "data_collection": policy
+    }
+
+
+def test_make_provider_openrouter_data_collection_unset(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.delenv("OPENROUTER_DATA_COLLECTION", raising=False)
+    for cfg in (Settings(), Settings().for_tier("pro")):
+        assert "data_collection" not in make_provider("openrouter", cfg)._inner.extra_body.get(
+            "provider", {}
+        )
+    monkeypatch.setenv("OPENROUTER_PROVIDER", "")
+    assert "provider" not in make_provider("openrouter", Settings())._inner.extra_body
 
 
 # Cloud base URLs must be https, so the API key never travels in plaintext.

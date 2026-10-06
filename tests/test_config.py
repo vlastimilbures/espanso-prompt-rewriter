@@ -382,6 +382,33 @@ def test_bool_parsing(monkeypatch, raw, expected):
     assert settings.local_only is expected
 
 
+# OPENROUTER_DATA_COLLECTION: empty (the default) or allow/deny in any case, kept lower case.
+@pytest.mark.parametrize(
+    ("raw", "expected"), [("", ""), ("deny", "deny"), ("DENY", "deny"), ("Allow", "allow")]
+)
+def test_data_collection_parsing(monkeypatch, raw, expected):
+    monkeypatch.setenv("OPENROUTER_DATA_COLLECTION", raw)
+    settings = Settings()
+    assert settings.openrouter_data_collection == expected
+    assert settings.for_tier("pro").openrouter_data_collection == expected
+
+
+def test_data_collection_default(monkeypatch):
+    monkeypatch.delenv("OPENROUTER_DATA_COLLECTION", raising=False)
+    assert Settings().openrouter_data_collection == ""
+
+
+# A typo is reported naming the variable, never silently sent (OpenRouter would 400).
+@pytest.mark.parametrize("raw", ["no", "true", "denied"])
+def test_data_collection_rejects_other_values(monkeypatch, raw):
+    monkeypatch.setenv("OPENROUTER_DATA_COLLECTION", raw)
+    with pytest.raises(
+        ValueError,
+        match=f"^OPENROUTER_DATA_COLLECTION must be empty or one of allow, deny, got '{raw}'$",
+    ):
+        Settings()
+
+
 # Anything else is an error, not a silent false: OLLAMA_THINK=1 must not mean "off".
 @pytest.mark.parametrize("raw", ["1", "yes", ""])
 @pytest.mark.parametrize("name", ["OLLAMA_THINK", "PROMPT_GATE_LOCAL"])
