@@ -19,15 +19,27 @@ absolute CLI path into the match files, since GUI-launched Espanso does not inhe
 promptmend espanso status  # missing / in sync / stale / modified / foreign per match file
 ```
 
-Users install the release wheel instead (`uv tool install <wheel> -c constraints.txt`, README
-"Install"; on Windows `scripts/install.ps1`, the Release asset #186: uv via winget, then
+Users install a release instead (`uv tool install promptmend -c <constraints.txt>`, Homebrew
+tap, docs/install.md; on Windows `scripts/install.ps1`, the Release asset #186: uv via winget, then
 the same Release's wheel + constraints.txt (not PyPI), `doctor`; never setup/deploy; CI's
 `install-script` job runs it via `PROMPTMEND_WHEEL`/`PROMPTMEND_CONSTRAINTS` (promptmend never
 comes from PyPI), once without uv on PATH, plus a `PROMPTMEND_DRY_RUN=1` rendered copy;
-never run it here), which reads no checkout `.env`; README "Updating"/"Uninstall" document `--force`
-and detach-before-uninstall. `tests/test_docs.py` checks every `promptmend …` invocation
-in README and in the CHANGELOG's Unreleased and newest release notes, and every standalone
-`--flag` span in README, against the Click tree.
+never run it here), which reads no checkout `.env`; docs/install.md "Update"/"Uninstall"
+document `--force` and detach-before-uninstall.
+
+Docs map: README.md is the landing page and the PyPI long description (absolute links and
+images only; no mermaid, `<details>` or `> [!` alerts; its hero text block is `brand.LOGO`).
+The depth lives in `docs/` (index `docs/README.md`): `install`, `usage`, `commands` (the only
+home of the exit codes), `configuration` (the only home of the settings tables, which
+`tests/test_docs.py` matches against `env_names()`), `profiles`, `privacy`, `interface`,
+`troubleshooting`, `benchmark` (the only home of benchmark numbers). Each page: `# Title`, an
+intro paragraph, sections, `## See also` last. `tests/test_docs.py` (`DOC_PAGES`, a fixed list;
+`docs/prompt-candidates/` is an archived record and stays out) checks every `promptmend …`
+invocation in README, the docs pages and the CHANGELOG's Unreleased and newest release notes,
+and every standalone `--flag` span (not in benchmark.md, the bench's own flags), against the
+Click tree; every repo link and `#anchor` resolves; README is PyPI-safe; each page has the
+skeleton. `tests/test_tui_snapshots.py` writes the README screenshots `docs/interface.svg`
+(Home) and `docs/try.svg` (Try) with the snapshots.
 
 Checks (CONTRIBUTING "Checks"; CI runs `uv sync --locked`, then these, with `pytest --cov`
 held to `fail_under = 95`):
@@ -48,7 +60,8 @@ Rules for agents:
   `setup --deploy` or `espanso` itself: they read or rewrite the user's live Espanso match
   files, and a deploy restarts Espanso.
 - Tests stay offline: no external API calls; mock HTTP (`fake_http`).
-- Every user-visible change gets a CHANGELOG `## Unreleased` entry and a README update.
+- Every user-visible change gets a CHANGELOG `## Unreleased` entry and an update of the README
+  or the relevant docs/ page.
 
 ## Architecture
 
@@ -291,7 +304,7 @@ Rules for agents:
   `tests/test_trigger_contract.py` forbids `commands`, `doctor`, `smoke` and `config_store` on
   the trigger path. `--version` is an eager callback on `_main`. Unlike the triggers they use
   ordinary exit codes (`commands/common.py`: 0 ok, 1 failed, 2 usage, 3 needs a terminal, 4
-  doctor/validate found problems; README "CLI"), print errors to stderr via `@guard` (never a
+  doctor/validate found problems; docs/commands.md "Exit codes"), print errors to stderr via `@guard` (never a
   traceback), load settings in repair mode (`load_layers()`), never prompt without a TTY
   (`stdin_is_tty()`, which tests patch), colour only on a TTY without `NO_COLOR`, and take a key
   only from stdin or `getpass` (`read_secret()`); `config set` refuses secret names and any
@@ -334,8 +347,9 @@ Rules for agents:
   too). `tests/test_tui.py`
   drives each tab with Pilot (`asyncio.run`, no pytest-asyncio); `tests/test_tui_snapshots.py`
   compares SVG exports with `tests/snapshots/` (Linux and macOS; `UPDATE_SNAPSHOTS=1`
-  regenerates them, and the Home one is `docs/interface.svg`). The header shows
-  `PromptMend <version>` (#112); the snapshots pin the version, so a release changes none.
+  regenerates them, and the Home and Try ones are `docs/interface.svg` and `docs/try.svg`).
+  The header shows `PromptMend <version>` (#112); the snapshots pin the version (`VERSION`,
+  "0.20.0", the release that ships those screenshots), so a release changes none.
   Home (Mockup B, #112) is `tui/home.py`'s pure `home_rows(state)` (no reads of its own, no
   Textual; `tests/test_tui_home.py`): rows for `-i-`, `-ip-`, the match files/Espanso, the
   history, `Output` (`PROMPT_OUTPUT`, #134: paste or clipboard), and
@@ -345,7 +359,7 @@ Rules for agents:
   a narrow terminal keeps it, #174) in `ManageApp._show()`. The Providers and Diagnostics
   tables show a settings file under the home folder as `~/…` via `common.short_label()`
   (display only; headless `config show` keeps `source_label()`). `tui/intro.py`'s `IntroScreen` (#112; text from
-  `tui/brand.py`: `brand.NAME` is the one display name the header, intro, wordmark and About read, so a rename (#169) changes one line; ASCII wordmark, dropped at `brand.NARROW` columns or less, frame is a Textual
+  `tui/brand.py`: `brand.NAME` is the one display name the header, intro and About read, so a rename (#169) changes one line; `brand.MARK` is the ASCII logo (a `[+]` speech bubble beside figlet-small "PromptMend"), `brand.LOGO` the mark plus `TAGLINE`, which README's hero repeats exactly (`tests/test_docs.py`); the mark is dropped at `brand.NARROW` columns or less, frame is a Textual
   border) is pushed over `MainScreen` on every launch for `ManageApp(intro=True)`; it has no
   timer (#173): any key (Enter, Escape, …) or click closes it and is consumed. Its muted
   `INTRO_HINT` names `teach.INTRO_OFF` (`config set PROMPT_UI_INTRO false`, parsed by the

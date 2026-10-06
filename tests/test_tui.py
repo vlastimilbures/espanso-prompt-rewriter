@@ -1962,10 +1962,13 @@ def test_brand_is_ascii_and_narrow_terminals_get_text_only() -> None:
     wide, narrow = brand.splash(110, "1.2.3"), brand.splash(70, "1.2.3")
     assert wide.isascii()
     assert brand.TAGLINE.isascii()
-    assert brand.WORDMARK[0] in wide
-    assert brand.WORDMARK[0] not in narrow
+    assert brand.LOGO.isascii()
+    assert brand.MARK[1] in wide
+    assert brand.MARK[1] not in narrow
     assert narrow == f"{brand.NAME} 1.2.3\n\n{brand.TAGLINE}"
-    assert max(map(len, brand.WORDMARK)) < brand.NARROW
+    assert max(map(len, brand.LOGO.splitlines())) < brand.NARROW
+    assert brand.LOGO.splitlines() == [*brand.MARK, "", brand.TAGLINE]
+    assert all(line == line.rstrip() for line in brand.LOGO.splitlines())
 
 
 # --- Every action shows its command (#111, stage 1) ---------------------------------------

@@ -64,6 +64,22 @@ All notable changes to this project are documented here. The format follows
 ### Changed
 - The interface's second tab is now labelled "2 Providers" (it was "Providers & keys"), so
   all seven tabs fit on an 80-column terminal. It still holds the keys.
+- The interface's intro and About screen show the new PromptMend logo (a mended speech bubble
+  beside the name), the same one that opens the README.
+
+### Documentation
+- The README is rewritten as a short landing page: what PromptMend does, screenshots of the
+  Home and Try tabs, an example, install paths for macOS (Homebrew, uv), Windows (the
+  one-command install, uv) and Linux, a quick start, the triggers and the key commands. It
+  renders on PyPI too (absolute links, no GitHub-only syntax).
+- The details moved to pages in `docs/`: install (verify, update, switch channel, uninstall,
+  upgrading from older versions), usage, commands (options, scripting contract, exit codes),
+  configuration (the complete settings reference), profiles, privacy, interface and
+  troubleshooting. `docs/benchmark.md` opens with the current results at a glance, the only
+  place the numbers are kept, which removes the README's contradicting figures.
+- The package metadata names the project, its keywords and classifiers, and links the docs,
+  issues and source on PyPI. The bug report form asks for the install channel,
+  `promptmend --version` and `promptmend doctor --json`.
 
 ## 0.19.0 - 2026-10-06
 

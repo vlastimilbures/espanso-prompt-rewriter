@@ -436,8 +436,8 @@ def _builtin_profiles(raw: str) -> tuple[str, ...]:
 def _regexes(raw: str) -> str:
     """PROMPT_EXTRA_PATTERNS, kept as text (the gate and the history compile it), but
     rejected here if an entry is not a valid regex. There is no timing probe for a
-    catastrophic pattern: it would run on every trigger and flake on a busy machine; README
-    warns against nested quantifiers instead."""
+    catastrophic pattern: it would run on every trigger and flake on a busy machine;
+    docs/privacy.md warns against nested quantifiers instead."""
     try:
         compile_extra(raw)
     except InvalidExtraPattern as exc:
@@ -565,7 +565,7 @@ class Settings:
     openrouter_api_key: str = _env("OPENROUTER_API_KEY", "", str.strip, secret=True)
     openrouter_max_tokens: int = _env("OPENROUTER_MAX_TOKENS", "2400", _positive_int)
     # OpenRouter routes one model slug across many hosts, and the host drives latency,
-    # cost and template fidelity (see the benchmark section in README.md). Pin one
+    # cost and template fidelity (see docs/benchmark.md). Pin one
     # endpoint tag; empty string restores OpenRouter's own blended routing.
     openrouter_provider: str = _env("OPENROUTER_PROVIDER", "google-ai-studio/flex")
     # OpenRouter `reasoning.effort` (none/minimal/low/medium/high); empty omits the field

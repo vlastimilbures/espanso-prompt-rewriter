@@ -1,6 +1,6 @@
-"""The interface's wordmark and About facts (#112). Plain ASCII only, so every terminal, font,
-NO_COLOR and screen reader shows it the same; the frame around it is a Textual border, not
-box-drawing text. No Textual here, so a test can check it without the interface."""
+"""The PromptMend logo and the interface's About facts (#112). Plain ASCII only, so every
+terminal, font, NO_COLOR and screen reader shows it the same; the frame around it is a Textual
+border, not box-drawing text. No Textual here, so a test can check it without the interface."""
 
 from __future__ import annotations
 
@@ -19,28 +19,26 @@ LICENCE = "MIT"
 NARROW = 70
 
 
-def _wordmark(name: str) -> tuple[str, str, str]:
-    """Three ASCII lines: a boxed draft, an arrow through ``name``, a boxed prompt."""
-    left, right = " .-------.", ".----------."
-    middle = f" | draft |  -->  [ {name} ]  -->  |  prompt  |"
-    gap = " " * (len(middle) - len(left) - len(right))
-    return (
-        f"{left}{gap}{right}",
-        middle,
-        f"{left}{gap}{right}".replace(".", "'"),
-    )
-
-
-WORDMARK = _wordmark(NAME)
+# The logo: a mended speech bubble beside `uvx pyfiglet -f small PromptMend`, ASCII and
+# narrower than NARROW. README's hero is LOGO exactly (tests/test_docs.py); the intro and
+# About show MARK above the tagline.
+MARK = (
+    " .-------.    ___                    _   __  __             _",
+    r" |  [+]  |   | _ \_ _ ___ _ __  _ __| |_|  \/  |___ _ _  __| |",
+    r" '--. .--'   |  _/ '_/ _ \ '  \| '_ \  _| |\/| / -_) ' \/ _` |",
+    r"    |/       |_| |_| \___/_|_|_| .__/\__|_|  |_\___|_||_\__,_|",
+    "                               |_|",
+)
+LOGO = "\n".join((*MARK, "", TAGLINE))
 
 
 def splash(width: int, version: str | None = None) -> str:
-    """The intro's text: the wordmark (when ``width`` columns hold it), the name and version,
+    """The intro's text: the mark (when ``width`` columns hold it), the name and version,
     and the tagline."""
     title = f"{NAME} {version or __version__}"
     lines = [title, "", TAGLINE]
     if width > NARROW:
-        lines = [*WORDMARK, "", *lines]
+        lines = [*MARK, "", *lines]
     return "\n".join(lines)
 
 

@@ -255,7 +255,8 @@ def test_form_choices_are_valid_cli_values() -> None:
 
 
 # Every -if- list starts with, and defaults to, `default` (keep the pro-tier setting), as the
-# comment above the match and README say, so the popup changes nothing unless a value is picked.
+# comment above the match and docs/usage.md say, so the popup changes nothing unless a value is
+# picked.
 # The timeout list stops at 120 s: Espanso blocks every other trigger while a call runs.
 def test_if_form_lists_default_to_the_tier_setting() -> None:
     (forms,) = [f for path in MATCH_FILES for m, f in _form_vars(path) if m["trigger"] == "-if-"]

@@ -1,8 +1,8 @@
 """What every management command shares: exit codes, the repair-mode settings, prompts that
 never run without a terminal, secret input, and output that respects NO_COLOR.
 
-Unlike improve and persona, these commands use ordinary exit codes (documented in README's
-CLI section) and print errors to stderr.
+Unlike improve and persona, these commands use ordinary exit codes (documented in
+docs/commands.md, "Exit codes") and print errors to stderr.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from .. import config
 from ..config import DEFAULT_SOURCE, ENV_SOURCE, ConfigLayers, Entry, Settings, secret_names
 from ..redaction import safe_repr
 
-# Exit codes (README, "CLI"). 2 is Click's own usage error (an unknown option, a bad value).
+# Exit codes (docs/commands.md). 2 is Click's own usage error (an unknown option, a bad value).
 OK = 0
 FAILED = 1
 USAGE = 2

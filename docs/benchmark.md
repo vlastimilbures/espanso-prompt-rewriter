@@ -1,7 +1,31 @@
 # Model benchmark
 
-The default models and the default prompt were chosen with this benchmark. The README's
-[Model benchmark](../README.md#model-benchmark) section has the summary.
+The default models and the default prompt were chosen with this benchmark, which scores every
+rewrite mechanically for template fidelity, prompt injection and language edge cases, latency
+and real cost. This page holds the method, every result table and how to run it; it is the
+only place the numbers live. The README's [Model benchmark](../README.md#model-benchmark)
+section links here.
+
+## Contents
+
+- [At a glance](#at-a-glance)
+- [Method](#method)
+- [Results](#results)
+- [Running it](#running-it)
+
+## At a glance
+
+The shipped prompt of v0.19.0 on each tier's default model, from the first table under
+[Results](#results) (`--suite all` plus `--suite holdout`, 3 runs per draft, 2026-10-06):
+
+| Tier | Trigger | Model, endpoint, effort | core | edge | holdout | p50 | p95 | $ per rewrite |
+|------|---------|-------------------------|------|------|---------|-----|-----|---------------|
+| Standard | `-i-` | `google/gemini-3.5-flash-lite` @ `google-ai-studio/flex`, `minimal` | 23/24 | 76/84 | 23/24 | 2.5 s | 3.5 s | 0.0012 |
+| Pro | `-ip-` | `openai/gpt-6-luna` @ `openai`, `low` | 24/24 | 82/84 | 22/24 | 7.5 s | 12.2 s | 0.0004 |
+
+The holdout drafts were frozen before this prompt was benched, and no profile quotes them.
+Both models opened `CONTEXT` with the configured persona in every run scored on it. Prices
+and endpoints change quickly, so re-run the benchmark before relying on these numbers.
 
 ## Method
 
@@ -213,3 +237,9 @@ uv run python scripts/bench_models.py --suite all --runs 3                 # cor
 uv run python scripts/bench_models.py --system-prompt-file candidate.md   # A/B a prompt change
 uv run python scripts/bench_models.py --profile general --suite all       # the local triggers' profile
 ```
+
+## See also
+
+- [Profiles](profiles.md): what the `default` and `general` profiles do
+- [Configuration](configuration.md#openrouter): the model and endpoint settings
+- [CONTRIBUTING.md, "Change the default prompt"](../CONTRIBUTING.md#change-the-default-prompt): when a prompt change needs a re-run
