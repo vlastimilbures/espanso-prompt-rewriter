@@ -361,3 +361,22 @@ def test_retention_setting_drives_the_prune(monkeypatch, stub_provider, history_
     seed_history(op)
     _run(LOCAL)
     assert len(history_rows("operations")) == 1
+
+
+# Clipboard output (#134): a success is still `ok`; a failed copy, whose rewrite is pasted
+# after the marker instead, is `clipboard_failed` with the charge kept.
+def test_clipboard_output_outcomes(monkeypatch, cloud, fake_http, history_rows):
+    monkeypatch.setenv("PROMPT_OUTPUT", "clipboard")
+    copied = []
+    monkeypatch.setattr(pyperclip, "copy", copied.append)
+    fake_http.reply(REPLY)
+    assert _run(CLOUD) == ""
+    assert copied == ["rewrite"]
+
+    def broken(text):
+        raise pyperclip.PyperclipException("no clipboard")
+
+    monkeypatch.setattr(pyperclip, "copy", broken)
+    assert _run(CLOUD).endswith("the rewrite is pasted instead]\n\nrewrite")
+    assert [op["outcome"] for op in history_rows("operations")] == ["ok", "clipboard_failed"]
+    assert [at["charged_amount"] for at in history_rows("attempts")] == ["0.0002", "0.0002"]

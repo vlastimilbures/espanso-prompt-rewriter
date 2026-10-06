@@ -853,3 +853,149 @@ def test_unknown_provider_beats_openrouter_only(fake_http):
     result = improve("--provider", "foo", "--tier", "pro", "--source", "argument", "--text", "d")
     assert result.stdout.startswith("[prompt-workflow: Unknown provider 'foo'")
     assert fake_http.requests == []
+
+
+# --- clipboard output (PROMPT_OUTPUT=clipboard, --output; #134) ---------------------------
+
+ARG = ("--source", "argument", "--text", "draft")
+
+
+@pytest.fixture
+def copied(monkeypatch):
+    items = []
+    monkeypatch.setattr(cli.pyperclip, "copy", items.append)
+    return items
+
+
+# A success prints nothing, so Espanso only erases the trigger, and the clipboard holds the
+# rewrite exactly as paste output would print it (cleaned, unfenced).
+@pytest.mark.parametrize("how", ["setting", "option"])
+def test_clipboard_output_prints_nothing(monkeypatch, stub_provider, copied, how):
+    stub_provider.result = "```\nWrite\x1b[201~ it.\n```"
+    if how == "setting":
+        monkeypatch.setenv("PROMPT_OUTPUT", "clipboard")
+        result = improve(*ARG)
+    else:
+        result = improve("--output", "clipboard", *ARG)
+    assert result.exit_code == 0
+    assert result.stdout == ""
+    assert copied == ["Write[201~ it."]
+
+
+# --output paste beats PROMPT_OUTPUT=clipboard for one call, and the clipboard is untouched.
+def test_output_paste_overrides_the_setting(monkeypatch, stub_provider, copied):
+    monkeypatch.setenv("PROMPT_OUTPUT", "clipboard")
+    assert improve("--output", "paste", *ARG).stdout == "improved"
+    assert copied == []
+
+
+# A bad value, as option or setting, is a marker; nothing is copied or sent.
+def test_bad_output_reports_inline(monkeypatch, stub_provider, copied):
+    result = improve("--output", "copy", *ARG)
+    assert result.stdout == (
+        "[prompt-workflow: --output must be paste or clipboard or default, got 'copy']"
+    )
+    monkeypatch.setenv("PROMPT_OUTPUT", "both")
+    result = improve(*ARG)
+    assert result.stdout == (
+        "[prompt-workflow: PROMPT_OUTPUT must be paste or clipboard, got 'both']"
+    )
+    assert copied == []
+    assert stub_provider.calls == []
+
+
+# --copy adds nothing in clipboard output: one copy, nothing printed.
+def test_copy_flag_with_clipboard_output(stub_provider, copied):
+    assert improve("--output", "clipboard", "--copy", *ARG).stdout == ""
+    assert copied == ["improved"]
+
+
+# Error markers still print, and nothing is copied.
+def test_clipboard_output_error_marker(stub_provider, copied):
+    stub_provider.exc = ProviderError("Ollama request failed")
+    result = improve("--output", "clipboard", *ARG)
+    assert result.stdout == "[prompt-workflow: Ollama request failed]"
+    assert copied == []
+
+
+# A cut-off or filtered reply: the partial rewrite goes on the clipboard, the note is printed.
+@pytest.mark.parametrize(
+    "printed",
+    [
+        "[prompt-workflow: the reply hit the model's output limit and is cut off]",
+        "[prompt-workflow: the model stopped early (refusal); the rewrite may be incomplete]",
+    ],
+)
+def test_clipboard_output_stop_note(stub_provider, copied, printed):
+    stub_provider.result = "<CONTEXT>\nhalf a prompt\n\n" + printed
+    assert improve("--output", "clipboard", *ARG).stdout == printed
+    assert copied == ["<CONTEXT>\nhalf a prompt"]
+
+
+# Paste output keeps the note after the rewrite, as before.
+def test_paste_output_keeps_stop_note(stub_provider, copied):
+    note = "\n\n[prompt-workflow: the reply hit the model's output limit and is cut off]"
+    stub_provider.result = "half" + note
+    assert improve(*ARG).stdout == "half" + note
+    assert copied == []
+
+
+# With --allow-flagged, stdout is only the sent-despite marker (no trailing blank line) and
+# the clipboard only the rewrite; with a cut-off reply both markers print.
+def test_clipboard_output_sent_despite(monkeypatch, fake_http, copied):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setenv("PROMPT_OUTPUT", "clipboard")
+    fake_http.reply({"choices": [{"message": {"content": "rewrite"}}]})
+    args = ("--provider", "openrouter", "--allow-flagged", "--source", "argument")
+    result = improve(*args, "--text", "Output is CONFIDENTIAL")
+    assert result.stdout == "[prompt-workflow: sent despite: confidential_label]"
+    assert copied == ["rewrite"]
+    fake_http.reply({"choices": [{"message": {"content": "half"}, "finish_reason": "length"}]})
+    result = improve(*args, "--text", "Output is CONFIDENTIAL")
+    assert result.stdout == (
+        "[prompt-workflow: sent despite: confidential_label]\n\n"
+        "[prompt-workflow: the reply hit the model's output limit and is cut off]"
+    )
+    assert copied == ["rewrite", "half"]
+
+
+# A copy that fails, with any exception, prints the marker and then the rewrite, so it is
+# pasted instead of lost; never a traceback.
+@pytest.mark.parametrize("error", [pyperclip.PyperclipException("no clipboard"), OSError("gone")])
+def test_clipboard_output_copy_failure_pastes_the_rewrite(monkeypatch, stub_provider, error):
+    def broken(text):
+        raise error
+
+    monkeypatch.setattr(cli.pyperclip, "copy", broken)
+    result = improve("--output", "clipboard", *ARG)
+    assert result.exit_code == 0
+    assert result.stdout == (
+        f"[prompt-workflow: Clipboard unavailable: {error}; the rewrite is pasted instead]"
+        "\n\nimproved"
+    )
+
+
+# The concealed-clipboard refusal is unchanged in clipboard output: cleared, marker printed,
+# nothing else copied.
+def test_clipboard_output_concealed_refusal(monkeypatch, stub_provider, copied):
+    monkeypatch.setattr(cli, "is_concealed", lambda: True)
+    result = improve("--output", "clipboard", "--provider", "ollama", "--source", "clipboard")
+    assert "password-manager item" in result.stdout
+    assert copied == [""]
+    assert stub_provider.built == []
+
+
+# The draft read from the clipboard is replaced by the rewrite.
+def test_clipboard_output_replaces_the_draft(monkeypatch, stub_provider, copied):
+    monkeypatch.setattr(cli.pyperclip, "paste", lambda: "summarise the minutes")
+    assert improve("--output", "clipboard", "--source", "clipboard").stdout == ""
+    assert stub_provider.calls[0]["prompt"] == "summarise the minutes"
+    assert copied == ["improved"]
+
+
+# persona ignores PROMPT_OUTPUT: the -p- snippet still pastes.
+def test_persona_ignores_clipboard_output(monkeypatch, copied):
+    monkeypatch.setenv("PROMPT_OUTPUT", "clipboard")
+    monkeypatch.setenv("PROMPT_PERSONA", "I am a tester.")
+    assert runner.invoke(app, ["persona"]).stdout == "I am a tester."
+    assert copied == []

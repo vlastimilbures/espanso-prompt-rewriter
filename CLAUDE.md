@@ -71,6 +71,12 @@ Rules for agents:
   `OPENROUTER_PRO_MODEL`. `config.openrouter_only()` then refuses `--tier pro` and a non-`default`
   `--effort` for any other provider (a ValueError marker, `error_marker` in the history). An
   explicit `--profile` beats both, so the OpenRouter triggers pass none.
+  `PROMPT_OUTPUT=clipboard` (or `--output clipboard`, through `with_overrides()`; #134) makes
+  `_deliver()` copy the finished rewrite and print only markers: nothing on success, the
+  sent-despite note without its blank line, and a provider's cut-off/filtered note, split off
+  the rewrite by `_split_stop_note()`. A failed copy (any exception) prints the marker and then
+  the rewrite (outcome `clipboard_failed`); success stays `ok`. `--copy` is ignored there;
+  `persona` never reads the setting.
 - `clipboard_guard.py` — `is_concealed()` asks the clipboard (ctypes: NSPasteboard types on
   macOS, user32 formats on Windows) whether a password manager marked the item, without reading
   it. `cli._read_input()` refuses such an item before `pyperclip.paste` and clears the clipboard

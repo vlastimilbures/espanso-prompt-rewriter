@@ -418,6 +418,19 @@ def _data_collection(raw: str) -> str:
     return raw.lower()
 
 
+# Where improve puts a successful rewrite (PROMPT_OUTPUT, --output): printed for Espanso to
+# paste at the caret, or copied to the clipboard with only markers printed (#134).
+PASTE = "paste"
+CLIPBOARD = "clipboard"
+OUTPUTS = (PASTE, CLIPBOARD)
+
+
+def _output(raw: str) -> str:
+    if raw.lower() not in OUTPUTS:
+        raise ValueError(" or ".join(OUTPUTS))
+    return raw.lower()
+
+
 # Option value meaning "keep the configured setting"; the -if- popup's choice lists
 # cannot express "unset", so each one offers this word instead.
 KEEP = "default"
@@ -479,6 +492,10 @@ class Settings:
     # Opening sentence of the default profile's CONTEXT and of the -p- snippet, e.g.
     # "I am working as a Head of Data at Example Corp." Empty: no fixed persona.
     persona: str = _env("PROMPT_PERSONA", "")
+    # paste: improve prints the rewrite for Espanso to paste. clipboard: it copies the rewrite
+    # and prints only markers (errors, the sent-despite note, a cut-off note), so a successful
+    # trigger just vanishes and the user pastes when ready.
+    output: str = _env("PROMPT_OUTPUT", PASTE, _output)
     timeout: float = _env("PROMPT_TIMEOUT_SECONDS", "30", _positive_float)
     # Low by default: the rewrite must reproduce fixed template wordings verbatim.
     # Empty omits the temperature from every request (models that reject the field).
@@ -584,6 +601,7 @@ class Settings:
         effort: str | None = None,
         max_tokens: str | None = None,
         timeout: str | None = None,
+        output: str | None = None,
     ) -> Settings:
         """Settings for one CLI call on ``provider``: for_tier(), then the per-call overrides.
         Only OpenRouter has a pro tier, so another provider keeps the standard settings (the
@@ -593,7 +611,7 @@ class Settings:
         pro = tier == "pro" and provider == "openrouter"
         tiered = self.for_tier(tier)
         cfg = (tiered if pro else self).with_overrides(
-            model=model, effort=effort, max_tokens=max_tokens, timeout=timeout
+            model=model, effort=effort, max_tokens=max_tokens, timeout=timeout, output=output
         )
         if pro and cfg.openrouter_model != self.openrouter_pro_model:
             return replace(cfg, profile=self.profile)
@@ -606,9 +624,10 @@ class Settings:
         effort: str | None = None,
         max_tokens: str | None = None,
         timeout: str | None = None,
+        output: str | None = None,
     ) -> Settings:
-        """Per-call overrides from the CLI (the -if- popup). Values arrive as strings; None
-        or `default` keeps the setting. ``model`` applies to whichever provider runs, and its
+        """Per-call overrides from the CLI (the -if- popup, --output). Values arrive as strings;
+        None or `default` keeps the setting. ``model`` applies to whichever provider runs, and its
         `slug@endpoint` form also sets the OpenRouter pin. Bad values raise ValueError, which
         the CLI prints inline."""
         if effort not in (None, KEEP, *EFFORTS):
@@ -616,6 +635,7 @@ class Settings:
         slug, endpoint = split_model_spec(None if model == KEEP else model)
         tokens = _override(max_tokens, "--max-tokens", _positive_int)
         seconds = _override(timeout, "--timeout", _positive_float)
+        destination = _override(output, "--output", _output)
         changes: dict[str, Any] = {}
         if slug:
             models = ("ollama_model", "lmstudio_model", "openrouter_model", "anthropic_model")
@@ -630,6 +650,8 @@ class Settings:
             changes["call_max_tokens"] = tokens
         if seconds is not None:
             changes["timeout"] = seconds
+        if destination is not None:
+            changes["output"] = destination
         return replace(self, **changes) if changes else self
 
 
