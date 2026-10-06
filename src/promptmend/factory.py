@@ -168,6 +168,7 @@ def make_provider(
     on_response: Callable[[dict[str, object]], None] | None = None,
     title: str = APP_TITLE,
     observer: UsageObserver | None = None,
+    remote: bool | None = None,
 ) -> Provider:
     """Build the named provider from settings. Anything that can send the draft off this
     machine (see _leaves_machine) comes wrapped in the data-protection gate, and with
@@ -188,10 +189,15 @@ def make_provider(
     HTTP attempt (providers/usage.py); a draft the gate blocks makes no attempt, so no record.
     A loopback Ollama or LM Studio that is not a cloud model reports cost ``not_applicable``.
 
+    ``remote`` replaces _leaves_machine(name, cfg) for a stand-in: the interface's Try tab
+    builds against the stub on 127.0.0.1 (``cfg`` points there) but gates, and refuses under
+    PROMPT_LOCAL_ONLY, as the real settings would (it passes _leaves_machine() of those).
+    Every other caller leaves it None.
+
     The ``-> Provider`` return type is also what makes mypy check that every provider class
     conforms to the Provider protocol.
     """
-    remote = _leaves_machine(name, cfg)
+    remote = _leaves_machine(name, cfg) if remote is None else remote
     if remote and cfg.local_only:
         raise GateBlocked(f"PROMPT_LOCAL_ONLY=true: {name} would send the draft off this machine")
     if name == "ollama":

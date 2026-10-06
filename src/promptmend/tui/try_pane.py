@@ -27,21 +27,23 @@ from textual.widgets import Button, Label, Select, Static, TextArea
 
 from .. import cli, recorder, smoke
 from ..commands import common
-from ..config import TIERS, Settings, openrouter_only
-from ..factory import PROVIDER_NAMES
+from ..config import TIERS, ConfigLayers, Settings, openrouter_only
+from ..factory import PROVIDER_NAMES, _leaves_machine
 from ..prompt_builder import ADDED, PROFILES
 from . import teach
 from .modals import ConfirmModal
 from .panes import Pane, _buttons
 
 if TYPE_CHECKING:
-    from ..config import ConfigLayers
     from ..providers.usage import AttemptUsage
     from .state import State
 
 STUB = "stub"
 REAL = "real"
 TARGETS = (("Local stub", STUB), ("Real provider", REAL))
+# The profile picker's first choice: no --profile, so the call uses PROMPT_PROFILE (or, on the
+# pro tier, PROMPT_PRO_PROFILE when set), exactly as a trigger that names none.
+CONFIGURED = "(configured)"
 # What the session log shows in place of the draft, which never leaves this tab.
 DRAFT_WITHHELD = "<draft withheld>"
 
@@ -114,11 +116,15 @@ def _model_setting(provider: str, tier: str) -> str:
     return f"{provider.upper()}_MODEL"
 
 
+def _profiles(names: Sequence[str]) -> list[tuple[str, str]]:
+    return [("as configured", CONFIGURED), *((n, n) for n in names)]
+
+
 class TryPane(Pane):
     # A run is under way (one at a time; Run is disabled meanwhile).
     running = False
-    # The provider and profile pickers start at the configured ones, once: a reload after a
-    # change elsewhere keeps what was picked here.
+    # The provider picker starts at the configured one, once: a reload after a change
+    # elsewhere keeps what was picked here.
     defaulted = False
     # The stub's request count of the last stub run (0 when the gate stopped it first).
     stub_requests: int | None = None
@@ -139,7 +145,7 @@ class TryPane(Pane):
             for id_, label, options, value in (
                 ("try-target", "Run against", TARGETS, STUB),
                 ("try-provider", "Provider", [(n, n) for n in PROVIDER_NAMES], PROVIDER_NAMES[0]),
-                ("try-profile", "Profile", [(n, n) for n in PROFILES], next(iter(PROFILES))),
+                ("try-profile", "Profile", _profiles(list(PROFILES)), CONFIGURED),
                 ("try-tier", "Tier", [(t, t) for t in TIERS], TIERS[0]),
             ):
                 with Vertical(classes="try-option"):
@@ -154,15 +160,16 @@ class TryPane(Pane):
         profiles = self.query_one("#try-profile", Select)
         picked = profiles.value
         names = [*PROFILES, *(p.name for p in state.profiles if p.status == ADDED)]
-        profiles.set_options([(n, n) for n in names])
+        profiles.set_options(_profiles(names))
         if not self.defaulted:
             self.defaulted = True
-            picked = state.settings.profile
             providers = self.query_one("#try-provider", Select)
             if state.settings.provider in PROVIDER_NAMES:
                 providers.value = state.settings.provider
         if picked in names:
             profiles.value = picked
+        else:
+            profiles.value = CONFIGURED
 
     def _value(self, selector: str) -> str:
         return str(self.query_one(selector, Select).value)
@@ -173,11 +180,15 @@ class TryPane(Pane):
             return
         draft = self.query_one("#try-draft", TextArea).text
         target = self._value("#try-target")
-        provider, profile = self._value("#try-provider"), self._value("#try-profile")
-        tier = self._value("#try-tier")
+        provider, tier = self._value("#try-provider"), self._value("#try-tier")
+        picked = self._value("#try-profile")
+        profile = None if picked == CONFIGURED else picked
         try:
-            layers, loaded = common.load_layers()
-            cfg = loaded.for_call(tier, provider=provider)
+            # Strict, as a trigger loads them: a bad PROMPT_LOCAL_ONLY, PROMPT_EXTRA_PATTERNS
+            # or a broken config.toml fails closed with the marker instead of falling back
+            # (repair mode would run with the default, an ungated or unrefused call).
+            layers = ConfigLayers.resolve()
+            cfg = layers.settings().for_call(tier, provider=provider)
             openrouter_only(provider, tier, None)
         except Exception as exc:
             self._finish(Outcome(cli._clean(cli.marker(exc)), True, "", None), None)
@@ -189,8 +200,7 @@ class TryPane(Pane):
             "improve",
             "--provider",
             provider,
-            "--profile",
-            profile,
+            *(("--profile", profile) if profile else ()),
             "--tier",
             tier,
             "--source",
@@ -236,7 +246,7 @@ class TryPane(Pane):
         )
 
     def _start(
-        self, draft: str, provider: str, profile: str, cfg: Settings, command: str | None
+        self, draft: str, provider: str, profile: str | None, cfg: Settings, command: str | None
     ) -> None:
         self.running = True
         self.query_one("#try-run", Button).disabled = True
@@ -245,7 +255,7 @@ class TryPane(Pane):
         self.background(lambda: self._call(draft, provider, profile, cfg, command))
 
     def _call(
-        self, draft: str, provider: str, profile: str, cfg: Settings, command: str | None
+        self, draft: str, provider: str, profile: str | None, cfg: Settings, command: str | None
     ) -> None:
         """In the worker: one rewrite, through make_provider() and its gate. ``command`` is
         None for a stub run, which records nothing; a real run is recorded as improve."""
@@ -257,45 +267,74 @@ class TryPane(Pane):
             rec.track(cfg)
             # Collected whether or not the history is on: the usage line shows them.
             rec.attempts = attempts
-        started = time.monotonic()
+        try:
+            self._rewrite(draft, provider, profile, cfg, command, attempts, ran, rec)
+        finally:
+            if rec is not None:
+                # After the result is on screen, as improve records after printing, and even
+                # when showing it failed (the app quit meanwhile): a charged call is recorded.
+                rec.emitted()
+                rec.profile_id = ran.profile_id
+                rec.finish()
+        if rec is not None:
+            # The History tab shows the new call.
+            self.app.call_from_thread(self.manage.reload)
+
+    def _rewrite(
+        self,
+        draft: str,
+        provider: str,
+        profile: str | None,
+        cfg: Settings,
+        command: str | None,
+        attempts: list[AttemptUsage],
+        ran: cli.Rewrite,
+        rec: recorder.Recorder | None,
+    ) -> None:
+        """The call itself (timed alone) and the hand-off of its outcome to the screen."""
         requests = 0
         error = False
+        latency = 0.0
         try:
             if command is None:
+                # Gated (and refused under PROMPT_LOCAL_ONLY) as the real settings would be,
+                # though the stub settings point every provider at 127.0.0.1.
+                remote = _leaves_machine(provider, cfg)
                 with smoke.stub_server() as stub:
+                    stub_cfg = smoke.stub_settings(cfg, stub.port)
+                    started = time.monotonic()
                     try:
                         text = cli.rewrite(
                             draft,
                             provider,
-                            smoke.stub_settings(cfg, stub.port),
+                            stub_cfg,
                             profile,
                             ran,
                             observer=attempts.append,
+                            remote=remote,
                         )
                     finally:
+                        # The call alone, not the stub's start or shutdown.
+                        latency = (time.monotonic() - started) * 1000
                         requests = stub.requests
             else:
-                text = cli.rewrite(draft, provider, cfg, profile, ran, observer=attempts.append)
+                started = time.monotonic()
+                try:
+                    text = cli.rewrite(draft, provider, cfg, profile, ran, observer=attempts.append)
+                finally:
+                    latency = (time.monotonic() - started) * 1000
                 requests = len(attempts)
         except Exception as exc:
             error = True
             text = cli.marker(exc)
             if rec is not None:
                 rec.outcome = cli._failure(exc, rec)
-        latency = (time.monotonic() - started) * 1000
         # Cleaned as improve's output is (_emit()), the sent-despite note included.
         shown = cli._clean(cli._sent_despite_note(ran.built) + text)
         outcome = Outcome(
             shown, error, usage_line(attempts, latency, stub=command is None), requests
         )
         self.app.call_from_thread(self._finish, outcome, command)
-        if rec is not None:
-            # After the result is on screen, as improve records after printing.
-            rec.emitted()
-            rec.profile_id = ran.profile_id
-            rec.finish()
-            # The History tab shows the new call.
-            self.app.call_from_thread(self.manage.reload)
 
     def _finish(self, outcome: Outcome, command: str | None) -> None:
         self.running = False

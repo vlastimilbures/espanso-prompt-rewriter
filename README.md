@@ -204,7 +204,7 @@ Windows, use uv.
 ## First run
 
 Run `promptmend` in a terminal (or `promptmend ui`) for a full-screen interface with
-seven tabs: Home, Providers & keys, Profiles, Triggers, History, Diagnostics and Try. Home says in one
+seven tabs: Home, Providers, Profiles, Triggers, History, Diagnostics and Try. Home says in one
 line whether you are ready (or names the most urgent problem and the tab that fixes it), then
 shows what `-i-` and `-ip-` run, the match files and Espanso, the usage history, the output mode and the
 `doctor` checks, each with a status word (ok, warn, FAIL); the header shows the same status
@@ -247,15 +247,19 @@ Escape leaves the line, so the tab keys work again. Enter:
   the Try tab rewrites a typed draft instead) and `ui`.
 
 A line that looks like it holds a key, or `secrets set` with anything after the key's name,
-is never run, shown back or kept: it is cleared, and keys go in Providers & keys. A key in
+is never run, shown back or kept: it is cleared, and keys go in Providers. A key in
 a command's output is shown as `<redacted, N chars>`.
 
 The Try tab (`7`) rewrites a draft you type into it, the way `-i-` would, so you can see the
 result before a trigger pastes one. Pick where it runs (Local stub or Real provider), the
-provider, the profile and the tier, then press Run. The clipboard is never read or written,
-and the draft never goes into a command line. Every run goes through the
+provider, the profile and the tier, then press Run. The profile starts at "as configured",
+which uses `PROMPT_PROFILE` (or `PROMPT_PRO_PROFILE`, if set, on the pro tier) exactly as a
+trigger does. The clipboard is never read or written, and the draft never goes into a
+command line. The settings are read as a trigger reads them, so an invalid one stops the run
+with its marker. Every run goes through the
 [data-protection gate](#privacy-and-data-protection), so a draft the gate blocks shows the
-same `[promptmend: …]` marker a trigger would paste, and nothing is sent. Local stub (the
+same `[promptmend: …]` marker a trigger would paste, and nothing is sent; a stub run is
+gated (and refused under `PROMPT_LOCAL_ONLY`) exactly as the real call would be. Local stub (the
 default) answers on `127.0.0.1` with a placeholder key: no provider is called and nothing is
 recorded. Real provider first asks, naming the provider, model and base URL; a confirmed call
 may be charged and is recorded in the [usage history](#usage-history) as a direct call (no
@@ -500,7 +504,7 @@ By default every improve trigger pastes the rewrite in place of the trigger. Wit
 `PROMPT_OUTPUT=clipboard` the rewrite goes on the clipboard instead:
 
 ```bash
-promptmend config set PROMPT_OUTPUT clipboard   # or Change setting under Providers & keys in `promptmend ui`
+promptmend config set PROMPT_OUTPUT clipboard   # or Change setting under Providers in `promptmend ui`
 promptmend config set PROMPT_OUTPUT paste       # back to pasting
 ```
 

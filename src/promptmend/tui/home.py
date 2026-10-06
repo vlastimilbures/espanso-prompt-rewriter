@@ -18,7 +18,7 @@ _RANK = {OK: 0, WARN: 1, FAIL: 2}
 # Tab id -> its label; the digit in each label is its key (app.TABS adds the panes).
 TAB_LABELS = {
     "home": "1 Home",
-    "providers": "2 Providers & keys",
+    "providers": "2 Providers",
     "profiles": "3 Profiles",
     "triggers": "4 Triggers",
     "history": "5 History",

@@ -328,7 +328,7 @@ def test_home_shows_doctor_and_checks_again(espanso: FakeRunner) -> None:
         assert "Not ready: OPENROUTER_API_KEY is not set, so -i- cannot rewrite." in shown
         assert "fail  Rewrites" not in shown  # the label is FAIL, as in Diagnostics
         assert "FAIL  Rewrites" in shown
-        assert "-> 2 Providers & keys" in shown
+        assert "-> 2 Providers" in shown
         await press(app, pilot, "#home-reload")
         await pilot.press("r")
         await settle(pilot)
@@ -364,7 +364,7 @@ def test_home_warns_of_a_persona_matching_the_patterns(
     drive(scenario)
 
 
-# --- Providers & keys ---------------------------------------------------------------------
+# --- Providers ----------------------------------------------------------------------------
 
 
 def test_providers_set_a_key_never_shows_it(saved: Path, espanso: FakeRunner) -> None:

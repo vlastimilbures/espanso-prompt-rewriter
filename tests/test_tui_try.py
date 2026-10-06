@@ -12,19 +12,20 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
+import httpx
 import pyperclip
 import pytest
 from test_tui_snapshots import fixed_state
 from textual.pilot import Pilot
 from textual.widgets import Button, Select, Static, TabbedContent, TextArea
 
-from promptmend import cli, clipboard_guard, smoke
+from promptmend import cli, clipboard_guard, prompt_builder, smoke
 from promptmend.cli import MAX_DRAFT_CHARS
 from promptmend.providers.usage import AttemptUsage
 from promptmend.tui import console, teach, try_pane
 from promptmend.tui.app import ManageApp
 from promptmend.tui.modals import ConfirmModal
-from promptmend.tui.try_pane import REAL, TryPane, usage_line
+from promptmend.tui.try_pane import CONFIGURED, REAL, TryPane, usage_line
 
 if TYPE_CHECKING:
     from conftest import FakeHttp, HistoryRows
@@ -39,7 +40,7 @@ REPLY = {
     "usage": {"prompt_tokens": 120, "completion_tokens": 30, "cost": 0.0012},
 }
 COMMAND = (
-    "promptmend improve --provider openrouter --profile default --tier standard "
+    "promptmend improve --provider openrouter --tier standard "
     "--source argument --text '<draft withheld>'"
 )
 
@@ -55,6 +56,22 @@ def no_clipboard(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pyperclip, "copy", touched)
     monkeypatch.setattr(clipboard_guard, "is_concealed", touched)
     monkeypatch.setattr(cli, "is_concealed", touched)
+
+
+@pytest.fixture
+def loopback_only(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """For stub runs: any request to a host other than 127.0.0.1 fails the test. Returns the
+    URLs of the requests sent (all to the stub)."""
+    sent: list[str] = []
+    real_send = httpx.Client.send
+
+    def send(client: httpx.Client, request: httpx.Request, **kwargs: Any) -> httpx.Response:
+        assert request.url.host == "127.0.0.1", f"a stub run reached {request.url}"
+        sent.append(str(request.url))
+        return real_send(client, request, **kwargs)
+
+    monkeypatch.setattr(httpx.Client, "send", send)
+    return sent
 
 
 @pytest.fixture
@@ -126,6 +143,7 @@ async def run(app: ManageApp, pilot: Pilot[int], draft: str, **picks: str) -> No
     await settle(pilot)
 
 
+@pytest.mark.usefixtures("loopback_only")
 def test_stub_run_shows_the_reply_and_records_nothing(history_rows: HistoryRows) -> None:
     async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
         await run(app, pilot, DRAFT)
@@ -143,6 +161,7 @@ def test_stub_run_shows_the_reply_and_records_nothing(history_rows: HistoryRows)
     assert not seen.disabled
 
 
+@pytest.mark.usefixtures("loopback_only")
 @pytest.mark.parametrize("provider", ["ollama", "anthropic", "lmstudio"])
 def test_stub_run_with_each_provider_shape(provider: str) -> None:
     async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
@@ -153,6 +172,7 @@ def test_stub_run_with_each_provider_shape(provider: str) -> None:
     assert seen.stub_requests == 1
 
 
+@pytest.mark.usefixtures("loopback_only")
 def test_gate_blocks_a_key_before_the_stub_is_called() -> None:
     async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
         await run(app, pilot, f"Use the key {KEY} to call the API.")
@@ -175,6 +195,7 @@ def test_gate_blocks_a_key_before_the_stub_is_called() -> None:
         ),
     ],
 )
+@pytest.mark.usefixtures("loopback_only")
 def test_empty_or_too_long_draft(draft: str, marker: str) -> None:
     async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
         await run(app, pilot, draft)
@@ -184,6 +205,7 @@ def test_empty_or_too_long_draft(draft: str, marker: str) -> None:
     assert seen.stub_requests == 0
 
 
+@pytest.mark.usefixtures("loopback_only")
 def test_pro_tier_on_another_provider_is_refused() -> None:
     async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
         await run(app, pilot, DRAFT, provider="ollama", tier="pro")
@@ -356,7 +378,7 @@ def test_pickers_start_at_the_settings_and_keep_a_pick() -> None:
         seen.append((str(pane.query_one("#try-provider", Select).value), str(options.value)))
 
     drive(scenario)
-    assert seen == [("openrouter", "default"), ("ollama", "mine")]
+    assert seen == [("openrouter", CONFIGURED), ("ollama", "mine")]
 
 
 def test_usage_line() -> None:
@@ -421,3 +443,194 @@ def test_escape_leaves_the_draft_so_the_tab_keys_work() -> None:
 
     drive(scenario)
     assert seen == ["1", "home"]
+
+
+# --- Review fixes: strict settings, recording, the pro profile, stub gating ----------------
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [("PROMPT_LOCAL_ONLY", "maybe"), ("PROMPT_EXTRA_PATTERNS", "(unclosed")],
+)
+@pytest.mark.parametrize("target", ["stub", REAL])
+def test_an_invalid_setting_fails_closed(
+    name: str,
+    value: str,
+    target: str,
+    cloud: None,
+    fake_http: FakeHttp,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Strict settings, as a trigger loads them: repair mode would fall back to the default
+    (no local-only refusal, no extra patterns) and send the draft."""
+    monkeypatch.setenv(name, value)
+
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        await run(app, pilot, DRAFT, target=target)
+        # No dialog: nothing to confirm when the settings do not load.
+        assert not isinstance(app.screen, ConfirmModal)
+
+    seen = drive(scenario)
+    assert seen.result.startswith("[promptmend: ")
+    assert name in seen.result
+    assert fake_http.requests == []
+    assert seen.stub_requests is None
+
+
+def test_a_real_call_is_recorded_even_when_showing_it_fails(
+    cloud: None,
+    fake_http: FakeHttp,
+    history_rows: HistoryRows,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_http.reply(REPLY)
+
+    def lost(*_: Any) -> None:
+        raise RuntimeError("the app went away")
+
+    monkeypatch.setattr(TryPane, "_finish", lost)
+
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        await run(app, pilot, DRAFT, target=REAL)
+        await pilot.press("y")
+        await settle(pilot)
+
+    seen = drive(scenario)
+    assert len(fake_http.requests) == 1
+    (op,) = history_rows("operations")
+    assert (op["origin"], op["outcome"], op["profile_id"]) == ("direct", "ok", "default")
+    assert op["latency_ms"] is not None
+    assert history_rows("attempts")[0]["charged_amount"] == "0.0012"
+    assert seen.last_message == "error: unexpected RuntimeError: the app went away"
+    assert not seen.running
+
+
+def test_pro_tier_uses_the_pro_profile_as_configured(
+    cloud: None,
+    fake_http: FakeHttp,
+    history_rows: HistoryRows,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """As -ip-: no --profile, so PROMPT_PRO_PROFILE applies on the pro model."""
+    monkeypatch.setenv("PROMPT_PRO_PROFILE", "general")
+    fake_http.reply(REPLY)
+
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        await run(app, pilot, DRAFT, target=REAL, tier="pro")
+        await pilot.press("y")
+        await settle(pilot)
+
+    seen = drive(scenario)
+    (call,) = fake_http.calls
+    assert call["json"]["model"] == "openai/gpt-6-luna"
+    assert call["json"]["messages"][0]["content"] == prompt_builder.system_prompt("general")
+    (op,) = history_rows("operations")
+    assert op["profile_id"] == "general"
+    assert seen.session[-1].command == (
+        "promptmend improve --provider openrouter --tier pro --source argument "
+        "--text '<draft withheld>'"
+    )
+
+
+def test_a_picked_profile_is_passed_and_named(
+    cloud: None, fake_http: FakeHttp, history_rows: HistoryRows
+) -> None:
+    fake_http.reply(REPLY)
+
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        await run(app, pilot, DRAFT, target=REAL, profile="general")
+        await pilot.press("y")
+        await settle(pilot)
+
+    seen = drive(scenario)
+    (op,) = history_rows("operations")
+    assert op["profile_id"] == "general"
+    assert "--profile general --tier standard" in seen.session[-1].command
+
+
+def test_pro_tier_stub_run(loopback_only: list[str]) -> None:
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        await run(app, pilot, DRAFT, tier="pro")
+
+    seen = drive(scenario)
+    assert seen.result == smoke.REPLY
+    assert seen.stub_requests == 1
+    (url,) = loopback_only
+    assert url.endswith("/api/v1/chat/completions")
+
+
+@pytest.mark.parametrize(
+    ("name", "value", "model"),
+    [
+        ("OLLAMA_BASE_URL", "https://ollama.example.com", "qwen3:8b"),
+        ("OLLAMA_BASE_URL", "http://localhost:11434", "gpt-oss:120b-cloud"),
+    ],
+)
+def test_a_stub_run_is_gated_as_the_real_call_would_be(
+    name: str,
+    value: str,
+    model: str,
+    loopback_only: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A remote Ollama (or a cloud model) is gated for real; the stub run is too, though the
+    stub settings point it at 127.0.0.1."""
+    monkeypatch.setenv(name, value)
+    monkeypatch.setenv("OLLAMA_MODEL", model)
+
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        await run(app, pilot, f"Use the key {KEY} to call the API.", provider="ollama")
+
+    seen = drive(scenario)
+    assert seen.result.startswith("[promptmend: ")
+    assert seen.stub_requests == 0
+    assert loopback_only == []
+
+
+def test_a_stub_run_is_refused_under_local_only_as_the_real_call_would_be(
+    loopback_only: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PROMPT_LOCAL_ONLY", "true")
+
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        await run(app, pilot, DRAFT)
+
+    seen = drive(scenario)
+    assert seen.result.startswith("[promptmend: PROMPT_LOCAL_ONLY=true")
+    assert seen.stub_requests == 0
+    assert loopback_only == []
+
+
+def test_a_local_stub_run_stays_ungated(
+    loopback_only: list[str],
+) -> None:
+    """A loopback Ollama is not gated for real (without PROMPT_GATE_LOCAL), nor for the stub."""
+
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        await run(app, pilot, "Rename the helper and keep the tests green.", provider="ollama")
+
+    seen = drive(scenario)
+    assert seen.result == smoke.REPLY
+    assert len(loopback_only) == 1
+
+
+def test_stub_latency_times_the_call_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The stub's shutdown (up to half a second) is not in the usage line's time."""
+    import contextlib
+    import time
+
+    real_server = smoke.stub_server
+
+    @contextlib.contextmanager
+    def slow_stop() -> Any:
+        with real_server() as stub:
+            yield stub
+        time.sleep(0.6)
+
+    monkeypatch.setattr(smoke, "stub_server", slow_stop)
+
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        await run(app, pilot, DRAFT)
+
+    seen = drive(scenario)
+    assert int(seen.usage.split(" ms")[0]) < 600

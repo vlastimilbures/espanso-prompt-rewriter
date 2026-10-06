@@ -303,8 +303,9 @@ Rules for agents:
   before, pinned by `tests/golden/no-args-help.txt`; `ui` without a TTY exits 3). `textual` is a
   required dependency (D-UI-2) imported only by `tui/`, which only `commands/ui.py` imports, once
   the interface opens; `tests/test_trigger_contract.py` checks neither the triggers nor `--help`,
-  `doctor`, `config show` and the other headless commands load it. Seven tabs (Home, Providers &
-  keys, Profiles, Triggers, History, Diagnostics, Try) show one `tui/state.State`, which `gather()`
+  `doctor`, `config show` and the other headless commands load it. Seven tabs (Home, Providers
+  (`2 Providers`, keys included; the label was `Providers & keys` before the Try tab, so all
+  seven fit at 80 columns), Profiles, Triggers, History, Diagnostics, Try) show one `tui/state.State`, which `gather()`
   reads again in a worker thread after every change (a generation number drops an older load
   that finishes late); each action calls the same services as the
   headless command (`commands/settings.save_setting()` is shared with `config set`) and adds no
@@ -391,16 +392,25 @@ Rules for agents:
   `tui/try_pane.py`'s `TryPane` (tab `7 Try`, #111) rewrites a draft typed into its
   `DraftArea` (`#try-draft`; Escape leaves it) and never touches the clipboard
   (`tests/test_tui_try.py` makes pyperclip and `is_concealed` fail if called). Run takes the
-  pickers (`#try-target` stub/real, provider, profile with the user's added ones, tier; set to
-  the settings once, then kept across reloads), loads settings in repair mode, applies
+  pickers (`#try-target` stub/real, provider set to the settings once and then kept across
+  reloads, profile defaulting to `CONFIGURED`, which passes no profile so `cfg.profile` applies
+  as for a trigger, `PROMPT_PRO_PROFILE` on the pro tier included, then the built-ins and the
+  user's added ones; tier), loads settings STRICTLY (`ConfigLayers.resolve()`, never repair
+  mode: a bad `PROMPT_LOCAL_ONLY`, `PROMPT_EXTRA_PATTERNS` or `config.toml` is the marker and
+  nothing is sent, stub included), applies
   `for_call()` and `openrouter_only()`, and calls `cli.rewrite()` in process in
   `Pane.background()` (the draft is never in an argv), one run at a time (`running`, Run
-  disabled). Stub (default): `smoke.stub_server()` + `stub_settings()`, no `Recorder`, no
-  session-log entry (its command would call the real provider). Real: a `ConfirmModal`
+  disabled). Stub (default): `smoke.stub_server()` + `stub_settings()`, gated as the real
+  call would be (`cli.rewrite(remote=_leaves_machine(provider, real cfg))`, passed on to
+  `make_provider(remote=)`, which only this passes), timed around the call alone, no
+  `Recorder`, no session-log entry (its command would call the real provider). Real: a
+  `ConfirmModal`
   (provider, model and base URL via `common.shown_value()`, whether it is recorded), then a
   `recorder.Recorder("improve")` (origin `direct`, no trigger) whose `attempts` list is the
-  observer's, outcome via `cli._failure()`, `finish()` after the result is shown; it logs
-  `teach.equivalent("improve", …, "--text", "<draft withheld>")`. The result (or
+  observer's, outcome via `cli._failure()`, `finish()` in a `finally` after the result is
+  shown (a failed hand-off still records the call); it logs
+  `teach.equivalent("improve", …, "--text", "<draft withheld>")` (`--profile` only when one
+  was picked). The result (or
   `cli.marker()` with the sent-despite note, through `cli._clean()`) goes in a read-only
   `TextArea` (`#try-result`, never markup); `usage_line()` (`#try-usage`) sums tokens and
   shows the cost as reported, `unknown` or `not applicable` (the stub, local models), never 0.

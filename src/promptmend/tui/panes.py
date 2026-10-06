@@ -350,7 +350,7 @@ class HomePane(Pane):
         self.manage.open_previous()
 
 
-# --- Providers & keys ---------------------------------------------------------------------
+# --- Providers ----------------------------------------------------------------------------
 
 
 class ProvidersPane(Pane):
