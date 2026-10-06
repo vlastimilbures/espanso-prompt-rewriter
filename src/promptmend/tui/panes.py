@@ -437,7 +437,7 @@ class ProvidersPane(Pane):
             self.report("\n".join(plan.describe()))
             return
         preview = "\n".join(
-            [*plan.describe(), "", "A backup is kept; `prompt-workflow config rollback` undoes it."]
+            [*plan.describe(), "", "A backup is kept; `promptmend config rollback` undoes it."]
         )
 
         def done(yes: bool | None) -> None:
@@ -622,7 +622,7 @@ def copy_profiles(owner: Reporter, root: Path | None) -> None:
     install's), then copy them on Yes, as `profiles migrate --checkout` does."""
     try:
         root = profiles_cmd._checkout(None if root is None else str(root))
-        source = root / profile_service.PROMPTS_PATH
+        source = root / profile_service.prompts_path(root)
         pristine = profile_service.git_pristine_profiles(root)
         changed = profile_service.changed_profiles(source, pristine)
     except EXPECTED as exc:
@@ -824,7 +824,7 @@ class TriggersPane(Pane):
     def _ask_detach(self, manifest: deploy.Manifest, root: Path) -> None:
         if not manifest.entries:
             self.busy = False
-            self.report("Nothing to do: prompt-workflow has no deployed match files on record.")
+            self.report("Nothing to do: promptmend has no deployed match files on record.")
             return
         preview = "Detach removes the files below that you have not edited:\n" + "\n".join(
             f"  {target}" for target in sorted(manifest.entries)

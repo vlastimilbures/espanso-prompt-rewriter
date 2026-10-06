@@ -13,11 +13,11 @@ import pyperclip
 import pytest
 from typer.testing import CliRunner
 
-import prompt_workflow.cli as cli
-from prompt_workflow.cli import _read_input, app
-from prompt_workflow.prompt_builder import system_prompt
-from prompt_workflow.providers.base import ProviderError
-from prompt_workflow.redaction import DEFAULT_IGNORABLE
+import promptmend.cli as cli
+from promptmend.cli import _read_input, app
+from promptmend.prompt_builder import system_prompt
+from promptmend.providers.base import ProviderError
+from promptmend.redaction import DEFAULT_IGNORABLE
 
 if TYPE_CHECKING:
     from conftest import FakeHttp, StubProvider
@@ -55,7 +55,7 @@ def test_read_input_clipboard_unavailable(monkeypatch: pytest.MonkeyPatch) -> No
 def test_cli_clipboard_unavailable_reports_inline(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pyperclip, "paste", _no_clipboard)
     result = improve("--provider", "ollama", "--source", "clipboard")
-    assert "[prompt-workflow: Clipboard unavailable" in result.stdout
+    assert "[promptmend: Clipboard unavailable" in result.stdout
     assert result.exit_code == 0
 
 
@@ -90,7 +90,7 @@ def test_empty_input_reports_inline() -> None:
 def test_too_long_input_reports_inline() -> None:
     result = improve("--provider", "ollama", "--source", "stdin", input="x" * 50_001)
     assert result.exit_code == 0
-    assert result.stdout == "[prompt-workflow: Input is too long (50001 chars, max 50000)]"
+    assert result.stdout == "[promptmend: Input is too long (50001 chars, max 50000)]"
 
 
 # CLI output has no trailing newline, since Espanso inserts stdout verbatim.
@@ -124,14 +124,14 @@ def test_improve_repairs_context_goal_slip(
 def test_unknown_provider_reports_inline() -> None:
     result = improve("--provider", "bogus", "--source", "argument", "--text", "draft")
     assert result.exit_code == 0
-    assert result.stdout.startswith("[prompt-workflow: Unknown provider 'bogus'")
+    assert result.stdout.startswith("[promptmend: Unknown provider 'bogus'")
 
 
 # An unknown profile is a ValueError, reported inline without the "unexpected" prefix.
 def test_unknown_profile_reports_inline(stub_provider: StubProvider) -> None:
     result = improve("--profile", "nope", "--source", "argument", "--text", "draft")
     assert result.exit_code == 0
-    assert result.stdout.startswith("[prompt-workflow: Unknown profile: 'nope'")
+    assert result.stdout.startswith("[promptmend: Unknown profile: 'nope'")
 
 
 FAKE_KEY = "sk-or-v1-" + "cd" * 32
@@ -147,7 +147,7 @@ def test_bad_name_error_never_echoes_key(
     monkeypatch.setenv(setting, f"openrouterOPENROUTER_API_KEY={FAKE_KEY}")
     result = improve("--source", "argument", "--text", "draft")
     assert result.exit_code == 0
-    assert result.stdout.startswith("[prompt-workflow: Unknown pro")
+    assert result.stdout.startswith("[promptmend: Unknown pro")
     assert "<redacted," in result.stdout
     assert "cdcd" not in result.stdout
     assert fake_http.calls == []
@@ -165,7 +165,7 @@ def test_provider_reason_reaches_the_marker(
     result = improve("--provider", "openrouter", "--source", "argument", "--text", "draft")
     assert result.exit_code == 0
     assert result.stdout == (
-        "[prompt-workflow: OpenRouter returned HTTP 402: out of credits; "
+        "[promptmend: OpenRouter returned HTTP 402: out of credits; "
         "Insufficient credits. Add more using the dashboard]"
     )
 
@@ -176,7 +176,7 @@ def test_merged_env_line_is_reported_not_pasted(tmp_path: Path) -> None:
     (tmp_path / ".env").write_text(f"PROMPT_PERSONA=I am a tester.OPENROUTER_API_KEY={FAKE_KEY}\n")
     result = improve("--source", "argument", "--text", "draft")
     assert result.stdout == (
-        "[prompt-workflow: PROMPT_PERSONA in .env runs into the next line; add the missing newline]"
+        "[promptmend: PROMPT_PERSONA in .env runs into the next line; add the missing newline]"
     )
     persona = runner.invoke(app, ["persona"])
     assert persona.stdout == "I am working as [role] in [company]."
@@ -216,7 +216,7 @@ def test_local_only_blocks_cloud_triggers(
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     result = improve(*args, "--source", "argument", "--text", "draft")
     assert result.exit_code == 0
-    assert result.stdout.startswith("[prompt-workflow: PROMPT_LOCAL_ONLY=true: ")
+    assert result.stdout.startswith("[promptmend: PROMPT_LOCAL_ONLY=true: ")
     assert fake_http.requests == []
 
 
@@ -227,7 +227,7 @@ def test_local_only_bad_value_fails_closed(
     monkeypatch.setenv("PROMPT_LOCAL_ONLY", "yes")
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     result = improve("--provider", "openrouter", "--source", "argument", "--text", "d")
-    assert result.stdout.startswith("[prompt-workflow: PROMPT_LOCAL_ONLY must be true or false")
+    assert result.stdout.startswith("[promptmend: PROMPT_LOCAL_ONLY must be true or false")
     assert fake_http.requests == []
 
 
@@ -242,7 +242,7 @@ def test_invalid_extra_pattern_fails_closed(
     result = improve("--provider", provider, "--source", "argument", "--text", "d")
     assert result.exit_code == 0
     assert result.stdout == (
-        "[prompt-workflow: PROMPT_EXTRA_PATTERNS must be valid ';'-separated regexes; "
+        "[promptmend: PROMPT_EXTRA_PATTERNS must be valid ';'-separated regexes; "
         "entry 2 (custom_2) is not a valid regex]"
     )
     assert fake_http.requests == []
@@ -265,7 +265,7 @@ def test_unexpected_error_reports_inline(stub_provider: StubProvider) -> None:
     stub_provider.exc = KeyError("kaboom")
     result = improve("--source", "argument", "--text", "draft")
     assert result.exit_code == 0
-    assert result.stdout == "[prompt-workflow: unexpected error: 'kaboom']"
+    assert result.stdout == "[promptmend: unexpected error: 'kaboom']"
 
 
 # --copy writes the result to the clipboard and still prints it.
@@ -285,7 +285,7 @@ def test_copy_clipboard_unavailable_reports_inline(
 ) -> None:
     monkeypatch.setattr(pyperclip, "copy", _no_clipboard)
     result = improve("--copy", "--source", "argument", "--text", "draft")
-    assert result.stdout.startswith("[prompt-workflow: Clipboard unavailable")
+    assert result.stdout.startswith("[promptmend: Clipboard unavailable")
 
 
 # --source stdin reads the draft from standard input.
@@ -332,14 +332,14 @@ def test_improve_per_call_overrides(stub_provider: StubProvider) -> None:
 def test_improve_bad_effort_reports_inline() -> None:
     result = improve("--effort", "extreme", "--source", "argument", "--text", "d")
     assert result.exit_code == 0
-    assert result.stdout.startswith("[prompt-workflow: --effort must be one of")
+    assert result.stdout.startswith("[promptmend: --effort must be one of")
 
 
 # An unknown tier is reported inline, like any other bad option, with exit code 0.
 def test_improve_unknown_tier() -> None:
     result = improve("--tier", "ultra", "--source", "argument", "--text", "d")
     assert result.exit_code == 0
-    assert result.stdout.startswith("[prompt-workflow: Unknown tier: 'ultra'")
+    assert result.stdout.startswith("[promptmend: Unknown tier: 'ultra'")
 
 
 # `persona` prints PROMPT_PERSONA for the -p- snippet, with no trailing newline.
@@ -389,9 +389,7 @@ def test_draft_strips_unsafe_characters(stub_provider: StubProvider) -> None:
 # Error markers go through the same sink.
 def test_error_marker_strips_unsafe_characters(stub_provider: StubProvider) -> None:
     stub_provider.exc = ProviderError("bad\x1b[0m thing")
-    assert (
-        improve("--source", "argument", "--text", "d").stdout == "[prompt-workflow: bad[0m thing]"
-    )
+    assert improve("--source", "argument", "--text", "d").stdout == "[promptmend: bad[0m thing]"
 
 
 def _smuggle(payload: str) -> str:
@@ -536,7 +534,7 @@ def test_output_is_utf8_under_legacy_code_page(tmp_path: Path) -> None:
         "PROMPTMEND_ENV": str(tmp_path / ".env"),
     }
     proc = subprocess.run(
-        [sys.executable, "-m", "prompt_workflow.cli", "persona"],
+        [sys.executable, "-m", "promptmend.cli", "persona"],
         capture_output=True,
         env=env,
         timeout=60,
@@ -557,7 +555,7 @@ def test_allow_flagged_sends_once_with_note(
     result = improve(
         "--provider", "openrouter", "--allow-flagged", "--text", draft, "--source", "argument"
     )
-    assert result.stdout == "[prompt-workflow: sent despite: email, confidential_label]\n\nrewrite"
+    assert result.stdout == "[promptmend: sent despite: email, confidential_label]\n\nrewrite"
     assert len(fake_http.requests) == 1
     assert "jane@" not in result.stdout
 
@@ -569,7 +567,7 @@ def test_allow_flagged_is_per_call(monkeypatch: pytest.MonkeyPatch, fake_http: F
     draft = "CONFIDENTIAL: summarise the board minutes"
     improve("--provider", "openrouter", "--allow-flagged", "--source", "argument", "--text", draft)
     result = improve("--provider", "openrouter", "--source", "argument", "--text", draft)
-    assert result.stdout.startswith("[prompt-workflow: Blocked cloud call.")
+    assert result.stdout.startswith("[promptmend: Blocked cloud call.")
     assert len(fake_http.requests) == 1
 
 
@@ -582,7 +580,7 @@ def test_allow_flagged_blocks_hard_finding(
     result = improve(
         "--provider", "openrouter", "--allow-flagged", "--source", "argument", "--text", draft
     )
-    assert result.stdout.startswith("[prompt-workflow: Blocked cloud call.")
+    assert result.stdout.startswith("[promptmend: Blocked cloud call.")
     assert "-iok- never sends payment_card" in result.stdout
     assert fake_http.requests == []
 
@@ -597,7 +595,7 @@ def test_allow_flagged_copy_has_no_note(
     monkeypatch.setattr(pyperclip, "copy", copied.append)
     args = ("--provider", "openrouter", "--allow-flagged", "--copy", "--source", "argument")
     result = improve(*args, "--text", "Output is CONFIDENTIAL")
-    assert result.stdout.startswith("[prompt-workflow: sent despite: confidential_label]")
+    assert result.stdout.startswith("[promptmend: sent despite: confidential_label]")
     assert copied == ["rewrite"]
 
 
@@ -609,7 +607,7 @@ def test_allow_flagged_note_on_failed_call(
     fake_http.reply({"error": {"message": "bad key"}}, status_code=401)
     args = ("--provider", "openrouter", "--allow-flagged", "--source", "argument")
     result = improve(*args, "--text", "Output is CONFIDENTIAL")
-    assert result.stdout.startswith("[prompt-workflow: sent despite: confidential_label]\n\n")
+    assert result.stdout.startswith("[promptmend: sent despite: confidential_label]\n\n")
     assert "HTTP 401" in result.stdout
 
 
@@ -631,7 +629,7 @@ def test_concealed_clipboard_is_refused(
     monkeypatch.setattr(pyperclip, "copy", copied.append)
     result = improve("--provider", provider, "--source", "clipboard")
     assert result.stdout == (
-        "[prompt-workflow: The clipboard held a password-manager item (marked concealed); it "
+        "[promptmend: The clipboard held a password-manager item (marked concealed); it "
         "was cleared and not sent. Copy the draft first]"
     )
     assert pasted == []
@@ -697,7 +695,7 @@ def test_fence_strip_edge_cases(stub_provider: StubProvider, reply: str, pasted:
 def test_persona_survives_an_unrelated_setting_error(tmp_path: Path) -> None:
     (tmp_path / ".env").write_text('PROMPT_PERSONA="I am a tester."\nPROMPT_TIMEOUT_SECONDS=abc\n')
     assert improve("--source", "argument", "--text", "d").stdout.startswith(
-        "[prompt-workflow: PROMPT_TIMEOUT_SECONDS must be"
+        "[promptmend: PROMPT_TIMEOUT_SECONDS must be"
     )
     result = runner.invoke(app, ["persona"])
     assert result.exit_code == 0
@@ -737,7 +735,7 @@ def test_undecodable_env_is_a_marker(tmp_path: Path, fake_http: FakeHttp) -> Non
     result = improve("--provider", "ollama", "--source", "argument", "--text", "CUST-123456")
     assert result.exit_code == 0
     assert result.stdout == (
-        "[prompt-workflow: the .env named by PROMPTMEND_ENV is not UTF-8 text; save it as UTF-8]"
+        "[promptmend: the .env named by PROMPTMEND_ENV is not UTF-8 text; save it as UTF-8]"
     )
     assert fake_http.calls == []
 
@@ -747,7 +745,7 @@ def test_cut_extra_pattern_is_a_marker(tmp_path: Path, fake_http: FakeHttp) -> N
     (tmp_path / ".env").write_text("PROMPT_EXTRA_PATTERNS=ticket #\\d{5};CUST-\\d{6}\n")
     result = improve("--provider", "ollama", "--source", "argument", "--text", "CUST-123456")
     assert result.stdout == (
-        "[prompt-workflow: the value of PROMPT_EXTRA_PATTERNS was cut at ' #' (a comment); "
+        "[promptmend: the value of PROMPT_EXTRA_PATTERNS was cut at ' #' (a comment); "
         "quote the value]"
     )
     assert fake_http.calls == []
@@ -768,7 +766,7 @@ def test_bad_value_matching_a_user_pattern_is_redacted_in_the_marker(
     monkeypatch.setenv("PROMPT_EXTRA_PATTERNS", "falcon")
     monkeypatch.setenv("PROMPT_TIMEOUT_SECONDS", "falcon")
     result = improve("--source", "argument", "--text", "d")
-    assert result.stdout.startswith("[prompt-workflow: PROMPT_TIMEOUT_SECONDS must be")
+    assert result.stdout.startswith("[promptmend: PROMPT_TIMEOUT_SECONDS must be")
     assert "falcon" not in result.stdout
 
 
@@ -776,7 +774,7 @@ def test_bad_value_matching_a_user_pattern_is_redacted_in_the_marker(
 def test_unknown_tier_is_redacted() -> None:
     tier = "sk-or-v1-" + "a" * 40
     result = improve("--tier", tier, "--source", "argument", "--text", "d")
-    assert result.stdout.startswith("[prompt-workflow: Unknown tier: <redacted, 49 chars>")
+    assert result.stdout.startswith("[promptmend: Unknown tier: <redacted, 49 chars>")
     assert "sk-or" not in result.stdout
 
 
@@ -786,7 +784,7 @@ def test_error_hides_a_value_matching_a_user_pattern(monkeypatch: pytest.MonkeyP
     monkeypatch.setenv("PROMPT_EXTRA_PATTERNS", r"PRJ-\d+")
     monkeypatch.setenv("PROMPT_PROVIDER", "PRJ-12345")
     result = improve("--source", "argument", "--text", "d")
-    assert result.stdout.startswith("[prompt-workflow: Unknown provider <redacted, 9 chars>")
+    assert result.stdout.startswith("[promptmend: Unknown provider <redacted, 9 chars>")
     assert "PRJ-12345" not in result.stdout
 
 
@@ -846,9 +844,7 @@ def test_openrouter_only_options_refused(
     monkeypatch.setenv("ANTHROPIC_API_KEY", "-".join(("test", "key")))
     result = improve("--provider", provider, *args, "--source", "argument", "--text", "d")
     assert result.exit_code == 0
-    assert (
-        result.stdout == f"[prompt-workflow: {named} applies only to OpenRouter, not '{provider}']"
-    )
+    assert result.stdout == f"[promptmend: {named} applies only to OpenRouter, not '{provider}']"
     assert fake_http.requests == []
 
 
@@ -863,7 +859,7 @@ def test_openrouter_only_uses_configured_provider(
 ) -> None:
     monkeypatch.setenv("PROMPT_PROVIDER", "ollama")
     result = improve("--tier", "pro", "--source", "argument", "--text", "d")
-    assert result.stdout == "[prompt-workflow: --tier pro applies only to OpenRouter, not 'ollama']"
+    assert result.stdout == "[promptmend: --tier pro applies only to OpenRouter, not 'ollama']"
 
 
 # An empty PROMPT_TEMPERATURE omits the temperature from every request.
@@ -918,7 +914,7 @@ def test_pro_max_tokens_leaves_other_providers(
 # An unknown provider is reported as such, not as an OpenRouter-only option.
 def test_unknown_provider_beats_openrouter_only(fake_http: FakeHttp) -> None:
     result = improve("--provider", "foo", "--tier", "pro", "--source", "argument", "--text", "d")
-    assert result.stdout.startswith("[prompt-workflow: Unknown provider 'foo'")
+    assert result.stdout.startswith("[promptmend: Unknown provider 'foo'")
     assert fake_http.requests == []
 
 
@@ -966,13 +962,11 @@ def test_bad_output_reports_inline(
 ) -> None:
     result = improve("--output", "copy", *ARG)
     assert result.stdout == (
-        "[prompt-workflow: --output must be paste or clipboard or default, got 'copy']"
+        "[promptmend: --output must be paste or clipboard or default, got 'copy']"
     )
     monkeypatch.setenv("PROMPT_OUTPUT", "both")
     result = improve(*ARG)
-    assert result.stdout == (
-        "[prompt-workflow: PROMPT_OUTPUT must be paste or clipboard, got 'both']"
-    )
+    assert result.stdout == ("[promptmend: PROMPT_OUTPUT must be paste or clipboard, got 'both']")
     assert copied == []
     assert stub_provider.calls == []
 
@@ -987,7 +981,7 @@ def test_copy_flag_with_clipboard_output(stub_provider: StubProvider, copied: li
 def test_clipboard_output_error_marker(stub_provider: StubProvider, copied: list[str]) -> None:
     stub_provider.exc = ProviderError("Ollama request failed")
     result = improve("--output", "clipboard", *ARG)
-    assert result.stdout == "[prompt-workflow: Ollama request failed]"
+    assert result.stdout == "[promptmend: Ollama request failed]"
     assert copied == []
 
 
@@ -995,8 +989,8 @@ def test_clipboard_output_error_marker(stub_provider: StubProvider, copied: list
 @pytest.mark.parametrize(
     "printed",
     [
-        "[prompt-workflow: the reply hit the model's output limit and is cut off]",
-        "[prompt-workflow: the model stopped early (refusal); the rewrite may be incomplete]",
+        "[promptmend: the reply hit the model's output limit and is cut off]",
+        "[promptmend: the model stopped early (refusal); the rewrite may be incomplete]",
     ],
 )
 def test_clipboard_output_stop_note(
@@ -1009,7 +1003,7 @@ def test_clipboard_output_stop_note(
 
 # Paste output keeps the note after the rewrite, as before.
 def test_paste_output_keeps_stop_note(stub_provider: StubProvider, copied: list[str]) -> None:
-    note = "\n\n[prompt-workflow: the reply hit the model's output limit and is cut off]"
+    note = "\n\n[promptmend: the reply hit the model's output limit and is cut off]"
     stub_provider.result = "half" + note
     assert improve(*ARG).stdout == "half" + note
     assert copied == []
@@ -1025,13 +1019,13 @@ def test_clipboard_output_sent_despite(
     fake_http.reply({"choices": [{"message": {"content": "rewrite"}}]})
     args = ("--provider", "openrouter", "--allow-flagged", "--source", "argument")
     result = improve(*args, "--text", "Output is CONFIDENTIAL")
-    assert result.stdout == "[prompt-workflow: sent despite: confidential_label]"
+    assert result.stdout == "[promptmend: sent despite: confidential_label]"
     assert copied == ["rewrite"]
     fake_http.reply({"choices": [{"message": {"content": "half"}, "finish_reason": "length"}]})
     result = improve(*args, "--text", "Output is CONFIDENTIAL")
     assert result.stdout == (
-        "[prompt-workflow: sent despite: confidential_label]\n\n"
-        "[prompt-workflow: the reply hit the model's output limit and is cut off]"
+        "[promptmend: sent despite: confidential_label]\n\n"
+        "[promptmend: the reply hit the model's output limit and is cut off]"
     )
     assert copied == ["rewrite", "half"]
 
@@ -1049,8 +1043,7 @@ def test_clipboard_output_copy_failure_pastes_the_rewrite(
     result = improve("--output", "clipboard", *ARG)
     assert result.exit_code == 0
     assert result.stdout == (
-        f"[prompt-workflow: Clipboard unavailable: {error}; the rewrite is pasted instead]"
-        "\n\nimproved"
+        f"[promptmend: Clipboard unavailable: {error}; the rewrite is pasted instead]\n\nimproved"
     )
 
 
@@ -1096,7 +1089,88 @@ def test_clipboard_output_copy_failure_with_sent_despite(
     args = ("--provider", "openrouter", "--allow-flagged", "--output", "clipboard")
     result = improve(*args, "--source", "argument", "--text", "Output is CONFIDENTIAL")
     assert result.stdout == (
-        "[prompt-workflow: sent despite: confidential_label]\n\n"
-        "[prompt-workflow: Clipboard unavailable: no clipboard mechanism; the rewrite is pasted "
+        "[promptmend: sent despite: confidential_label]\n\n"
+        "[promptmend: Clipboard unavailable: no clipboard mechanism; the rewrite is pasted "
         "instead]\n\nrewrite"
     )
+
+
+# --- The deprecated `prompt-workflow` alias (#169) ------------------------------------------
+
+
+@pytest.fixture
+def as_alias(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The CLI started as the alias entry point (Windows: `prompt-workflow.exe`)."""
+    exe = "C:\\uv\\bin\\Prompt-Workflow.exe" if os.name == "nt" else "/uv/bin/prompt-workflow"
+    monkeypatch.setattr(sys, "argv", [exe])
+
+
+@pytest.mark.parametrize("args", [["config", "show"], ["config", "validate"], ["doctor"]])
+def test_the_alias_notes_its_deprecation_once_on_management_commands(
+    as_alias: None, monkeypatch: pytest.MonkeyPatch, args: list[str]
+) -> None:
+    from promptmend import deploy
+
+    monkeypatch.setattr(deploy, "run_command", lambda argv: None)
+    result = runner.invoke(app, args)
+    assert result.stderr.splitlines().count(cli.DEPRECATED_ALIAS) == 1
+    assert cli.DEPRECATED_ALIAS not in result.stdout
+
+
+def test_the_alias_notes_its_deprecation_before_the_interface(
+    as_alias: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from promptmend.commands import common
+    from promptmend.tui.app import ManageApp
+
+    monkeypatch.setattr(common, "stdin_is_tty", lambda: True)
+    monkeypatch.setattr(common, "stdout_is_tty", lambda: True)
+    monkeypatch.setattr(ManageApp, "run", lambda self, *args, **kwargs: None)
+    assert runner.invoke(app, []).stderr.splitlines() == [cli.DEPRECATED_ALIAS]
+
+
+# The triggers, --version and --help print exactly what `promptmend` prints.
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["improve", "--source", "argument", "--text", "draft"],
+        ["persona"],
+        ["--version"],
+        ["--help"],
+        ["config", "--help"],
+        ["improve", "--help"],
+    ],
+)
+def test_the_alias_adds_nothing_to_the_triggers_version_or_help(
+    monkeypatch: pytest.MonkeyPatch, stub_provider: StubProvider, args: list[str]
+) -> None:
+    monkeypatch.setattr(sys, "argv", ["/uv/bin/promptmend"])
+    direct = runner.invoke(app, args)
+    monkeypatch.setattr(sys, "argv", ["/uv/bin/prompt-workflow"])
+    aliased = runner.invoke(app, args)
+    assert (aliased.exit_code, aliased.stdout, aliased.stderr) == (
+        direct.exit_code,
+        direct.stdout,
+        direct.stderr,
+    )
+    assert cli.DEPRECATED_ALIAS not in aliased.stderr
+
+
+def test_promptmend_itself_notes_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "argv", ["/uv/bin/promptmend"])
+    assert cli.DEPRECATED_ALIAS not in runner.invoke(app, ["config", "show"]).stderr
+
+
+# Usage lines name `promptmend` however it was started (here `python -m`).
+def test_usage_names_promptmend() -> None:
+    result = subprocess.run(
+        [sys.executable, "-m", "promptmend.cli", "--help"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env={**os.environ, "COLUMNS": "100", "NO_COLOR": "1"},
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0
+    assert "Usage: promptmend [OPTIONS] COMMAND" in result.stdout

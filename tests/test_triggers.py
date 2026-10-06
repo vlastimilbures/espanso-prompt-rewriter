@@ -13,9 +13,9 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
-from prompt_workflow.cli import app
-from prompt_workflow.config import Settings
-from prompt_workflow.prompt_builder import PROFILES, system_prompt
+from promptmend.cli import app
+from promptmend.config import Settings
+from promptmend.prompt_builder import PROFILES, system_prompt
 
 if TYPE_CHECKING:
     from conftest import HistoryRows, StubProvider

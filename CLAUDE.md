@@ -2,25 +2,26 @@
 
 ## What this is
 
-A Python CLI (`prompt-workflow`) invoked by Espanso text-expansion triggers to rewrite a
+A Python CLI (`promptmend`, PromptMend; the old command `prompt-workflow` stays a
+deprecated alias until 1.0.0, #169) invoked by Espanso text-expansion triggers to rewrite a
 clipboard/stdin draft into a more precise prompt via a local or cloud LLM. Espanso match files
 in `espanso/match/` call the CLI as a shell command and paste back stdout.
 
 ## Commands
 
 Contributor install (`uv tool install --editable` constrained to `uv.lock`, checked by
-`scripts/check_tool_lock.py`, then `prompt-workflow espanso deploy --yes`, which substitutes the
+`scripts/check_tool_lock.py`, then `promptmend espanso deploy --yes`, which substitutes the
 absolute CLI path into the match files, since GUI-launched Espanso does not inherit shell PATH):
 
 ```bash
 ./scripts/install_macos.sh      # macOS
 .\scripts\install_windows.ps1   # Windows
-prompt-workflow espanso status  # missing / in sync / stale / modified / foreign per match file
+promptmend espanso status  # missing / in sync / stale / modified / foreign per match file
 ```
 
 Users install the release wheel instead (`uv tool install <wheel> -c constraints.txt`, README
 "Install"), which reads no checkout `.env`; README "Updating"/"Uninstall" document `--force`
-and detach-before-uninstall. `tests/test_docs.py` checks every `prompt-workflow …` invocation
+and detach-before-uninstall. `tests/test_docs.py` checks every `promptmend …` invocation
 in README and in the CHANGELOG's Unreleased and newest release notes, and every standalone
 `--flag` span in README, against the Click tree.
 
@@ -39,7 +40,7 @@ Rules for agents:
 
 - `scripts/bench_models.py` and `uv run pytest -m live` (`tests/test_live.py`) call the paid
   OpenRouter API: run them only when asked.
-- Never run the installers, `prompt-workflow espanso …` (`deploy`, `status`, `detach`),
+- Never run the installers, `promptmend espanso …` (`deploy`, `status`, `detach`),
   `setup --deploy` or `espanso` itself: they read or rewrite the user's live Espanso match
   files, and a deploy restarts Espanso.
 - Tests stay offline: no external API calls; mock HTTP (`fake_http`).
@@ -50,7 +51,7 @@ Rules for agents:
 - `cli.py` — main Typer command, `improve`. Reads a draft (`clipboard`/`stdin`/`argument`),
   calls a provider built by `make_provider()` (which applies the gate), and prints the result
   with no trailing newline (Espanso inserts stdout verbatim). All failures are caught and
-  converted to a `[prompt-workflow: ...]` marker printed to stdout with exit code 0, rather than a
+  converted to a `[promptmend: ...]` marker printed to stdout with exit code 0, rather than a
   stack trace or blank expansion, since Espanso has no good way to surface a nonzero exit /
   stderr to the user. A golden-template rewrite (its profile contains `<output_template>`, which
   `tests/test_prompts.py` ties to `<CONTEXT>`) first goes through
@@ -182,7 +183,7 @@ Rules for agents:
   recorder's call) then deletes up to `_PRUNE_BATCH` operations past the retention in a second
   short transaction, only after the record committed and only within the budget (an interrupt
   rolls back a whole SQLite transaction, so the two are never one), so a failed prune never
-  costs the record. `prompt-workflow history prune` prunes on demand. `PROMPT_HISTORY` (default `true`) and
+  costs the record. `promptmend history prune` prunes on demand. `PROMPT_HISTORY` (default `true`) and
   `PROMPT_HISTORY_RETENTION_DAYS` configure it; estimates come only from a user `prices.toml`
   in the config dir and are kept apart from reported costs. `sqlite3`, `tomllib`, `csv` and
   `decimal` are imported inside functions, and `recorder.py` imports the module only when a run is recorded.
@@ -229,17 +230,19 @@ Rules for agents:
   never opens `default.md` on a case-insensitive FS) and the listed file name exactly. `user_profiles()` reports each file as
   added/overrides/shadowed/invalid name, plus opted-in built-ins without a file (missing), for
   the doctor/profiles commands (#92). `profiles.migrate_profiles()` copies a checkout's added
-  or modified `src/prompt_workflow/prompts/*.md` (against `git_pristine_profiles()` or the
+  or modified `src/promptmend/prompts/*.md` (against `git_pristine_profiles()` or the
   packaged `PROFILES`) into that dir: copy only, exclusive create, never deletes or overwrites.
 - `assets.py` — the Espanso match files as package data. Hatch `force-include` copies the repo's
-  `espanso/match/` (the source of truth) to `prompt_workflow/espanso/match/` in the wheel. An editable install falls back to the checkout's folder.
+  `espanso/match/` (the source of truth) to `promptmend/espanso/match/` in the wheel. An editable install falls back to the checkout's folder.
   CI's `wheel` job builds sdist + wheel, installs the wheel in a clean venv outside the checkout
-  and runs `scripts/check_wheel.py` (match files, profiles, `persona`) on all three OSes.
-- `deploy.py` — managed Espanso deployment behind `prompt-workflow espanso deploy|status|detach`
+  and runs `scripts/check_wheel.py` (match files, profiles, `promptmend --version` and the
+  `prompt-workflow --version` alias, `persona`) on all three OSes.
+- `deploy.py` — managed Espanso deployment behind `promptmend espanso deploy|status|detach`
   (cli.py imports it lazily, and `tests/test_trigger_contract.py` keeps it off the trigger path).
   `plan()` renders each packaged match file (`render()`: the stamp line
-  `# prompt-workflow <version> (managed; edit at your own risk)` + a literal replace of
-  `__PROMPT_WORKFLOW__`, byte-identical to the old scripts otherwise, see `tests/test_deploy.py`)
+  `# promptmend <version> (managed; edit at your own risk)` + a literal replace of
+  `__PROMPT_WORKFLOW__`, byte-identical to the old scripts otherwise, see `tests/test_deploy.py`;
+  `_STAMP_LINE` also takes 0.18.0's `# prompt-workflow <version>` stamp, #169)
   and compares it with disk and the manifest (`user_data_dir()/espanso-manifest.json`: target,
   asset version, digest, launcher, backups) into `missing`/`in sync`/`stale`/`modified`/`foreign`, and lists the folder's other
   `.yml`/`.yaml` files (links too, never followed; not the legacy `base.yml`, backups or
@@ -257,7 +260,9 @@ Rules for agents:
   `apply()` writes only into `<espanso>/match/` (never `config/`, #37), keeps a modified/foreign
   file unless the caller chose `ours` (timestamped backup; pruning to 2 deletes only paths in the
   target's folder named exactly `<name>.bak-<14 digits>[-n]`) or `side`
-  (`<name>.prompt-workflow-new`), and retires the pre-0.9 `match/base.yml` with a backup. The
+  (`<name>.promptmend-new`), and retires the pre-0.9 `match/base.yml` (naming either command)
+  with a backup. `is_legacy_launcher()` spots a deployed `prompt-workflow[.exe]` launcher, which
+  doctor's `launcher` check WARNs about (redeploy). The
   CLI ends a deploy that kept a file with a stderr `WARNING:` naming it (exit 0).
   `detach()` (default `--keep-static`, D-UNI-1) removes only owned files whose digest still
   matches, and only entries naming one of `assets.match_names()` in the current (resolved)
@@ -270,7 +275,10 @@ Rules for agents:
 - `commands/` — the management commands (#92): `setup`, `config show|get|set|unset|validate|
   migrate|rollback`, `secrets set|status|remove`, `profiles list|migrate`, `stats`,
   `history export|prune|reset`, `doctor` (plus `espanso` in `cli.py`, which gained
-  `deploy --dry-run`). `cli.py`'s `_LazyGroup` imports a command's module only when it runs or
+  `deploy --dry-run`). Started as the `prompt-workflow` alias (`cli._run_as_alias()`:
+  `Path(sys.argv[0]).stem`), a management command or `ui` first prints
+  `cli.DEPRECATED_ALIAS` on stderr, once; the triggers, `--version` and `--help` never do, and
+  `_LazyGroup.main()` makes every usage line say `promptmend`. `cli.py`'s `_LazyGroup` imports a command's module only when it runs or
   `--help` lists it (`_LAZY_COMMANDS`), so improve/persona never load them; it also passes
   every Click usage error through `redaction.redact_words()`, since Click quotes a stray argument;
   `tests/test_trigger_contract.py` forbids `commands`, `doctor`, `smoke` and `config_store` on
@@ -287,8 +295,8 @@ Rules for agents:
   `tests/test_commands.py` walks the whole command tree: no option named like a secret, a key
   given to any value is never saved, and every command on a broken `.env`/TOML/secrets exits
   0-4 without a traceback (add a new command to `_commands()` there).
-- `tui/` — the full-screen Textual interface (#93): `prompt-workflow ui`, and a bare
-  `prompt-workflow` when stdin and stdout are both TTYs (D-UI-1: `_LazyGroup.parse_args()` turns
+- `tui/` — the full-screen Textual interface (#93): `promptmend ui`, and a bare
+  `promptmend` when stdin and stdout are both TTYs (D-UI-1: `_LazyGroup.parse_args()` turns
   `[]` into `["ui"]`; anywhere else `no_args_is_help` prints the help and exits 2 exactly as
   before, pinned by `tests/golden/no-args-help.txt`; `ui` without a TTY exits 3). `textual` is a
   required dependency (D-UI-2) imported only by `tui/`, which only `commands/ui.py` imports, once
@@ -319,7 +327,7 @@ Rules for agents:
   drives each tab with Pilot (`asyncio.run`, no pytest-asyncio); `tests/test_tui_snapshots.py`
   compares SVG exports with `tests/snapshots/` (Linux and macOS; `UPDATE_SNAPSHOTS=1`
   regenerates them, and the Home one is `docs/interface.svg`). The header shows
-  `prompt-workflow <version>` (#112); the snapshots pin the version, so a release changes none.
+  `PromptMend <version>` (#112); the snapshots pin the version, so a release changes none.
   Home (Mockup B, #112) is `tui/home.py`'s pure `home_rows(state)` (no reads of its own, no
   Textual; `tests/test_tui_home.py`): rows for `-i-`, `-ip-`, the match files/Espanso, the
   history, `Output` (`PROMPT_OUTPUT`, #134: paste or clipboard), and
@@ -344,7 +352,7 @@ Rules for agents:
   the tooltip by `_buttons()`; a button with none goes in `teach.NO_COMMAND`
   (`test_every_button_has_its_command_as_tooltip` fails otherwise). `Pane.report(...,
   command=teach.equivalent(...))` (and `attempt(command=)`, `PreviousInstallScreen.report`)
-  shows a muted `$ prompt-workflow …` above the result and appends to `ManageApp.session`,
+  shows a muted `$ promptmend …` above the result and appends to `ManageApp.session`,
   which Home shows as a read-only log (`session_text()`, latest `SESSION_LINES`), or
   `teach.RECIPES` while it is empty. A value that looks like a key is shown as
   `<value withheld>` (`shown_arg()`). `tests/test_tui_teach.py` parses every button command
@@ -377,7 +385,7 @@ Rules for agents:
   template (`prompt_builder.template()`) holds `{{PERSONA_RULE}}`, and not with
   `PROMPT_LOCAL_ONLY=true` unless `PROMPT_GATE_LOCAL=true` (`_persona_stays_local()`); shown on
   the interface's Home and Diagnostics tabs; never on the trigger path.
-  `import_check()` (the interface's Diagnostics) imports `prompt_workflow.cli` in a fresh
+  `import_check()` (the interface's Diagnostics) imports `promptmend.cli` in a fresh
   interpreter (`-P`, so a module planted in the working directory never runs; the smoke test's
   child uses `-P` too) and reports its time, module count and any `HEAVY_MODULES` it loaded.
   The `folders` check (#169) WARNs while a legacy folder is still in use, naming why (a
@@ -387,12 +395,15 @@ Rules for agents:
 - `previous_install.py` — finds an earlier checkout install (#110) from the launcher in the
   deployed match files (`deploy.deployed_launchers()`) and manifest, the uv tool receipt and a
   path the user entered; never a disk scan, and a checkout's `.env` is only checked for
-  existence. A root counts only as `<root>/.venv/bin/prompt-workflow` (or
-  `.venv\Scripts\prompt-workflow.exe`) whose `pyproject.toml` names this project and that is
-  not the running `config._PROJECT_ROOT`. Gated (D-MIG-4): nothing in legacy mode or once
+  existence. A root counts only as `<root>/.venv/bin/promptmend` (or
+  `.venv\Scripts\promptmend.exe`, or either with the pre-rename `prompt-workflow`, #169)
+  whose `pyproject.toml` names this project (`PROJECT_NAMES`: `promptmend` or the old
+  `espanso-prompt-rewriter`, also the uv receipt's folder) and that is not the running
+  `config._PROJECT_ROOT`; its profiles are `profiles.prompts_path()` (`src/promptmend/prompts`,
+  else the old `src/prompt_workflow/prompts`). Gated (D-MIG-4): nothing in legacy mode or once
   `config.toml` or the secret store exists; a manifest does not gate. Skipped roots live in
   `user_data_dir()/previous-install.json` (damaged = empty). `shadow()` reports a different
-  `prompt-workflow` first on PATH. `Detection.pending` (ungated, since the copy itself closes
+  `promptmend` (or `prompt-workflow` alias) first on PATH. `Detection.pending` (ungated, since the copy itself closes
   the gate) is a copy from `migration.json` whose `.env` is not retired yet: doctor WARNs
   (`retire_pending`) once no launcher points into it. `setup` offers the copy at the start of
   its Settings step (`--migrate-from PATH`), then the profiles, and the retire after the
@@ -401,7 +412,7 @@ Rules for agents:
   candidate setup and the interface offer. Doctor's `previous_install` check; off the trigger
   path.
 - `smoke.py` — `setup`'s smoke test: a `ThreadingHTTPServer` on 127.0.0.1:0 answering the
-  OpenAI-compatible, Anthropic and Ollama shapes, and a child `python -m prompt_workflow.cli
+  OpenAI-compatible, Anthropic and Ollama shapes, and a child `python -m promptmend.cli
   improve --provider <p>` whose env points every `*_BASE_URL` at it with a placeholder key (the
   real key is never sent). `setup` offers a `.env` migration (applies only on an interactive
   yes), previews the deploy (`--deploy` applies, keeping edited files), and discloses the usage
@@ -423,7 +434,7 @@ through when every finding is in `redaction.SOFT_FINDINGS` (labels, Vietnamese I
 any other finding, including `custom_N`, stays blocked. `Settings` rejects an invalid
 `PROMPT_EXTRA_PATTERNS` regex when it loads (`config._regexes`, naming the entry, never the
 pattern); every repeat in a built-in pattern is bounded (a test walks each one). The CLI then prefixes the output with
-`[prompt-workflow: sent despite: …]` (finding names only) from `GatedProvider.sent_despite`.
+`[promptmend: sent despite: …]` (finding names only) from `GatedProvider.sent_despite`.
 It also requires `https` cloud base URLs (plain `http` only to loopback).
 `providers.base.post_json()` (the only HTTP call) gives a loopback URL its own `HTTPTransport`,
 which makes httpx skip env and system proxies for it; every other URL keeps the proxy.
@@ -435,7 +446,7 @@ overrides any `--provider` a trigger passes; `PROMPT_PROVIDER` only sets the bar
 ### Espanso integration contract
 
 - `espanso/match/prompts-llm.yml` triggers call `"__PROMPT_WORKFLOW__" improve ...`;
-  `prompt-workflow espanso deploy` (which the install scripts call) substitutes
+  `promptmend espanso deploy` (which the install scripts call) substitutes
   `__PROMPT_WORKFLOW__` with the stable absolute path to the installed CLI.
   Only that path is quoted (`cmd.exe` mangles more than one quoted part); there is no `cd`.
   Nothing is ever deployed to Espanso's `config/` (`espanso/config/` and `--with-config` were
@@ -443,7 +454,7 @@ overrides any `--provider` a trigger passes; `PROMPT_PROVIDER` only sets the bar
 - Every match that runs the CLI (including commented-out ones and `-p-`) sets
   `force_mode: clipboard`, so output is always pasted: Espanso's default backend would type output
   shorter than 100 characters key by key. `tests/test_yaml.py` enforces it.
-- Every match (commented-out ones too) has its own `label:` (`prompt-workflow: …`), shown in
+- Every match (commented-out ones too) has its own `label:` (`PromptMend: …`), shown in
   Espanso's search bar; `tests/test_yaml.py` enforces it.
 - `espanso/match/prompts-core.yml` holds static, non-LLM form-based snippets (no CLI call).
 - Every match (commented-out ones too) sets `left_word: true`, so a trigger fires only after a

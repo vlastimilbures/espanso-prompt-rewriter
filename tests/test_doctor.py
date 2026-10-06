@@ -9,11 +9,11 @@ from typing import Any
 
 import pytest
 
-from prompt_workflow import assets, config, deploy, doctor
-from prompt_workflow.config import ConfigLayers, Settings
-from prompt_workflow.history import Health
+from promptmend import assets, config, deploy, doctor
+from promptmend.config import ConfigLayers, Settings
+from promptmend.history import Health
 
-LAUNCHER = "/Users/me/.local/bin/prompt-workflow"
+LAUNCHER = "/Users/me/.local/bin/promptmend"
 
 
 def _runner(answers: dict[str, str] | None = None) -> deploy.Runner:
@@ -29,7 +29,7 @@ def _status(check_id: str, report: doctor.Report) -> doctor.Check:
 def no_clipboard(monkeypatch: pytest.MonkeyPatch) -> None:
     import pyperclip
 
-    from prompt_workflow import clipboard_guard
+    from promptmend import clipboard_guard
 
     monkeypatch.setattr(clipboard_guard, "is_concealed", lambda: None)
     monkeypatch.setattr(pyperclip, "paste", lambda: "")
@@ -39,7 +39,7 @@ def no_clipboard(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_install_reports_the_channel(tmp_path: Path) -> None:
-    exe = tmp_path / "bin" / "prompt-workflow"
+    exe = tmp_path / "bin" / "promptmend"
     exe.parent.mkdir()
     exe.write_text("", "utf-8")
     check = doctor._install_check(deploy.Launcher(exe, "uv"), None)
@@ -141,23 +141,43 @@ def test_match_files_in_sync_edited_and_unknown(espanso: Path) -> None:
 def test_launcher_checks(tmp_path: Path, espanso: Path) -> None:
     assert doctor._launcher_check(LAUNCHER, None).status == "warn"
     assert doctor._launcher_check(LAUNCHER, deploy.Manifest.load()).status == "info"
-    exe = tmp_path / "prompt-workflow"
+    exe = tmp_path / "promptmend"
     exe.write_text("", "utf-8")
     deploy.apply(deploy.plan(espanso, str(exe), deploy.Manifest.load()))
     check = doctor._launcher_check(str(exe), deploy.Manifest.load())
     assert (check.status, check.data["drift"]) == ("ok", False)
 
 
+# #169: match files still calling the deprecated `prompt-workflow` alias get a redeploy hint.
+def test_launcher_check_warns_about_the_old_command(tmp_path: Path, espanso: Path) -> None:
+    old = tmp_path / "prompt-workflow"
+    old.write_text("", "utf-8")
+    deploy.apply(deploy.plan(espanso, str(old), deploy.Manifest.load()))
+    check = doctor._launcher_check(str(tmp_path / "promptmend"), deploy.Manifest.load())
+    assert check.status == "warn"
+    assert "redeploy with `promptmend espanso deploy`" in check.message
+    assert set(check.data) == set(doctor.DATA_KEYS["launcher"])
+    assert check.data["drift"] is True
+
+
+def test_launcher_check_warns_about_another_launcher(tmp_path: Path, espanso: Path) -> None:
+    other = tmp_path / "other" / "promptmend"
+    other.parent.mkdir()
+    other.write_text("", "utf-8")
+    deploy.apply(deploy.plan(espanso, str(other), deploy.Manifest.load()))
+    check = doctor._launcher_check(str(tmp_path / "promptmend"), deploy.Manifest.load())
+    assert (check.status, check.data["drift"]) == ("warn", True)
+    assert "redeploy" not in check.message
+
+
 def test_launcher_check_skips_entries_whose_file_is_gone(tmp_path: Path, espanso: Path) -> None:
     """A deleted folder (or another Espanso config folder) leaves manifest entries behind:
     their launcher calls nothing, so a gone one is no FAIL; a live file's gone launcher is."""
-    exe = tmp_path / "prompt-workflow"
+    exe = tmp_path / "promptmend"
     exe.write_text("", "utf-8")
     old = tmp_path / "old-espanso"
     (old / "match").mkdir(parents=True)
-    deploy.apply(
-        deploy.plan(old, str(tmp_path / "gone" / "prompt-workflow"), deploy.Manifest.load())
-    )
+    deploy.apply(deploy.plan(old, str(tmp_path / "gone" / "promptmend"), deploy.Manifest.load()))
     deploy.apply(deploy.plan(espanso, str(exe), deploy.Manifest.load()))
     for path in (old / "match").iterdir():
         path.unlink()
@@ -193,7 +213,7 @@ def test_run_compares_with_a_live_entry_not_an_orphan(
     old = tmp_path / "old-espanso"
     (old / "match").mkdir(parents=True)
     deploy.apply(deploy.plan(espanso, LAUNCHER, deploy.Manifest.load()))
-    deploy.apply(deploy.plan(old, "/A/gone/prompt-workflow", deploy.Manifest.load()))
+    deploy.apply(deploy.plan(old, "/A/gone/promptmend", deploy.Manifest.load()))
     for path in (old / "match").iterdir():
         path.unlink()
     report = doctor.run(espanso_dir=espanso, runner=_runner())
@@ -266,7 +286,7 @@ def test_history_check(
     status: str,
     words: str,
 ) -> None:
-    from prompt_workflow import history
+    from promptmend import history
 
     monkeypatch.setattr(history.HistoryStore, "health", lambda self: _health(**health))
     check, sqlite = doctor._history_checks(Settings(history=history_on))
@@ -281,7 +301,7 @@ def test_history_check(
 def test_sqlite_check(
     monkeypatch: pytest.MonkeyPatch, version: str, status: str, bug: bool
 ) -> None:
-    from prompt_workflow import history
+    from promptmend import history
 
     monkeypatch.setattr(
         history.HistoryStore, "health", lambda self: _health(sqlite_version=version)
@@ -296,7 +316,7 @@ def test_sqlite_check(
 def test_clipboard_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
     import pyperclip
 
-    from prompt_workflow import clipboard_guard
+    from promptmend import clipboard_guard
 
     def broken() -> None:
         raise pyperclip.PyperclipException("no copy/paste mechanism")
@@ -401,7 +421,7 @@ def test_profiles_check(monkeypatch: pytest.MonkeyPatch) -> None:
     check = doctor._profiles_check(Settings())
     hint = (
         "Your general.md replaces the built-in only once PROMPT_PROFILE_OVERRIDES lists it: "
-        "`prompt-workflow config set PROMPT_PROFILE_OVERRIDES general`."
+        "`promptmend config set PROMPT_PROFILE_OVERRIDES general`."
     )
     assert (check.status, check.message) == ("warn", f"general: shadowed; {hint}")
     assert {"name": "general", "status": "shadowed"} in check.data["user"]
@@ -421,11 +441,11 @@ def test_a_check_that_raises_is_reported(
 
 
 def test_overrides_hint_keeps_the_names_already_listed() -> None:
-    from prompt_workflow.profiles import overrides_hint
+    from promptmend.profiles import overrides_hint
 
     assert overrides_hint(["mine", "default-pro"]) is None  # not a built-in
     assert overrides_hint(["general"], ("general",)) is None
     hint = overrides_hint(["mine", "general"], ("default",))
     assert hint is not None
     assert hint.startswith("Your general.md replaces")
-    assert hint.endswith("`prompt-workflow config set PROMPT_PROFILE_OVERRIDES default,general`.")
+    assert hint.endswith("`promptmend config set PROMPT_PROFILE_OVERRIDES default,general`.")

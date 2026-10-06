@@ -1,6 +1,6 @@
 import pytest
 
-from prompt_workflow.providers.base import strip_thinking
+from promptmend.providers.base import strip_thinking
 
 
 # strip_thinking() removes a single-line <think> block.

@@ -18,8 +18,8 @@ import pytest
 from bench_module import GOOD, bench
 from typer.testing import CliRunner
 
-from prompt_workflow.cli import app
-from prompt_workflow.config import ENV_FILE_VARS, read_env_file
+from promptmend.cli import app
+from promptmend.config import ENV_FILE_VARS, read_env_file
 
 if TYPE_CHECKING:
     from conftest import FakeHttp
@@ -45,7 +45,7 @@ def _improve(draft: str) -> subprocess.CompletedProcess[str]:
     # so the CLI finds the repo .env, which is what configures this call.
     env = {k: v for k, v in os.environ.items() if k not in ENV_FILE_VARS}
     return subprocess.run(
-        [sys.executable, "-m", "prompt_workflow.cli", *IMPROVE],
+        [sys.executable, "-m", "promptmend.cli", *IMPROVE],
         input=draft,
         capture_output=True,
         text=True,
@@ -62,7 +62,7 @@ needs_key = pytest.mark.skipif(
 
 def _assert_rewrite(returncode: int, out: str, draft: bench.Draft) -> None:
     assert returncode == 0
-    assert not out.startswith("[prompt-workflow:"), out
+    assert not out.startswith("[promptmend:"), out
     assert not out.endswith("\n")
     # Model quality varies run to run; the structural checks must hold regardless.
     structural = [
@@ -97,4 +97,4 @@ def test_live_checks_run_offline(monkeypatch: pytest.MonkeyPatch, fake_http: Fak
 def test_live_sensitive_draft_is_blocked() -> None:
     proc = _improve("customer data for card 4111 1111 1111 1111")
     assert proc.returncode == 0
-    assert proc.stdout.startswith("[prompt-workflow: Blocked cloud call")
+    assert proc.stdout.startswith("[promptmend: Blocked cloud call")

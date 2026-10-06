@@ -14,10 +14,10 @@ from typing import TYPE_CHECKING
 import pytest
 from typer.testing import CliRunner, Result
 
-from prompt_workflow import config, config_files, config_store, deploy, doctor, relocate
-from prompt_workflow.cli import app
-from prompt_workflow.config import Settings
-from prompt_workflow.config_files import FileSecretStore
+from promptmend import config, config_files, config_store, deploy, doctor, relocate
+from promptmend.cli import app
+from promptmend.config import Settings
+from promptmend.config_files import FileSecretStore
 
 if TYPE_CHECKING:
     from conftest import FakeHttp, HistoryRows
@@ -335,10 +335,10 @@ def test_management_commands_move_the_folders_first(
     assert "moved" not in again.stderr
 
 
-# A bare `prompt-workflow` on a terminal opens the interface, which moves them too.
+# A bare `promptmend` on a terminal opens the interface, which moves them too.
 def test_the_interface_moves_the_folders(folders: Folders, monkeypatch: pytest.MonkeyPatch) -> None:
-    from prompt_workflow.commands import common
-    from prompt_workflow.tui.app import ManageApp
+    from promptmend.commands import common
+    from promptmend.tui.app import ManageApp
 
     monkeypatch.setattr(common, "stdin_is_tty", lambda: True)
     monkeypatch.setattr(common, "stdout_is_tty", lambda: True)

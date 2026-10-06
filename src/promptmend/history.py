@@ -940,7 +940,7 @@ class HistoryStore:
                 if version > SCHEMA_VERSION:
                     raise UnusableHistory(
                         f"history schema version {version} is newer than this version of "
-                        f"prompt-workflow supports ({SCHEMA_VERSION})"
+                        f"promptmend supports ({SCHEMA_VERSION})"
                     )
                 if version < SCHEMA_VERSION:
                     conn.execute("BEGIN IMMEDIATE")

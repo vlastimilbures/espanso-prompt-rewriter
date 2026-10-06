@@ -7,8 +7,8 @@ from __future__ import annotations
 import pytest
 import typer
 
-from prompt_workflow import cli
-from prompt_workflow.tui import teach
+from promptmend import cli
+from promptmend.tui import teach
 
 # What a placeholder stands for, so the command can be parsed.
 EXAMPLES = {
@@ -56,20 +56,20 @@ def test_the_drift_check_catches_a_wrong_command() -> None:
 
 def test_equivalent_quotes_values_and_keeps_placeholders() -> None:
     assert teach.equivalent("config", "set", "<NAME>", "<VALUE>") == (
-        "prompt-workflow config set <NAME> <VALUE>"
+        "promptmend config set <NAME> <VALUE>"
     )
     assert teach.equivalent("history", "export", "-o", "my file.csv") == (
-        "prompt-workflow history export -o 'my file.csv'"
+        "promptmend history export -o 'my file.csv'"
     )
     assert teach.equivalent("config", "set", "X", teach.WITHHELD).endswith("X <value withheld>")
 
 
 def test_tooltips() -> None:
-    assert teach.tooltip("deploy") == "In a terminal:\n$ prompt-workflow espanso deploy"
+    assert teach.tooltip("deploy") == "In a terminal:\n$ promptmend espanso deploy"
     smoke = teach.tooltip("smoke") or ""
-    assert smoke.startswith("In a terminal:\n$ prompt-workflow setup\n")
+    assert smoke.startswith("In a terminal:\n$ promptmend setup\n")
     assert "smoke test" in smoke
-    assert (teach.tooltip("home-previous") or "").count("$ prompt-workflow") == 4
+    assert (teach.tooltip("home-previous") or "").count("$ promptmend") == 4
     assert teach.tooltip("import-check") == teach.NO_COMMAND["import-check"]
     assert teach.tooltip("previous-close") is None
     assert teach.tooltip("no-such-button") is None

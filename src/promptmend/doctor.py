@@ -126,7 +126,7 @@ def _version_check() -> Check:
         "python": platform.python_version(),
         "platform": sys.platform,
     }
-    return Check("version", INFO, f"prompt-workflow {__version__}", data)
+    return Check("version", INFO, f"promptmend {__version__}", data)
 
 
 def _cli_check() -> Check:
@@ -327,7 +327,7 @@ def _match_check(target: Path, launcher: str | None, manifest: deploy.Manifest |
     edited = [s for s in the_plan.steps if s.state in (deploy.MODIFIED, deploy.FOREIGN)]
     if broken:
         names = ", ".join(f"{s.name}: {s.state}" for s in broken)
-        return Check("match_files", FAIL, f"{names}; run `prompt-workflow espanso deploy`", data)
+        return Check("match_files", FAIL, f"{names}; run `promptmend espanso deploy`", data)
     if edited or the_plan.legacy is not None:
         return Check("match_files", WARN, "some files are not ours as deployed", data)
     return Check("match_files", OK, "every match file is in sync", data)
@@ -350,19 +350,28 @@ def _launcher_check(current: str | None, manifest: deploy.Manifest | None) -> Ch
     }
     note = (
         f"; {len(orphans)} manifest entries for files that no longer exist "
-        "(`prompt-workflow espanso deploy` forgets them)"
+        "(`promptmend espanso deploy` forgets them)"
         if orphans
         else ""
     )
     if manifest is None:
         return Check("launcher", WARN, "the deploy manifest cannot be read", data)
     if not deployed:
-        return Check("launcher", INFO, f"nothing deployed by prompt-workflow on record{note}", data)
+        return Check("launcher", INFO, f"nothing deployed by promptmend on record{note}", data)
     if missing:
         return Check(
             "launcher",
             FAIL,
             f"the deployed matches call {', '.join(missing)}, which is gone{note}",
+            data,
+        )
+    legacy = [p for p in deployed if deploy.is_legacy_launcher(p)]
+    if legacy:
+        return Check(
+            "launcher",
+            WARN,
+            f"the deployed matches call {', '.join(legacy)}, the deprecated `prompt-workflow` "
+            f"command (removed in 1.0.0): redeploy with `promptmend espanso deploy`{note}",
             data,
         )
     if drift:
@@ -492,16 +501,16 @@ def _previous_install_check(
     if pending and retire:
         notes.append(
             f"the old .env at {pending.env_file} is still in place "
-            f"(`prompt-workflow config retire --from {pending.root}`)"
+            f"(`promptmend config retire --from {pending.root}`)"
         )
     elif pending:
         notes.append(
             f"the settings of {pending.root} were copied, but the match files still run "
-            f"{', '.join(pending.launchers_in_root)} (`prompt-workflow espanso deploy`)"
+            f"{', '.join(pending.launchers_in_root)} (`promptmend espanso deploy`)"
         )
     if found.shadow:
         notes.append(
-            f"`prompt-workflow` on PATH is {found.shadow.path}, not the installed launcher "
+            f"`{found.shadow.command}` on PATH is {found.shadow.path}, not the installed launcher "
             f"{found.shadow.launcher}: {found.shadow.hint}"
         )
     if found.shadow or (pending and retire):
@@ -635,19 +644,19 @@ HEAVY_MODULES = (
     "tomli_w",
     "tomlkit",
     "keyring",
-    "prompt_workflow.deploy",
-    "prompt_workflow.commands",
-    "prompt_workflow.doctor",
-    "prompt_workflow.config_store",
-    "prompt_workflow.previous_install",
-    "prompt_workflow.relocate",
+    "promptmend.deploy",
+    "promptmend.commands",
+    "promptmend.doctor",
+    "promptmend.config_store",
+    "promptmend.previous_install",
+    "promptmend.relocate",
 )
 IMPORT_TIMEOUT = 30
 _IMPORT_PROBE = """
 import json, sys, time
 started = set(sys.modules)
 clock = time.perf_counter()
-import prompt_workflow.cli
+import promptmend.cli
 seconds = time.perf_counter() - clock
 heavy = sorted(m for m in sys.modules if m.split(".")[0] in HEAVY or m.startswith(PREFIXES))
 print(json.dumps({"seconds": seconds, "modules": len(set(sys.modules) - started), "heavy": heavy}))

@@ -18,9 +18,9 @@ from typing import Any
 
 import pytest
 
-from prompt_workflow import history
-from prompt_workflow.config import Settings, user_data_dir
-from prompt_workflow.history import HistoryError, HistoryStore, load_price_table
+from promptmend import history
+from promptmend.config import Settings, user_data_dir
+from promptmend.history import HistoryError, HistoryStore, load_price_table
 
 SRC = Path(history.__file__).resolve().parents[1]
 
@@ -184,9 +184,9 @@ def test_disabled_history_records_nothing(store: HistoryStore) -> None:
 
 def test_importing_the_cli_or_history_loads_no_sqlite() -> None:
     code = (
-        "import sys, prompt_workflow.cli; bad = {'sqlite3', 'prompt_workflow.history'}; "
+        "import sys, promptmend.cli; bad = {'sqlite3', 'promptmend.history'}; "
         "print(sorted(bad & sys.modules.keys()))\n"
-        "import prompt_workflow.history; bad = {'sqlite3', 'tomllib', 'decimal'}; "
+        "import promptmend.history; bad = {'sqlite3', 'tomllib', 'decimal'}; "
         "print(sorted(bad & sys.modules.keys()))"
     )
     env = {**os.environ, "PYTHONPATH": str(SRC)}
@@ -314,7 +314,7 @@ def test_a_negative_zero_is_stored_as_zero(store: HistoryStore) -> None:
 
 
 def test_error_kinds_match_what_post_json_records() -> None:
-    base = (SRC / "prompt_workflow" / "providers" / "base.py").read_text("utf-8")
+    base = (SRC / "promptmend" / "providers" / "base.py").read_text("utf-8")
     recorded = set(re.findall(r'error_kind(?: or)? = .*?"([a-z_0-9]+)"', base))
     assert recorded == set(history.ERROR_KINDS)
 
@@ -475,7 +475,7 @@ def test_a_corrupt_database_never_raises_and_reset_recovers(store: HistoryStore)
 def test_when_database_and_sidecar_both_fail_nothing_raises(tmp_path: Path) -> None:
     blocker = tmp_path / "file"
     blocker.write_text("x")
-    store = HistoryStore(blocker / "prompt-workflow" / history.DB_NAME)
+    store = HistoryStore(blocker / "promptmend" / history.DB_NAME)
     assert store.record(_op(), [_attempt()]) is False
     assert store._mark_lost() is False
     health = store.health()
@@ -530,7 +530,7 @@ def test_an_unreadable_sidecar_marks_tracking_incomplete(store: HistoryStore) ->
 _WRITER = """
 import json, sys
 from pathlib import Path
-from prompt_workflow.history import HistoryStore
+from promptmend.history import HistoryStore
 store = HistoryStore(Path(sys.argv[1]))
 worker = int(sys.argv[2])
 stored = []
@@ -594,7 +594,7 @@ def test_concurrent_writers_complete_or_drop_without_duplicates(
 _MARKER = """
 import sys
 from pathlib import Path
-from prompt_workflow.history import HistoryStore
+from promptmend.history import HistoryStore
 store = HistoryStore(Path(sys.argv[1]))
 print(sum(store._mark_lost() for _ in range(25)))
 """

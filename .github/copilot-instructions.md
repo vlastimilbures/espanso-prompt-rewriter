@@ -5,7 +5,7 @@ commands and rules; read it before changing code. `CONTRIBUTING.md` has the chec
 rules. The invariants below must never be broken:
 
 - The CLI prints only through `cli._emit()` (no trailing newline); every failure is a
-  `[prompt-workflow: ...]` marker on stdout with exit code 0, never a traceback.
+  `[promptmend: ...]` marker on stdout with exit code 0, never a traceback.
 - Build every provider with `factory.make_provider()`, which wraps any call that can leave the
   machine in the data-protection gate. The only overrides are `ALLOW_CLOUD_OVERRIDE=true` and
   `--allow-flagged` (one call, soft findings only); never add a code path around the gate.

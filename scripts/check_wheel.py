@@ -7,8 +7,9 @@ built wheel into a clean venv and runs this with that venv's Python (not from th
     <venv python> scripts/check_wheel.py --repo . --wheel dist/<name>.whl
 
 It checks that the package was imported from the venv, that every match file under the repo's
-espanso/match/ and every profile under src/prompt_workflow/prompts/ resolves through
-importlib.resources, that espanso/config/ was not shipped, and that `prompt-workflow persona`
+espanso/match/ and every profile under src/promptmend/prompts/ resolves through
+importlib.resources, that espanso/config/ was not shipped, that `promptmend --version` and its
+deprecated alias `prompt-workflow --version` print the version, and that `promptmend persona`
 runs with an empty config. With `--constraints` (the release's constraints.txt, exported from
 uv.lock), every distribution installed next to the package must be pinned there at the
 installed version. Exits nonzero on the first failure.
@@ -26,10 +27,10 @@ import zipfile
 from importlib import metadata
 from pathlib import Path
 
-import prompt_workflow
-from prompt_workflow import assets
-from prompt_workflow.cli import PERSONA_PLACEHOLDER
-from prompt_workflow.prompt_builder import PROFILES, system_prompt
+import promptmend
+from promptmend import assets
+from promptmend.cli import PERSONA_PLACEHOLDER
+from promptmend.prompt_builder import PROFILES, system_prompt
 
 
 def _fail(message: str) -> None:
@@ -37,9 +38,9 @@ def _fail(message: str) -> None:
 
 
 def _check_import(repo: Path) -> Path:
-    package = Path(prompt_workflow.__file__).resolve().parent
+    package = Path(promptmend.__file__).resolve().parent
     if package.is_relative_to(repo):
-        _fail(f"prompt_workflow was imported from the checkout ({package}), not the wheel")
+        _fail(f"promptmend was imported from the checkout ({package}), not the wheel")
     return package
 
 
@@ -56,7 +57,7 @@ def _check_match_files(repo: Path, package: Path) -> None:
 
 
 def _check_profiles(repo: Path) -> None:
-    expected = sorted(p.stem for p in (repo / "src" / "prompt_workflow" / "prompts").glob("*.md"))
+    expected = sorted(p.stem for p in (repo / "src" / "promptmend" / "prompts").glob("*.md"))
     if sorted(PROFILES) != expected:
         _fail(f"profiles {sorted(PROFILES)} != repo {expected}")
     for name in expected:
@@ -71,10 +72,25 @@ def _check_wheel_contents(wheel: Path) -> None:
         _fail(f"espanso/config must not ship, found {shipped}")
 
 
+def _exe(name: str) -> Path:
+    return Path(sys.executable).parent / (f"{name}.exe" if os.name == "nt" else name)
+
+
+def _check_commands() -> None:
+    """`promptmend` and its deprecated alias `prompt-workflow` (until 1.0.0) both run, and
+    --version prints only the version (no deprecation note)."""
+    want = metadata.version("promptmend")
+    for name in ("promptmend", "prompt-workflow"):
+        result = subprocess.run(  # noqa: S603 - the venv's own entry point
+            [str(_exe(name)), "--version"], capture_output=True, check=False, timeout=60
+        )
+        out = result.stdout.decode("utf-8").strip()
+        if (result.returncode, out, result.stderr) != (0, want, b""):
+            _fail(f"{name} --version exited {result.returncode} with {out!r} {result.stderr!r}")
+
+
 def _check_persona() -> None:
-    exe = Path(sys.executable).parent / (
-        "prompt-workflow.exe" if os.name == "nt" else "prompt-workflow"
-    )
+    exe = _exe("promptmend")
     with tempfile.TemporaryDirectory() as tmp:
         home = Path(tmp)
         env_file = home / "empty.env"
@@ -125,7 +141,7 @@ def constraint_mismatches(constraints: str, installed: dict[str, str]) -> list[s
 
 
 def _check_constraints(constraints: Path) -> None:
-    own = _normalize(metadata.distribution("espanso-prompt-rewriter").metadata["Name"])
+    own = _normalize(metadata.distribution("promptmend").metadata["Name"])
     installed = {
         dist.metadata["Name"]: dist.version
         for dist in metadata.distributions()
@@ -153,6 +169,7 @@ def main() -> None:
     _check_match_files(repo, package)
     _check_profiles(repo)
     _check_wheel_contents(args.wheel)
+    _check_commands()
     _check_persona()
     if args.constraints:
         _check_constraints(args.constraints)

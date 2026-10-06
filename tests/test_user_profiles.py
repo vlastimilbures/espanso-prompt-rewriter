@@ -13,10 +13,10 @@ from typing import IO, TYPE_CHECKING, Any
 import pytest
 from typer.testing import CliRunner, Result
 
-from prompt_workflow import assets, profiles, prompt_builder
-from prompt_workflow.cli import app
-from prompt_workflow.config import Settings
-from prompt_workflow.prompt_builder import (
+from promptmend import assets, profiles, prompt_builder
+from promptmend.cli import app
+from promptmend.config import Settings
+from promptmend.prompt_builder import (
     PROFILES,
     UserProfile,
     system_prompt,
@@ -97,7 +97,7 @@ def test_override_without_a_file_keeps_the_builtin() -> None:
     _write("default")
     system_prompt("default", "", ("default",))
     assert PROFILES["default"] == builtin
-    shipped = (REPO / "src" / "prompt_workflow" / "prompts" / "default.md").read_text("utf-8")
+    shipped = (REPO / "src" / "promptmend" / "prompts" / "default.md").read_text("utf-8")
     assert shipped.strip() == builtin
 
 
@@ -138,7 +138,7 @@ def test_profile_names_are_case_sensitive_everywhere(
     with pytest.raises(ValueError, match="Unknown profile"):
         system_prompt(name, "", ("default",) if name == "Default" else ())
     result = _improve("--profile", name)
-    assert result.stdout.startswith("[prompt-workflow: Unknown profile")
+    assert result.stdout.startswith("[promptmend: Unknown profile")
     assert stub_provider.calls == []
 
 
@@ -222,12 +222,12 @@ def test_bad_profile_overrides_reports_inline(
     monkeypatch.setenv("PROMPT_PROFILE_OVERRIDES", "regulation")
     result = _improve()
     assert result.exit_code == 0
-    assert result.stdout.startswith("[prompt-workflow: PROMPT_PROFILE_OVERRIDES must be")
+    assert result.stdout.startswith("[promptmend: PROMPT_PROFILE_OVERRIDES must be")
     assert stub_provider.calls == []
 
 
-def _checkout(tmp_path: Path) -> Path:
-    prompts = tmp_path / "checkout" / profiles.PROMPTS_PATH
+def _checkout(tmp_path: Path, path: str = profiles.PROMPTS_PATH) -> Path:
+    prompts = tmp_path / "checkout" / path
     prompts.mkdir(parents=True)
     for name, text in PROFILES.items():
         (prompts / f"{name}.md").write_text(text + "\n", "utf-8")
@@ -332,6 +332,39 @@ def test_git_pristine_profiles_rejects_non_utf8(tmp_path: Path) -> None:
     assert str(tmp_path) not in str(info.value)
 
 
+# #169: a checkout from before the rename keeps its profiles under src/prompt_workflow/prompts,
+# and a revision from before the rename too, even once the working tree is renamed.
+@pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
+def test_profiles_of_a_checkout_from_before_the_rename(tmp_path: Path) -> None:
+    prompts = _checkout(tmp_path, profiles.LEGACY_PROMPTS_PATH)
+    repo = prompts.parents[2]
+    assert profiles.prompts_path(repo) == profiles.LEGACY_PROMPTS_PATH
+    (prompts / "regulation.md").write_text("Untracked.", "utf-8")
+    _git(repo, "init", "-q")
+    _git(repo, "add", "src")
+    _git(repo, "commit", "-qm", "base")
+    base = "HEAD"
+    pristine = profiles.git_pristine_profiles(repo)
+    assert profiles.changed_profiles(prompts, pristine) == {}
+    (prompts / "general.md").write_text("Edited.", "utf-8")
+    assert profiles.changed_profiles(prompts, profiles.git_pristine_profiles(repo)) == {
+        "general": "modified"
+    }
+    renamed = repo / profiles.PROMPTS_PATH
+    renamed.parent.mkdir(parents=True)
+    prompts.rename(renamed)
+    assert profiles.prompts_path(repo) == profiles.PROMPTS_PATH
+    pristine = profiles.git_pristine_profiles(repo, base)
+    assert profiles.changed_profiles(renamed, pristine) == {"general": "modified"}
+
+
+def test_prompts_path_prefers_the_new_folder(tmp_path: Path) -> None:
+    assert profiles.prompts_path(tmp_path) == profiles.PROMPTS_PATH  # neither: the new name
+    (tmp_path / profiles.LEGACY_PROMPTS_PATH).mkdir(parents=True)
+    (tmp_path / profiles.PROMPTS_PATH).mkdir(parents=True)
+    assert profiles.prompts_path(tmp_path) == profiles.PROMPTS_PATH
+
+
 # A source the loader could not read either is an error naming the profile, not a crash.
 def test_changed_profiles_reports_unreadable_source(tmp_path: Path) -> None:
     prompts = _checkout(tmp_path)
@@ -383,7 +416,7 @@ def test_match_files_from_the_checkout() -> None:
         assets.read_match("default.yml")
 
 
-# A wheel carries them at prompt_workflow/espanso/match/, which wins over the checkout.
+# A wheel carries them at promptmend/espanso/match/, which wins over the checkout.
 def test_match_files_from_the_package(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     packaged = tmp_path / "pkg" / "espanso" / "match"
     packaged.mkdir(parents=True)
@@ -406,7 +439,7 @@ def test_wheel_declares_match_files_only() -> None:
 
     pyproject = tomllib.loads((REPO / "pyproject.toml").read_text("utf-8"))
     force = pyproject["tool"]["hatch"]["build"]["targets"]["wheel"]["force-include"]
-    assert force == {"espanso/match": "prompt_workflow/espanso/match"}
+    assert force == {"espanso/match": "promptmend/espanso/match"}
 
 
 # A refusal with nothing at the target (a read-only folder) is a real error, not "exists".

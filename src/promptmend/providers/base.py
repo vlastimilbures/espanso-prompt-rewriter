@@ -352,10 +352,10 @@ def strip_thinking(text: str) -> str:
 
 # Appended to a rewrite the model stopped at its output cap, so a cut-off prompt is never
 # pasted as if it were complete. Provider-neutral: the cap is not always one --max-tokens sets.
-TRUNCATED_NOTE = "\n\n[prompt-workflow: the reply hit the model's output limit and is cut off]"
+TRUNCATED_NOTE = "\n\n[promptmend: the reply hit the model's output limit and is cut off]"
 # Appended to a rewrite a content filter or a refusal stopped.
 FILTERED_NOTE = (
-    "\n\n[prompt-workflow: the model stopped early ({reason}); the rewrite may be incomplete]"
+    "\n\n[promptmend: the model stopped early ({reason}); the rewrite may be incomplete]"
 )
 
 # Stop reasons (OpenRouter finish_reason, Anthropic stop_reason, Ollama done_reason) for a

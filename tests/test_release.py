@@ -150,7 +150,7 @@ colorama==0.4.6 ; sys_platform == 'win32'
 typing-extensions==4.16.0 ; python_full_version < '3.13'
     # via anyio
 httpx==0.28.1
-    # via espanso-prompt-rewriter
+    # via promptmend
 """
 
 
@@ -191,6 +191,6 @@ def test_constraints_export_matches_the_lock() -> None:
         if line and not line.startswith((" ", "#"))
     ]
     assert {"httpx", "pyperclip", "typer"} <= {name for name, _ in pinned}
-    assert "espanso-prompt-rewriter" not in {name for name, _ in pinned}
+    assert "promptmend" not in {name for name, _ in pinned}
     assert check_wheel.constraint_mismatches(export.stdout, dict(pinned)) == []
     assert all(locked[name] == version for name, version in pinned)

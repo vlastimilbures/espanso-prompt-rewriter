@@ -1,7 +1,7 @@
 import tomllib
 from pathlib import Path
 
-from prompt_workflow import __version__
+from promptmend import __version__
 
 
 # __version__ comes from the installed metadata and must match pyproject.toml.

@@ -23,20 +23,20 @@ import pytest
 import yaml
 from typer.testing import CliRunner, Result
 
-from prompt_workflow import __version__, assets, deploy
-from prompt_workflow.cli import app
-from prompt_workflow.config import user_data_dir
-from prompt_workflow.match_history import KNOWN_SOURCES
+from promptmend import __version__, assets, deploy
+from promptmend.cli import app
+from promptmend.config import user_data_dir
+from promptmend.match_history import KNOWN_SOURCES
 
 runner = CliRunner()
 REPO = Path(__file__).resolve().parents[1]
 MATCH = REPO / "espanso" / "match"
 NAMES = sorted(p.name for p in MATCH.glob("*.yml"))
-LAUNCHER = "/Users/me/.local/bin/prompt-workflow"
+LAUNCHER = "/Users/me/.local/bin/promptmend"
 VERSION = __version__
 # Captured at import, before conftest swaps it for a refusal in every test.
 REAL_RUN_COMMAND = deploy.run_command
-EXE = "prompt-workflow.exe" if os.name == "nt" else "prompt-workflow"
+EXE = "promptmend.exe" if os.name == "nt" else "promptmend"
 STATIC = "prompts-core.yml"  # the only match file that never calls the CLI
 
 
@@ -55,12 +55,12 @@ def _script_render_windows(source: str, cli: str) -> str:
 
 @pytest.mark.parametrize("name", NAMES)
 @pytest.mark.parametrize(
-    "path", ["/Users/me/.local/bin/prompt-workflow", "/Users/Jan Novák/a|b&c/prompt-workflow"]
+    "path", ["/Users/me/.local/bin/promptmend", "/Users/Jan Novák/a|b&c/promptmend"]
 )
 def test_render_matches_the_macos_script_plus_stamp(name: str, path: str) -> None:
     source = (MATCH / name).read_bytes().decode("utf-8")
     rendered = deploy.render(source, deploy.launcher_text(path, windows=False), "1.2.3")
-    stamp = "# prompt-workflow 1.2.3 (managed; edit at your own risk)\n"
+    stamp = "# promptmend 1.2.3 (managed; edit at your own risk)\n"
     assert rendered == stamp + _script_render_macos(source, path)
     # The stamp is a comment: the YAML Espanso reads is unchanged.
     assert yaml.safe_load(rendered) == yaml.safe_load(_script_render_macos(source, path))
@@ -68,11 +68,11 @@ def test_render_matches_the_macos_script_plus_stamp(name: str, path: str) -> Non
 
 @pytest.mark.parametrize("name", NAMES)
 def test_render_matches_the_windows_script_plus_stamp(name: str) -> None:
-    cli = r"C:\Users\Jan Novák\.local\bin\prompt-workflow.exe"
+    cli = r"C:\Users\Jan Novák\.local\bin\promptmend.exe"
     source = (MATCH / name).read_bytes().decode("utf-8")
     rendered = deploy.render(source, deploy.launcher_text(cli, windows=True), "1.2.3")
     assert rendered.split("\n", 1)[1] == _script_render_windows(source, cli)
-    assert "C:/Users/Jan Novák/.local/bin/prompt-workflow.exe" in rendered or name == STATIC
+    assert "C:/Users/Jan Novák/.local/bin/promptmend.exe" in rendered or name == STATIC
 
 
 # The packaged files are the ones the scripts deployed from.
@@ -83,19 +83,17 @@ def test_assets_are_the_repo_match_files() -> None:
 @pytest.mark.parametrize("bad", ['"', "$", "`", "\\"])
 def test_launcher_guard_posix(bad: str) -> None:
     with pytest.raises(deploy.DeployError, match="quote, \\$, backtick or backslash"):
-        deploy.launcher_text(f"/opt/a{bad}b/prompt-workflow", windows=False)
+        deploy.launcher_text(f"/opt/a{bad}b/promptmend", windows=False)
 
 
 @pytest.mark.parametrize("bad", ['"', "%", "^", "&", "|", "<", ">"])
 def test_launcher_guard_windows(bad: str) -> None:
     with pytest.raises(deploy.DeployError, match=r"cmd\.exe or YAML"):
-        deploy.launcher_text(rf"C:\a{bad}b\prompt-workflow.exe", windows=True)
+        deploy.launcher_text(rf"C:\a{bad}b\promptmend.exe", windows=True)
 
 
 def test_launcher_windows_slashes() -> None:
-    assert deploy.launcher_text(r"C:\x\prompt-workflow.exe", windows=True) == (
-        "C:/x/prompt-workflow.exe"
-    )
+    assert deploy.launcher_text(r"C:\x\promptmend.exe", windows=True) == ("C:/x/promptmend.exe")
 
 
 # --- Plan, apply, states ------------------------------------------------------------------
@@ -138,7 +136,7 @@ def test_deploy_twice_is_a_noop(espanso: Path) -> None:
     assert first.changed
     for name in NAMES:
         text = (espanso / "match" / name).read_text("utf-8")
-        assert text.startswith(f"# prompt-workflow {VERSION} (managed; edit at your own risk)\n")
+        assert text.startswith(f"# promptmend {VERSION} (managed; edit at your own risk)\n")
     before = _tree(espanso)
     manifest = (user_data_dir() / deploy.MANIFEST_NAME).read_bytes()
 
@@ -271,14 +269,14 @@ def test_status_reports_stale_after_an_upgrade(
     assert "stale     prompts-template.yml" in result.stdout
     deploy.apply(_plan(espanso))
     target = espanso / "match" / "prompts-template.yml"
-    assert target.read_text("utf-8").startswith("# prompt-workflow 0.16.0 (managed")
+    assert target.read_text("utf-8").startswith("# promptmend 0.16.0 (managed")
     assert deploy.Manifest.load().entries[str(target)].asset_version == "0.16.0"
 
 
 # A new launcher path makes every CLI-calling file stale; the static one stays in sync.
 def test_new_launcher_is_stale(espanso: Path) -> None:
     deploy.apply(_plan(espanso))
-    states = _states(espanso, "/opt/homebrew/bin/prompt-workflow")
+    states = _states(espanso, "/opt/homebrew/bin/promptmend")
     assert states == {n: deploy.IN_SYNC if n == STATIC else deploy.STALE for n in NAMES}
 
 
@@ -312,15 +310,30 @@ def test_backup_name_never_clobbers(espanso: Path) -> None:
     assert (first.name, second.name) == ("a.yml.bak-20260101000000", "a.yml.bak-20260101000000-1")
 
 
-def test_legacy_base_yml_is_retired(espanso: Path) -> None:
+@pytest.mark.parametrize("command", ["promptmend", "prompt-workflow"])  # either name (#169)
+def test_legacy_base_yml_is_retired(espanso: Path, command: str) -> None:
     legacy = espanso / "match" / "base.yml"
-    legacy.write_text('matches:\n  - trigger: "-p-"\n    # prompt-workflow\n', "utf-8")
+    legacy.write_text(f'matches:\n  - trigger: "-p-"\n    # {command}\n', "utf-8")
     the_plan = _plan(espanso)
     assert the_plan.legacy == legacy
     deploy.apply(the_plan)
     assert not legacy.exists()
     assert len(list(legacy.parent.glob("base.yml.bak-*"))) == 1
     assert _plan(espanso).is_noop
+
+
+@pytest.mark.parametrize(
+    ("launcher", "legacy"),
+    [
+        ("/Users/me/.local/bin/prompt-workflow", True),
+        ("C:/Users/me/.local/bin/prompt-workflow.exe", True),
+        ("C:\\Users\\me\\.local\\bin\\Prompt-Workflow.EXE", True),
+        ("/Users/me/.local/bin/promptmend", False),
+        ("/Users/me/prompt-workflow/bin/promptmend", False),
+    ],
+)
+def test_is_legacy_launcher(launcher: str, legacy: bool) -> None:
+    assert deploy.is_legacy_launcher(launcher) is legacy
 
 
 def test_other_base_yml_is_left_alone(espanso: Path) -> None:
@@ -482,39 +495,39 @@ def _exe(path: Path, body: str = "") -> Path:
 
 
 # The same for every uv channel: a wheel URL, a local wheel and PyPI
-# (`uv tool install espanso-prompt-rewriter`) all install into `<uv tool dir>/<project name>`.
+# (`uv tool install promptmend`) all install into `<uv tool dir>/<project name>`.
 def test_resolve_uv(tmp_path: Path) -> None:
     tools, bin_dir = tmp_path / "uv" / "tools", tmp_path / "bin"
-    launcher = _exe(bin_dir / "prompt-workflow")
+    launcher = _exe(bin_dir / "promptmend")
     fake = FakeRunner({"uv tool dir": f"{tools}\n", "uv tool dir --bin": f"{bin_dir}\n"})
     found = deploy.resolve_launcher(
-        runner=fake, prefix=tools / "espanso-prompt-rewriter", script=tmp_path / "x", windows=False
+        runner=fake, prefix=tools / "promptmend", script=tmp_path / "x", windows=False
     )
     assert found == deploy.Launcher(launcher, "uv")
 
 
 def test_resolve_uv_windows_exe(tmp_path: Path) -> None:
     tools, bin_dir = tmp_path / "tools", tmp_path / "bin"
-    launcher = _exe(bin_dir / "prompt-workflow.exe")
+    launcher = _exe(bin_dir / "promptmend.exe")
     fake = FakeRunner({"uv tool dir": str(tools), "uv tool dir --bin": str(bin_dir)})
     found = deploy.resolve_launcher(
-        runner=fake, prefix=tools / "espanso-prompt-rewriter", script=tmp_path / "x", windows=True
+        runner=fake, prefix=tools / "promptmend", script=tmp_path / "x", windows=True
     )
     assert found.path == launcher
 
 
 def _cellar(tmp_path: Path, version: str) -> Path:
-    return tmp_path / "brew" / "Cellar" / "espanso-prompt-rewriter" / version / "libexec"
+    return tmp_path / "brew" / "Cellar" / "promptmend" / version / "libexec"
 
 
 def test_resolve_homebrew_never_cellar(tmp_path: Path) -> None:
     brew = tmp_path / "brew"
-    launcher = _exe(brew / "bin" / "prompt-workflow")
-    _exe(_cellar(tmp_path, "0.15.0") / "bin" / "prompt-workflow")
+    launcher = _exe(brew / "bin" / "promptmend")
+    _exe(_cellar(tmp_path, "0.15.0") / "bin" / "promptmend")
     found = deploy.resolve_launcher(
         runner=FakeRunner({"brew --prefix": f"{brew}\n"}),
         prefix=_cellar(tmp_path, "0.15.0"),
-        script=_cellar(tmp_path, "0.15.0") / "bin" / "prompt-workflow",
+        script=_cellar(tmp_path, "0.15.0") / "bin" / "promptmend",
         windows=False,
     )
     assert found == deploy.Launcher(launcher, "homebrew")
@@ -522,7 +535,7 @@ def test_resolve_homebrew_never_cellar(tmp_path: Path) -> None:
 
 def test_resolve_homebrew_opt(tmp_path: Path) -> None:
     brew = tmp_path / "brew"
-    launcher = _exe(brew / "opt" / "espanso-prompt-rewriter" / "bin" / "prompt-workflow")
+    launcher = _exe(brew / "opt" / "promptmend" / "bin" / "promptmend")
     found = deploy.resolve_launcher(
         runner=FakeRunner({"brew --prefix": str(brew)}),
         prefix=_cellar(tmp_path, "0.15.0"),
@@ -533,30 +546,30 @@ def test_resolve_homebrew_opt(tmp_path: Path) -> None:
 
 
 # The tap's formula (scripts/brew_formula.py): Language::Python::Virtualenv builds the venv in
-# `<Cellar>/prompt-workflow/<version>/libexec` and links `<prefix>/bin/prompt-workflow` to its
+# `<Cellar>/promptmend/<version>/libexec` and links `<prefix>/bin/promptmend` to its
 # console script. Python may report the venv through the Cellar path or the `opt` link.
 @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need a privilege on Windows")
 @pytest.mark.parametrize("via", ["cellar", "opt"])
 def test_resolve_the_tap_formula(tmp_path: Path, via: str) -> None:
     brew = tmp_path / "homebrew"
-    libexec = brew / "Cellar" / "prompt-workflow" / "0.19.0" / "libexec"
-    script = _exe(libexec / "bin" / "prompt-workflow")
+    libexec = brew / "Cellar" / "promptmend" / "0.19.0" / "libexec"
+    script = _exe(libexec / "bin" / "promptmend")
     (brew / "bin").mkdir(parents=True)
-    (brew / "bin" / "prompt-workflow").symlink_to(script)
+    (brew / "bin" / "promptmend").symlink_to(script)
     (brew / "opt").mkdir()
-    (brew / "opt" / "prompt-workflow").symlink_to(libexec.parent)
-    prefix = libexec if via == "cellar" else brew / "opt" / "prompt-workflow" / "libexec"
+    (brew / "opt" / "promptmend").symlink_to(libexec.parent)
+    prefix = libexec if via == "cellar" else brew / "opt" / "promptmend" / "libexec"
     fake = FakeRunner({"brew --prefix": f"{brew}\n"})
     found = deploy.resolve_launcher(
-        runner=fake, prefix=prefix, script=brew / "bin" / "prompt-workflow", windows=False
+        runner=fake, prefix=prefix, script=brew / "bin" / "promptmend", windows=False
     )
-    assert found == deploy.Launcher(brew / "bin" / "prompt-workflow", "homebrew")
+    assert found == deploy.Launcher(brew / "bin" / "promptmend", "homebrew")
     assert "Cellar" not in deploy.launcher_text(found.path, windows=False)
 
 
 # A venv under some other `opt` folder (or no brew at all) is not Homebrew's.
 def test_resolve_an_opt_prefix_outside_homebrew(tmp_path: Path) -> None:
-    script = _exe(tmp_path / "opt" / "tools" / "bin" / "prompt-workflow")
+    script = _exe(tmp_path / "opt" / "tools" / "bin" / "promptmend")
     for answer in ({"brew --prefix": str(tmp_path / "homebrew")}, {}):
         found = deploy.resolve_launcher(
             runner=FakeRunner(answer),
@@ -569,10 +582,10 @@ def test_resolve_an_opt_prefix_outside_homebrew(tmp_path: Path) -> None:
 
 def test_resolve_scoop_shim(tmp_path: Path) -> None:
     scoop = tmp_path / "scoop"
-    shim = _exe(scoop / "shims" / "prompt-workflow.exe")
+    shim = _exe(scoop / "shims" / "promptmend.exe")
     found = deploy.resolve_launcher(
         runner=FakeRunner(),
-        prefix=scoop / "apps" / "prompt-workflow" / "current",
+        prefix=scoop / "apps" / "promptmend" / "current",
         script=tmp_path / "x",
         windows=True,
     )
@@ -580,7 +593,7 @@ def test_resolve_scoop_shim(tmp_path: Path) -> None:
 
 
 def test_resolve_running_script(tmp_path: Path) -> None:
-    script = _exe(tmp_path / "pipx" / "bin" / "prompt-workflow")
+    script = _exe(tmp_path / "pipx" / "bin" / "promptmend")
     found = deploy.resolve_launcher(
         runner=FakeRunner(), prefix=tmp_path / "venv", script=script, windows=False
     )
@@ -589,11 +602,11 @@ def test_resolve_running_script(tmp_path: Path) -> None:
 
 # Windows runs a console script as argv[0] without the .exe.
 def test_resolve_running_script_windows(tmp_path: Path) -> None:
-    exe = _exe(tmp_path / "Scripts" / "prompt-workflow.exe")
+    exe = _exe(tmp_path / "Scripts" / "promptmend.exe")
     found = deploy.resolve_launcher(
         runner=FakeRunner(),
         prefix=tmp_path / "venv",
-        script=tmp_path / "Scripts" / "prompt-workflow",
+        script=tmp_path / "Scripts" / "promptmend",
         windows=True,
     )
     assert found.path == exe
@@ -605,8 +618,8 @@ def test_resolve_running_script_windows(tmp_path: Path) -> None:
     ids=["cellar", "versioned", "project-venv"],
 )
 def test_resolve_refuses_an_unstable_script(tmp_path: Path, parts: tuple[str, ...]) -> None:
-    script = _exe(tmp_path.joinpath(*parts) / "prompt-workflow")
-    with pytest.raises(deploy.DeployError, match="stable prompt-workflow launcher"):
+    script = _exe(tmp_path.joinpath(*parts) / "promptmend")
+    with pytest.raises(deploy.DeployError, match="stable promptmend launcher"):
         deploy.resolve_launcher(
             runner=FakeRunner(), prefix=tmp_path / "venv", script=script, windows=False
         )
@@ -615,7 +628,7 @@ def test_resolve_refuses_an_unstable_script(tmp_path: Path, parts: tuple[str, ..
 def test_resolve_nothing(tmp_path: Path) -> None:
     with pytest.raises(deploy.DeployError, match="pass --launcher"):
         deploy.resolve_launcher(
-            runner=FakeRunner(), prefix=tmp_path, script=Path("prompt-workflow"), windows=False
+            runner=FakeRunner(), prefix=tmp_path, script=Path("promptmend"), windows=False
         )
 
 
@@ -626,9 +639,9 @@ def test_resolve_nothing(tmp_path: Path) -> None:
 @pytest.mark.skipif(sys.platform == "win32", reason="runs a POSIX shell launcher")
 def test_upgrade_keeps_the_uv_launcher(tmp_path: Path, espanso: Path) -> None:
     tools, bin_dir = tmp_path / "tools", tmp_path / "bin"
-    venv = tools / "espanso-prompt-rewriter"
-    _exe(venv / "bin" / "prompt-workflow-real", "echo N")
-    launcher = _exe(bin_dir / "prompt-workflow", f'exec "{venv}/bin/prompt-workflow-real"')
+    venv = tools / "promptmend"
+    _exe(venv / "bin" / "promptmend-real", "echo N")
+    launcher = _exe(bin_dir / "promptmend", f'exec "{venv}/bin/promptmend-real"')
     fake = FakeRunner({"uv tool dir": str(tools), "uv tool dir --bin": str(bin_dir)})
     found = deploy.resolve_launcher(runner=fake, prefix=venv, script=tmp_path / "x", windows=False)
     deploy.apply(_plan(espanso, deploy.launcher_text(found.path, windows=False)))
@@ -636,7 +649,7 @@ def test_upgrade_keeps_the_uv_launcher(tmp_path: Path, espanso: Path) -> None:
     # uv tool install --force: the venv is removed and rebuilt, the bin entry rewritten.
     for p in sorted(venv.rglob("*"), reverse=True):
         p.unlink() if p.is_file() else p.rmdir()
-    _exe(venv / "bin" / "prompt-workflow-real", "echo N+1")
+    _exe(venv / "bin" / "promptmend-real", "echo N+1")
 
     deployed = (espanso / "match" / "prompts-llm.yml").read_text("utf-8")
     assert f'\\"{launcher}\\" improve' in deployed
@@ -647,9 +660,9 @@ def test_upgrade_keeps_the_uv_launcher(tmp_path: Path, espanso: Path) -> None:
 @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need a privilege on Windows")
 def test_upgrade_keeps_the_homebrew_launcher(tmp_path: Path, espanso: Path) -> None:
     brew = tmp_path / "brew"
-    old = _exe(_cellar(tmp_path, "0.15.0") / "bin" / "prompt-workflow", "echo N")
+    old = _exe(_cellar(tmp_path, "0.15.0") / "bin" / "promptmend", "echo N")
     (brew / "bin").mkdir(parents=True)
-    link = brew / "bin" / "prompt-workflow"
+    link = brew / "bin" / "promptmend"
     link.symlink_to(old)
     found = deploy.resolve_launcher(
         runner=FakeRunner({"brew --prefix": str(brew)}),
@@ -661,7 +674,7 @@ def test_upgrade_keeps_the_homebrew_launcher(tmp_path: Path, espanso: Path) -> N
     deploy.apply(_plan(espanso, deploy.launcher_text(found.path, windows=False)))
 
     # brew upgrade: install N+1 in its own Cellar dir, relink, remove N.
-    new = _exe(_cellar(tmp_path, "0.16.0") / "bin" / "prompt-workflow", "echo N+1")
+    new = _exe(_cellar(tmp_path, "0.16.0") / "bin" / "promptmend", "echo N+1")
     link.unlink()
     link.symlink_to(new)
     old.unlink()
@@ -884,7 +897,7 @@ def test_locate_espanso_dir_says_why_it_falls_back(
 def _terminal(monkeypatch: pytest.MonkeyPatch) -> None:
     """The CLI tests answer prompts through CliRunner's input, as a person at a terminal would;
     without a terminal the commands refuse to ask (tests/test_commands.py)."""
-    from prompt_workflow.commands import common
+    from promptmend.commands import common
 
     monkeypatch.setattr(common, "stdin_is_tty", lambda: True)
 
@@ -992,10 +1005,10 @@ def test_cli_resolves_launcher_and_espanso_dir(
 
 
 def test_cli_status_diff_and_legacy(espanso: Path, fake_run: FakeRunner) -> None:
-    (espanso / "match" / "base.yml").write_text('trigger: "-p-" prompt-workflow', "utf-8")
+    (espanso / "match" / "base.yml").write_text('trigger: "-p-" promptmend', "utf-8")
     result = _cli("status", "--diff", *_where(espanso))
     assert result.exit_code == 0
-    assert "+# prompt-workflow" in result.stdout
+    assert "+# promptmend" in result.stdout
     assert "legacy    base.yml" in result.stdout
     assert fake_run.calls == []  # status never restarts or writes
     assert (espanso / "match" / "base.yml").exists()
@@ -1017,7 +1030,7 @@ def _your_files(espanso: Path) -> None:
     (match / "base.yml").write_text("matches:\n  - trigger: ':me'\n", "utf-8")
     (match / "work.YAML").write_text("matches: []\n", "utf-8")
     (match / "prompts-llm.yml.bak-20260101000000").write_text("old", "utf-8")
-    (match / "prompts-llm.yml.prompt-workflow-new").write_text("new", "utf-8")
+    (match / "prompts-llm.yml.promptmend-new").write_text("new", "utf-8")
     (match / "notes.txt").write_text("notes", "utf-8")
     (match / "packages" / "pkg.yml").mkdir(parents=True)
 
@@ -1035,7 +1048,7 @@ def test_plan_lists_nothing_without_a_match_folder(tmp_path: Path) -> None:
 
 
 def test_legacy_base_is_not_listed_as_yours(espanso: Path) -> None:
-    (espanso / "match" / "base.yml").write_text('trigger: "-p-" prompt-workflow', "utf-8")
+    (espanso / "match" / "base.yml").write_text('trigger: "-p-" promptmend', "utf-8")
     the_plan = _plan(espanso)
     assert the_plan.legacy == espanso / "match" / "base.yml"
     assert the_plan.yours == []
@@ -1116,7 +1129,7 @@ def test_in_sync_file_without_manifest_is_adopted(espanso: Path) -> None:
 
 
 def test_cli_deploy_retires_legacy(espanso: Path, fake_run: FakeRunner) -> None:
-    (espanso / "match" / "base.yml").write_text('trigger: "-p-" prompt-workflow', "utf-8")
+    (espanso / "match" / "base.yml").write_text('trigger: "-p-" promptmend', "utf-8")
     result = _cli("deploy", "--yes", *_where(espanso))
     assert "legacy    base.yml will be retired" in result.stdout
     assert "retired legacy" in result.stdout
@@ -1184,11 +1197,7 @@ def test_file_an_old_script_wrote_is_stale(espanso: Path, windows: bool) -> None
         timeout=30,
         check=True,
     ).stdout
-    cli = (
-        r"C:\Users\me\.local\bin\prompt-workflow.exe"
-        if windows
-        else "/Users/me/bin/prompt-workflow"
-    )
+    cli = r"C:\Users\me\.local\bin\promptmend.exe" if windows else "/Users/me/bin/promptmend"
     render = _script_render_windows if windows else _script_render_macos
     (espanso / "match" / "prompts-llm.yml").write_text(render(old, cli), "utf-8")
     assert _states(espanso)["prompts-llm.yml"] == deploy.STALE
@@ -1233,14 +1242,57 @@ _PROMPT_FORM_0_18 = """\
 _CORE_0_18 = "1cf316c0745bbdc9827643530caacf3b782a59cb72312ccfebcfccd4ea73c656"
 
 
+def _as_0_18(source: str) -> str:
+    """A match source as 0.18.0 had it: the rename (#169) changed only the labels and the
+    command named in comments."""
+    return source.replace('label: "PromptMend: ', 'label: "prompt-workflow: ').replace(
+        "promptmend", "prompt-workflow"
+    )
+
+
+# The rename (#169): a file 0.18.0 deployed (its `# prompt-workflow` stamp, its labels, its
+# `prompt-workflow` launcher) is ours and stale, with or without its manifest entry, and the
+# next deploy replaces it with the `promptmend` launcher without a conflict.
+@pytest.mark.parametrize("name", ["prompts-llm.yml", "prompts-template.yml"])
+@pytest.mark.parametrize("manifest", [True, False])
+def test_a_file_0_18_deployed_is_stale(
+    monkeypatch: pytest.MonkeyPatch, espanso: Path, name: str, manifest: bool
+) -> None:
+    source = _as_0_18((MATCH / name).read_text("utf-8"))
+    assert hashlib.sha256(source.encode()).hexdigest() in KNOWN_SOURCES[name]
+    old_launcher = "/Users/me/.local/bin/prompt-workflow"
+    rendered = "# prompt-workflow 0.18.0 (managed; edit at your own risk)\n" + source.replace(
+        deploy.PLACEHOLDER, old_launcher
+    )
+    target = espanso / "match" / name
+    target.write_text(rendered, encoding="utf-8")
+    if manifest:
+        entry = deploy.Entry(
+            target=str(target),
+            asset_version="0.18.0",
+            digest=hashlib.sha256(rendered.encode()).hexdigest(),
+            launcher=old_launcher,
+            calls_cli=True,
+        )
+        manifest_file = deploy.Manifest.load()
+        manifest_file.entries[str(target)] = entry
+        manifest_file.save()
+    assert _states(espanso)[name] == deploy.STALE
+    outcome = deploy.apply(_plan(espanso))
+    assert not outcome.kept
+    text = target.read_text("utf-8")
+    assert text.startswith(f"# promptmend {VERSION} (managed; edit at your own risk)\n")
+    assert old_launcher not in text
+    assert LAUNCHER in text
+    assert not list(target.parent.glob(f"{name}.bak-*"))
+
+
 @pytest.mark.parametrize("manifest", [True, False])
 def test_0_18_prompts_core_with_prompt_form_is_replaced(
     monkeypatch: pytest.MonkeyPatch, espanso: Path, manifest: bool
 ) -> None:
-    old = (
-        (MATCH / STATIC)
-        .read_text("utf-8")
-        .replace("matches:\n", "matches:\n" + _PROMPT_FORM_0_18, 1)
+    old = _as_0_18((MATCH / STATIC).read_text("utf-8")).replace(
+        "matches:\n", "matches:\n" + _PROMPT_FORM_0_18, 1
     )
     assert hashlib.sha256(old.encode()).hexdigest() == _CORE_0_18  # v0.18.0's file, exactly
     assert _CORE_0_18 in KNOWN_SOURCES[STATIC]
@@ -1269,9 +1321,7 @@ def _old_release(monkeypatch: pytest.MonkeyPatch, name: str = "prompts-llm.yml")
     return old
 
 
-@pytest.mark.parametrize(
-    "launcher", ["/Users/me/old/prompt-workflow", "C:/Users/me/old/prompt-workflow.exe"]
-)
+@pytest.mark.parametrize("launcher", ["/Users/me/old/promptmend", "C:/Users/me/old/promptmend.exe"])
 def test_older_release_with_another_launcher_is_stale(
     monkeypatch: pytest.MonkeyPatch, espanso: Path, launcher: str
 ) -> None:
@@ -1280,9 +1330,7 @@ def test_older_release_with_another_launcher_is_stale(
     target.write_text(old.replace("__PROMPT_WORKFLOW__", launcher), "utf-8")
     assert _states(espanso)["prompts-llm.yml"] == deploy.STALE
     # ...also behind a stamp an earlier deploy wrote.
-    stamped = "# prompt-workflow 0.1.0 (managed; edit at your own risk)\n" + target.read_text(
-        "utf-8"
-    )
+    stamped = "# promptmend 0.1.0 (managed; edit at your own risk)\n" + target.read_text("utf-8")
     target.write_text(stamped, "utf-8")
     assert _states(espanso)["prompts-llm.yml"] == deploy.STALE
     outcome = deploy.apply(_plan(espanso))
@@ -1292,7 +1340,7 @@ def test_older_release_with_another_launcher_is_stale(
 
 def test_edited_older_release_is_foreign(monkeypatch: pytest.MonkeyPatch, espanso: Path) -> None:
     old = _old_release(monkeypatch)
-    edited = old.replace("__PROMPT_WORKFLOW__", "/x/prompt-workflow") + "# mine\n"
+    edited = old.replace("__PROMPT_WORKFLOW__", "/x/promptmend") + "# mine\n"
     (espanso / "match" / "prompts-llm.yml").write_text(edited, "utf-8")
     assert _states(espanso)["prompts-llm.yml"] == deploy.FOREIGN
 
@@ -1463,7 +1511,7 @@ def test_crlf_file_an_old_windows_script_wrote_is_stale(
     monkeypatch: pytest.MonkeyPatch, espanso: Path
 ) -> None:
     old = _old_release(monkeypatch)
-    rendered = old.replace("__PROMPT_WORKFLOW__", "C:/Users/me/prompt-workflow.exe")
+    rendered = old.replace("__PROMPT_WORKFLOW__", "C:/Users/me/promptmend.exe")
     target = espanso / "match" / "prompts-llm.yml"
     target.write_bytes(rendered.replace("\n", "\r\n").encode("utf-8"))
     assert _states(espanso)["prompts-llm.yml"] == deploy.STALE

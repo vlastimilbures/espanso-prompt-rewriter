@@ -185,7 +185,7 @@ def refuse_in_legacy_mode(what: str) -> None:
         name = config.env_file_var()
         raise CommandError(
             f"{name} is set ({path}), so {what} would not be read; edit that file, "
-            f"or unset {name} and run `prompt-workflow config migrate`"
+            f"or unset {name} and run `promptmend config migrate`"
         )
 
 

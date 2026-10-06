@@ -1,5 +1,5 @@
 # Contributor install: the CLI from this checkout, pinned to uv.lock, then the managed
-# deploy (`prompt-workflow espanso deploy`) writes the match files into Espanso.
+# deploy (`promptmend espanso deploy`) writes the match files into Espanso.
 # -WithConfig is kept only to say it was removed.
 param([switch]$WithConfig)
 
@@ -47,16 +47,16 @@ $ToolBin = (uv tool dir --bin)
 Assert-Exit "uv tool dir --bin"
 $ToolDir = (uv tool dir)
 Assert-Exit "uv tool dir"
-$Cli = Join-Path $ToolBin.Trim() "prompt-workflow.exe"
-$ToolPython = Join-Path $ToolDir.Trim() "espanso-prompt-rewriter\Scripts\python.exe"
+$Cli = Join-Path $ToolBin.Trim() "promptmend.exe"
+$ToolPython = Join-Path $ToolDir.Trim() "promptmend\Scripts\python.exe"
 if (-not (Test-Path $Cli) -or -not (Test-Path $ToolPython)) {
-    Write-Error "Could not locate prompt-workflow. Check 'uv tool install' output."
+    Write-Error "Could not locate promptmend. Check 'uv tool install' output."
     exit 1
 }
 & $ToolPython scripts\check_tool_lock.py --python $ToolPython
 Assert-Exit "lock check"
 
-Write-Host "Settings are read from a .env (copy .env.example to %APPDATA%\prompt-workflow\.env;"
+Write-Host "Settings are read from a .env (copy .env.example to %APPDATA%\promptmend\.env;"
 Write-Host "one in $RepoDir is still read), or the saved config.toml and secrets.toml"
 Write-Host "(see Configuration in README.md). Then test -p- and -i- in any text field."
 # Last, so its result is the final thing printed: it shows the plan, writes the match files
@@ -64,4 +64,4 @@ Write-Host "(see Configuration in README.md). Then test -p- and -i- in any text 
 # edited is kept, never overwritten, and it ends with a WARNING naming each one (exit 0:
 # keeping it is safe).
 & $Cli espanso deploy --yes --launcher $Cli
-Assert-Exit "prompt-workflow espanso deploy"
+Assert-Exit "promptmend espanso deploy"

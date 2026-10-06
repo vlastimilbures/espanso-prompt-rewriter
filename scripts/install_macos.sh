@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Contributor install: the CLI from this checkout, pinned to uv.lock, then the managed
-# deploy (`prompt-workflow espanso deploy`) writes the match files into Espanso.
+# deploy (`promptmend espanso deploy`) writes the match files into Espanso.
 for arg in "$@"; do
   case "$arg" in
     --with-config)
@@ -32,10 +32,10 @@ uv tool install --editable . --force -c "$constraints"
 
 # Ask uv where it installed the tool rather than `command -v`, which would pick up an
 # activated project venv whose binary disappears if .venv is removed.
-cli_path="$(uv tool dir --bin)/prompt-workflow"
-tool_python="$(uv tool dir)/espanso-prompt-rewriter/bin/python"
+cli_path="$(uv tool dir --bin)/promptmend"
+tool_python="$(uv tool dir)/promptmend/bin/python"
 if [ ! -x "$cli_path" ] || [ ! -x "$tool_python" ]; then
-  echo "Could not locate prompt-workflow. Check 'uv tool install' output." >&2
+  echo "Could not locate promptmend. Check 'uv tool install' output." >&2
   exit 1
 fi
 "$tool_python" scripts/check_tool_lock.py --python "$tool_python"
@@ -45,7 +45,7 @@ if [ -f "$repo_dir/.env" ]; then
   chmod 600 "$repo_dir/.env"
 fi
 
-echo "Settings are read from a .env (copy .env.example to ~/.config/prompt-workflow/.env;"
+echo "Settings are read from a .env (copy .env.example to ~/.config/promptmend/.env;"
 echo "one in $repo_dir is still read), or the saved config.toml and secrets.toml"
 echo "(see Configuration in README.md). Then test -p- and -i- in any text field."
 # Last, so its result is the final thing printed: it shows the plan, writes the match files

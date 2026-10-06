@@ -9,15 +9,15 @@ from typing import TYPE_CHECKING, Any
 import httpx
 import pytest
 
-from prompt_workflow.config import Settings
-from prompt_workflow.factory import make_provider
-from prompt_workflow.prompt_builder import PERSONA_TOKEN, render
-from prompt_workflow.providers import base
-from prompt_workflow.providers.anthropic import AnthropicProvider
-from prompt_workflow.providers.base import Provider, ProviderError
-from prompt_workflow.providers.ollama import OllamaProvider
-from prompt_workflow.providers.openai_compatible import OpenAICompatibleProvider
-from prompt_workflow.providers.usage import (
+from promptmend.config import Settings
+from promptmend.factory import make_provider
+from promptmend.prompt_builder import PERSONA_TOKEN, render
+from promptmend.providers import base
+from promptmend.providers.anthropic import AnthropicProvider
+from promptmend.providers.base import Provider, ProviderError
+from promptmend.providers.ollama import OllamaProvider
+from promptmend.providers.openai_compatible import OpenAICompatibleProvider
+from promptmend.providers.usage import (
     AttemptUsage,
     Meter,
     UsageObserver,
@@ -507,7 +507,7 @@ def test_trigger_path_does_not_import_decimal() -> None:
     import subprocess
     import sys
 
-    code = "import sys, prompt_workflow.cli; print('decimal' in sys.modules)"
+    code = "import sys, promptmend.cli; print('decimal' in sys.modules)"
     result = subprocess.run(
         [sys.executable, "-c", code], capture_output=True, text=True, check=True, timeout=60
     )

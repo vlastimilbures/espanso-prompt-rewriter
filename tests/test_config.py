@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from prompt_workflow import config
-from prompt_workflow.config import ConfigLayers, Finding, Settings, env_names, split_model_spec
+from promptmend import config
+from promptmend.config import ConfigLayers, Finding, Settings, env_names, split_model_spec
 
 
 # Settings() reads env vars at instantiation, not at import time.

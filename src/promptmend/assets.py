@@ -1,8 +1,8 @@
 """The Espanso match files, shipped in the wheel as package data.
 
 The repo's `espanso/match/` stays the source of truth; Hatch's force-include copies it to
-`prompt_workflow/espanso/match/` when the wheel is built. An editable install maps only
-`src/prompt_workflow`, so there the files are read from the checkout instead.
+`promptmend/espanso/match/` when the wheel is built. An editable install maps only
+`src/promptmend`, so there the files are read from the checkout instead.
 """
 
 from __future__ import annotations

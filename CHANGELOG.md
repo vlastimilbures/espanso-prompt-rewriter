@@ -6,8 +6,34 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Breaking
+- The project is renamed **PromptMend** (#169): the package (PyPI and wheel) is `promptmend`
+  instead of `espanso-prompt-rewriter`, the command is `promptmend` instead of
+  `prompt-workflow`, and the Python package is `promptmend` instead of `prompt_workflow`.
+  `prompt-workflow` stays installed as a deprecated alias until 1.0.0: the triggers,
+  `--help` and `--version` behave exactly as with `promptmend`, and every other command
+  (and the interface) first prints one stderr line, "`prompt-workflow` is deprecated; use
+  `promptmend` (removed in 1.0.0)". Usage lines name `promptmend` either way, and the
+  interface's header, intro and About show PromptMend.
+- The marker the triggers paste for an error or a note is `[promptmend: …]` (was
+  `[prompt-workflow: …]`): a script that looks for the old prefix must look for the new one.
+- The match labels in Espanso's search bar start with `PromptMend:` (was `prompt-workflow:`),
+  and a deployed file's stamp is `# promptmend <version> (managed; edit at your own risk)`.
+  A file an earlier release deployed, with its `# prompt-workflow` stamp and `prompt-workflow`
+  launcher, still counts as ours (`stale`), so the next deploy replaces it without a
+  conflict. A side-by-side copy is now `<name>.promptmend-new`. The `__PROMPT_WORKFLOW__`
+  placeholder in the packaged match files is unchanged.
+- OpenRouter calls carry `X-Title: promptmend` (was `espanso-prompt-rewriter`; the benchmark
+  sends `promptmend-bench`), so the dashboard lists them under the new name.
+- Upgrade: `uv tool uninstall espanso-prompt-rewriter` (the triggers stop until the deploy),
+  `uv tool install promptmend==<version> -c <the release's constraints.txt>`, then
+  `promptmend espanso deploy` and `promptmend doctor`. `doctor` warns while the deployed
+  matches still call a `prompt-workflow` launcher, and its previous-install check, `setup` and
+  `profiles migrate` still find a checkout from before the rename (its old project name,
+  `src/prompt_workflow/prompts`, a `.venv/bin/prompt-workflow` launcher or uv receipt).
+
 ### Added
-- `prompt-workflow doctor` has a `folders` check (#169): it warns while an old
+- `promptmend doctor` has a `folders` check (#169): it warns while an old
   `prompt-workflow` folder is still in use, or holds entries left behind because the new
   folder has its own.
 - `OPENROUTER_DATA_COLLECTION` (`allow` or `deny`, empty by default) sets OpenRouter's
@@ -18,7 +44,7 @@ All notable changes to this project are documented here. The format follows
   while `OPENROUTER_ALLOW_FALLBACKS=true`, and otherwise the trigger pastes an HTTP error
   marker. README "What is sent, and to whom" and the Configuration table describe it.
 - The release workflow can upload each release's sdist and wheel to PyPI as
-  `espanso-prompt-rewriter`, by trusted publishing (no stored token), once the owner turns it
+  `promptmend`, by trusted publishing (no stored token), once the owner turns it
   on with the repository variable `PYPI_PUBLISH` (#95). The new `pypi` job runs after the
   GitHub Release is published, holds only the OIDC token, and uploads the files the release
   job attested, never a rebuild.
@@ -28,13 +54,13 @@ All notable changes to this project are documented here. The format follows
 - README "Install", "Updating" and "Uninstall" cover each channel: uv from PyPI or from a
   GitHub Release, and Homebrew (the PyPI and Homebrew channels start with 0.19.0), with the
   tap trust note and how to switch channels (#96). Scoop and WinGet are no longer planned.
-- `prompt-workflow espanso status` and the interface's Triggers tab also list every other
+- `promptmend espanso status` and the interface's Triggers tab also list every other
   `.yml`/`.yaml` file in Espanso's `match/` folder, such as Espanso's own `base.yml` or your
   own variants, as `yours`: not managed, never touched by `deploy` or `detach` (#38). Our
   backups, side-by-side copies and subfolders such as `packages/` are not listed; a symlinked
   file is listed and marked as a link. These lines never change the exit code.
 
-- Clipboard output: with `PROMPT_OUTPUT=clipboard` (`prompt-workflow config set PROMPT_OUTPUT
+- Clipboard output: with `PROMPT_OUTPUT=clipboard` (`promptmend config set PROMPT_OUTPUT
   clipboard`, or the interface) the improve triggers put the rewrite on the clipboard and paste
   nothing, so the trigger just vanishes and you paste when ready; switching windows during a
   long wait no longer sends the paste elsewhere. Error markers, the `-iok-` "sent despite" note
@@ -43,20 +69,20 @@ All notable changes to this project are documented here. The format follows
   "Clipboard output" (#134, #23).
 - The interface opens with a short intro: an ASCII wordmark (text only on a terminal of 70
   columns or fewer), the name, version and a tagline (#112). It closes after 0.8 s or on any
-  key or click, and that key does nothing else. `prompt-workflow ui --no-intro`, or the new
+  key or click, and that key does nothing else. `promptmend ui --no-intro`, or the new
   setting `PROMPT_UI_INTRO=false` (default `true`; the triggers ignore it), skips it. When an
   earlier checkout install is found, its screen opens once the intro has closed.
 - `a` in the interface opens an About screen: version, install channel, Python and Textual
   versions, the settings and history folders, licence and repository (#112).
 - The interface teaches its headless commands (#111). Each button's tooltip shows the command
   that does the same in a terminal; each result of a change starts with the command it was
-  (`$ prompt-workflow config set PROMPT_TIMEOUT_SECONDS 45`, a value that looks like a key
+  (`$ promptmend config set PROMPT_TIMEOUT_SECONDS 45`, a value that looks like a key
   shown as `<value withheld>`); and Home lists this session's commands, or six recipes such
-  as `prompt-workflow espanso status --diff` before there are any. A test parses every one
+  as `promptmend espanso status --diff` before there are any. A test parses every one
   of these commands against the CLI.
 
 ### Fixed
-- `prompt-workflow espanso deploy` finds Homebrew's stable `bin/` launcher also when Python
+- `promptmend espanso deploy` finds Homebrew's stable `bin/` launcher also when Python
   reports the formula's virtualenv through Homebrew's `opt/<formula>` link rather than its
   Cellar path; before, it fell back to the running script, labelled `script` instead of
   `homebrew` (#95).
@@ -86,8 +112,8 @@ All notable changes to this project are documented here. The format follows
 - Interface: the intro no longer closes by itself after 0.8 s; it stays until you press
   Enter, Escape or any other key, or click, and that key does nothing else (#173). A muted
   line under it says so and names the command that turns it off:
-  `prompt-workflow config set PROMPT_UI_INTRO false`. `ui --no-intro` still skips it once.
-- README "CLI" documents the `[prompt-workflow: …]` marker as the stable way for a script to
+  `promptmend config set PROMPT_UI_INTRO false`. `ui --no-intro` still skips it once.
+- README "CLI" documents the `[promptmend: …]` marker as the stable way for a script to
   tell a failed `improve` run from a rewrite, since the exit code is always 0 (#32).
 - The `default` prompt's two examples now open `CONTEXT` with your `PROMPT_PERSONA` (a new
   `{{PERSONA_OPENING}}` token, filled like `{{PERSONA_RULE}}`; without a persona they read as
@@ -126,7 +152,7 @@ All notable changes to this project are documented here. The format follows
 - The static `-prompt-` form ("Act as {{role}}", objective, context, constraints, output) in
   `prompts-core.yml` (#38). `-p-` already gives the golden CONTEXT…OUTPUTS template to fill
   in. `prompts-core.yml` now holds only `-risk-`. Your deployed copy shows as `stale` until you
-  run `prompt-workflow espanso deploy`, which updates it like any unedited file (no conflict
+  run `promptmend espanso deploy`, which updates it like any unedited file (no conflict
   question, no backup).
 - The interface's Home tab is redesigned (#112). A headline names the most urgent problem
   and the tab that fixes it ("Almost ready: one match file was edited since the last deploy.

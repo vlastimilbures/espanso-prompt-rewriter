@@ -2,7 +2,7 @@
 settings, the provider, the gate, the HTTP call and the output path are all exercised without
 a paid call or a key leaving the machine.
 
-A child process runs `python -m prompt_workflow.cli improve --provider <name> ...` (the same
+A child process runs `python -m promptmend.cli improve --provider <name> ...` (the same
 code a trigger runs) with every provider base URL pointed at the stub and a placeholder key
 in place of the real one, set as environment variables, which outrank every settings file.
 The usage history is switched off the same way: a health check is not usage (#116).
@@ -21,8 +21,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 # What the stub answers, and so what improve must print.
-REPLY = "prompt-workflow setup check: ok"
-DRAFT = "Check that prompt-workflow can rewrite a draft end to end."
+REPLY = "promptmend setup check: ok"
+DRAFT = "Check that promptmend can rewrite a draft end to end."
 # Sent instead of the real key, which never reaches even the stub.
 PLACEHOLDER_KEY = "setup-check-placeholder"
 TIMEOUT = 60
@@ -105,7 +105,7 @@ def run(provider: str, *, runner: Runner | None = None) -> SmokeResult:
             # The working directory stays off sys.path: a planted module never runs.
             "-P",
             "-m",
-            "prompt_workflow.cli",
+            "promptmend.cli",
             "improve",
             "--provider",
             provider,

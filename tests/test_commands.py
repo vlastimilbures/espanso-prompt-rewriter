@@ -19,17 +19,17 @@ import pytest
 from typer._click.core import Command, Context, Parameter
 from typer.testing import CliRunner, Result
 
-from prompt_workflow import __version__, assets, config, deploy, doctor, history, smoke
-from prompt_workflow.cli import app
-from prompt_workflow.commands import common
-from prompt_workflow.config import secret_names
-from prompt_workflow.history import HistoryStore
+from promptmend import __version__, assets, config, deploy, doctor, history, smoke
+from promptmend.cli import app
+from promptmend.commands import common
+from promptmend.config import secret_names
+from promptmend.history import HistoryStore
 
 if TYPE_CHECKING:
     from conftest import SeedHistory
 
 runner = CliRunner()
-LAUNCHER = "/Users/me/.local/bin/prompt-workflow"
+LAUNCHER = "/Users/me/.local/bin/promptmend"
 # Built at runtime, so no key-shaped literal lands in the repo (gitleaks).
 KEY = "sk-or-v1-" + "ab12" * 16
 PERSONA = "I am the sentinel persona of Example Corp."
@@ -78,7 +78,7 @@ def tty(monkeypatch: pytest.MonkeyPatch) -> None:
 def clipboard(monkeypatch: pytest.MonkeyPatch) -> str:
     import pyperclip
 
-    from prompt_workflow import clipboard_guard
+    from promptmend import clipboard_guard
 
     text = "clipboard sentinel text 42"
     monkeypatch.setattr(pyperclip, "paste", lambda: text)
@@ -164,7 +164,7 @@ def test_no_color(
 
 
 def config_store_secret(directory: Path, value: str = KEY) -> None:
-    from prompt_workflow import config_store
+    from promptmend import config_store
 
     config_store.save_secret("OPENROUTER_API_KEY", value)
     assert (directory / "secrets.toml").is_file()
@@ -516,7 +516,7 @@ def _old_checkout(near: Path) -> str:
     """An earlier checkout with a .env holding a key, for the --from/--migrate-from walks."""
     root = near.parent / "old-checkout"
     root.mkdir(exist_ok=True)
-    (root / "pyproject.toml").write_text('[project]\nname = "espanso-prompt-rewriter"\n', "utf-8")
+    (root / "pyproject.toml").write_text('[project]\nname = "promptmend"\n', "utf-8")
     (root / ".env").write_text(f"OLLAMA_MODEL=old\nOPENROUTER_API_KEY={KEY}\n", "utf-8")
     return str(root)
 
@@ -781,7 +781,7 @@ def test_doctor_clipboard_reports_the_length_only(
 def test_doctor_never_reads_a_concealed_clipboard(monkeypatch: pytest.MonkeyPatch) -> None:
     import pyperclip
 
-    from prompt_workflow import clipboard_guard
+    from promptmend import clipboard_guard
 
     monkeypatch.setattr(clipboard_guard, "is_concealed", lambda: True)
     monkeypatch.setattr(pyperclip, "paste", lambda: pytest.fail("read a concealed item"))
@@ -794,7 +794,7 @@ def test_doctor_launcher_drift_and_missing(
 ) -> None:
     monkeypatch.setattr(deploy, "run_command", FakeRunner())
     deploy.apply(deploy.plan(espanso, LAUNCHER, deploy.Manifest.load()))
-    exe = tmp_path / "bin" / "prompt-workflow"
+    exe = tmp_path / "bin" / "promptmend"
     exe.parent.mkdir()
     exe.write_text("", "utf-8")
     data = json.loads(
@@ -917,7 +917,7 @@ def test_profiles_list(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_profiles_migrate(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, tty: None) -> None:
-    from prompt_workflow import profiles
+    from promptmend import profiles
 
     checkout = tmp_path / "checkout"
     source = checkout / profiles.PROMPTS_PATH
@@ -1173,7 +1173,7 @@ def test_stdin_at_a_terminal_asks_hidden(
 def test_stdin_drops_a_byte_order_mark(saved: Path) -> None:
     result = _run("secrets", "set", "OPENROUTER_API_KEY", "--stdin", input=f"\ufeff{KEY}\r\n")
     assert result.exit_code == 0, result.output
-    from prompt_workflow import config_store
+    from promptmend import config_store
 
     assert config_store.saved_secret_names() == ("OPENROUTER_API_KEY",)
     assert f'"{KEY}"' in (saved / "secrets.toml").read_text("utf-8")
@@ -1427,7 +1427,7 @@ def test_stats_shows_estimated_unknown_and_local_costs(
     assert "1 attempt(s) with an unknown cost" in out
     estimated: dict[str, Any] = {"estimated": {"USD": Decimal("0.5")}, "reported": {}}
     row = history.StatsRow("x", 1, 1, "2026-10-05T00:00:00.000000Z", None, None, {}, **estimated)
-    from prompt_workflow.commands import usage
+    from promptmend.commands import usage
 
     assert "estimated 0.5 USD" in " ".join(usage._row_text(row))
 
@@ -1438,7 +1438,7 @@ def test_stats_when_history_is_off(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_an_unexpected_error_is_one_line(monkeypatch: pytest.MonkeyPatch) -> None:
-    from prompt_workflow.commands import usage
+    from promptmend.commands import usage
 
     def broken(settings: Any) -> None:
         raise RuntimeError("kaput")
@@ -1512,7 +1512,7 @@ def test_secrets_remove_says_where_a_key_still_comes_from(
 def test_profiles_migrate_nothing_changed_and_default(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from prompt_workflow import profiles
+    from promptmend import profiles
 
     checkout = tmp_path / "checkout"
     source = checkout / profiles.PROMPTS_PATH

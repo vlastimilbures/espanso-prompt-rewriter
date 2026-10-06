@@ -1,8 +1,8 @@
 import pytest
 
-from prompt_workflow.gate import GatedProvider
-from prompt_workflow.providers.base import ProviderError
-from prompt_workflow.redaction import compile_extra
+from promptmend.gate import GatedProvider
+from promptmend.providers.base import ProviderError
+from promptmend.redaction import compile_extra
 
 
 class _Stub:

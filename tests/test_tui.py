@@ -20,15 +20,15 @@ import pytest
 from textual.pilot import Pilot
 from textual.widgets import Button, Input, Select, Static
 
-from prompt_workflow import config, config_store, deploy, doctor, history, smoke
-from prompt_workflow import profiles as profile_service
-from prompt_workflow.history import HistoryStore
-from prompt_workflow.tui import panes
-from prompt_workflow.tui.app import HIGH_CONTRAST, ManageApp
-from prompt_workflow.tui.home import pill
-from prompt_workflow.tui.modals import ConfirmModal, FormModal, TextModal
-from prompt_workflow.tui.previous import PreviousInstallScreen
-from prompt_workflow.tui.state import State, gather
+from promptmend import config, config_store, deploy, doctor, history, smoke
+from promptmend import profiles as profile_service
+from promptmend.history import HistoryStore
+from promptmend.tui import panes
+from promptmend.tui.app import HIGH_CONTRAST, ManageApp
+from promptmend.tui.home import pill
+from promptmend.tui.modals import ConfirmModal, FormModal, TextModal
+from promptmend.tui.previous import PreviousInstallScreen
+from promptmend.tui.state import State, gather
 
 if TYPE_CHECKING:
     from conftest import SeedHistory
@@ -66,7 +66,7 @@ def espanso(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FakeRunner:
         }
     )
     monkeypatch.setattr(deploy, "run_command", fake)
-    launcher = tmp_path / "bin" / "prompt-workflow"
+    launcher = tmp_path / "bin" / "promptmend"
     launcher.parent.mkdir()
     launcher.write_text("", encoding="utf-8")
     monkeypatch.setattr(deploy, "resolve_launcher", lambda **_: deploy.Launcher(launcher, "uv"))
@@ -219,7 +219,7 @@ def test_header_shows_the_name_and_installed_version(
     """#112: the header names the tool and its version on every screen."""
     from textual.widgets._header import HeaderTitle
 
-    from prompt_workflow.tui import app as app_module
+    from promptmend.tui import app as app_module
 
     monkeypatch.setattr(app_module, "__version__", "9.8.7")
     seen = []
@@ -235,7 +235,7 @@ def test_header_shows_the_name_and_installed_version(
     # Then the status pill (#112), first so a narrow terminal cuts the tagline, not the status
     # (#174): the espanso fixture leaves the key unset, a problem.
     assert "problem" in seen[-1]
-    assert seen[:2] == [f"prompt-workflow 9.8.7 — {seen[-1]} · set up and manage"] * 2
+    assert seen[:2] == [f"PromptMend 9.8.7 — {seen[-1]} · set up and manage"] * 2
 
 
 def test_a_failing_load_is_shown_not_raised(espanso: FakeRunner) -> None:
@@ -608,7 +608,7 @@ def test_providers_test_call_adds_no_history_row(
 
 
 def _user_profile(name: str = "mine") -> Path:
-    from prompt_workflow.prompt_builder import user_profiles_dir
+    from promptmend.prompt_builder import user_profiles_dir
 
     folder = user_profiles_dir()
     folder.mkdir(parents=True, exist_ok=True)
@@ -699,11 +699,11 @@ def test_profiles_migrate_copies_after_confirming(
         assert pane(app, "profiles").last_message == (
             "extra: copied\ngeneral: copied\nYour general.md replaces the built-in only once "
             "PROMPT_PROFILE_OVERRIDES lists it: "
-            "`prompt-workflow config set PROMPT_PROFILE_OVERRIDES general`."
+            "`promptmend config set PROMPT_PROFILE_OVERRIDES general`."
         )
 
     drive(scenario)
-    from prompt_workflow.prompt_builder import user_profiles_dir
+    from promptmend.prompt_builder import user_profiles_dir
 
     assert sorted(p.name for p in user_profiles_dir().iterdir()) == ["extra.md", "general.md"]
 
@@ -779,7 +779,7 @@ def test_profiles_migrate_without_a_checkout(espanso: FakeRunner) -> None:
     async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
         await pilot.press("3")
         await press(app, pilot, "#migrate-profiles")
-        assert "no src/prompt_workflow/prompts" in pane(app, "profiles").last_message
+        assert "no src/promptmend/prompts" in pane(app, "profiles").last_message
 
     drive(scenario)
 
@@ -923,7 +923,7 @@ def test_triggers_report_failures(espanso: FakeRunner, monkeypatch: pytest.Monke
 
 def test_triggers_deploy_retires_the_legacy_file(espanso: FakeRunner) -> None:
     legacy = espanso.root / "match" / "base.yml"
-    legacy.write_text('matches:\n  - trigger: "-p-"  # prompt-workflow\n', encoding="utf-8")
+    legacy.write_text('matches:\n  - trigger: "-p-"  # promptmend\n', encoding="utf-8")
 
     async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
         await pilot.press("4")
@@ -940,7 +940,7 @@ def test_triggers_without_a_launcher(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(deploy, "run_command", lambda argv: None)
 
     def no_launcher(**_: Any) -> None:
-        raise deploy.DeployError("Could not find a stable prompt-workflow launcher")
+        raise deploy.DeployError("Could not find a stable promptmend launcher")
 
     monkeypatch.setattr(deploy, "resolve_launcher", no_launcher)
 
@@ -1125,7 +1125,7 @@ def test_files_under_home_show_as_tilde(
 
 
 def test_short_label_only_shortens_files_under_home(monkeypatch: pytest.MonkeyPatch) -> None:
-    from prompt_workflow.commands import common
+    from promptmend.commands import common
 
     home = Path.home()
     assert common.short_label(f"file:{home / 'a' / 'b.toml'}") == "~/a/b.toml"
@@ -1166,8 +1166,8 @@ def test_import_check_reports_failures(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_routes_classify_each_provider() -> None:
-    from prompt_workflow.config import Settings
-    from prompt_workflow.factory import routes
+    from promptmend.config import Settings
+    from promptmend.factory import routes
 
     cfg = Settings(ollama_model="gpt-oss:120b-cloud", local_only=True)
     found = {r.name: r for r in routes(cfg)}
@@ -1180,7 +1180,7 @@ def test_routes_classify_each_provider() -> None:
 def test_triggers_match_the_match_files() -> None:
     import yaml
 
-    from prompt_workflow import assets
+    from promptmend import assets
 
     found = {t.trigger: t for t in assets.triggers()}
     match_dir = Path(__file__).parents[1] / "espanso" / "match"
@@ -1202,7 +1202,7 @@ def test_triggers_match_the_match_files() -> None:
 @pytest.fixture
 def terminal(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """Make stdin and stdout read as terminals, each switchable, and record each launch."""
-    from prompt_workflow.commands import common
+    from promptmend.commands import common
 
     state: dict[str, Any] = {"stdin": True, "stdout": True, "launched": 0, "code": None}
     monkeypatch.setattr(common, "stdin_is_tty", lambda: state["stdin"])
@@ -1220,7 +1220,7 @@ def terminal(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 def _invoke(*args: str) -> Result:
     from typer.testing import CliRunner
 
-    from prompt_workflow.cli import app
+    from promptmend.cli import app
 
     return CliRunner().invoke(app, list(args))
 
@@ -1233,7 +1233,7 @@ def _words(text: str) -> str:
     """Help text without colour, box drawing, the program name or line wrapping, which
     differ by terminal width, CI and OS."""
     text = re.sub(r"\x1b\[[0-9;]*m", "", text)
-    text = re.sub(r"Usage: .*? \[OPTIONS\]", "Usage: prompt-workflow [OPTIONS]", text)
+    text = re.sub(r"Usage: .*? \[OPTIONS\]", "Usage: promptmend [OPTIONS]", text)
     # Every box-drawing character: Windows draws square corners where macOS draws round ones.
     return " ".join(re.sub(r"[\u2500-\u257f|+]", " ", text).split())
 
@@ -1284,7 +1284,7 @@ def test_terminal_opens_the_interface_and_exits_with_its_code(
 
 
 def test_ui_without_a_terminal_exits_3(terminal: dict[str, Any]) -> None:
-    from prompt_workflow.commands.common import NEEDS_TERMINAL
+    from promptmend.commands.common import NEEDS_TERMINAL
 
     terminal["stdout"] = False
     result = _invoke("ui")
@@ -1304,7 +1304,7 @@ def test_bare_command_in_a_real_process(tmp_path: Path) -> None:
 
     def run(*args: str) -> subprocess.CompletedProcess[bytes]:
         return subprocess.run(
-            [sys.executable, "-m", "prompt_workflow.cli", *args],
+            [sys.executable, "-m", "promptmend.cli", *args],
             capture_output=True,
             stdin=subprocess.DEVNULL,
             env=env,
@@ -1515,7 +1515,7 @@ def test_children_ignore_modules_planted_in_the_working_directory(
 def test_builtin_profiles_load_in_a_fixed_order(monkeypatch: pytest.MonkeyPatch) -> None:
     # The Linux snapshot listed `general` before `default`: a directory's order is the file
     # system's, so the loader sorts.
-    from prompt_workflow import prompt_builder
+    from promptmend import prompt_builder
 
     class Entry:
         def __init__(self, name: str) -> None:
@@ -1538,7 +1538,7 @@ def test_builtin_profiles_load_in_a_fixed_order(monkeypatch: pytest.MonkeyPatch)
 def _old_checkout(tmp_path: Path, espanso: FakeRunner) -> Path:
     """A checkout an editable install ran from: a .env with one setting and the key, an
     edited profile, and the match files rendered with its .venv launcher."""
-    from prompt_workflow import assets, previous_install
+    from promptmend import assets, previous_install
 
     root = tmp_path / "Projects" / "epr"
     (root / profile_service.PROMPTS_PATH).mkdir(parents=True)
@@ -1547,9 +1547,9 @@ def _old_checkout(tmp_path: Path, espanso: FakeRunner) -> Path:
     (root / ".env").write_text(f"PROMPT_TIMEOUT_SECONDS=45\nOPENROUTER_API_KEY={KEY}\n", "utf-8")
     (root / profile_service.PROMPTS_PATH / "mine.md").write_text("Mine.\n", "utf-8")
     if os.name == "nt":
-        launcher = (root / ".venv" / "Scripts" / "prompt-workflow.exe").as_posix()
+        launcher = (root / ".venv" / "Scripts" / "promptmend.exe").as_posix()
     else:
-        launcher = str(root / ".venv" / "bin" / "prompt-workflow")
+        launcher = str(root / ".venv" / "bin" / "promptmend")
     for match in assets.match_names():
         text = assets.read_match(match).replace(deploy.PLACEHOLDER, launcher)
         (espanso.root / "match" / match).write_bytes(text.encode("utf-8"))
@@ -1574,7 +1574,7 @@ def _disabled(app: ManageApp, step: str) -> bool:
 
 
 def test_previous_install_walks_copy_deploy_retire(previous: Path) -> None:
-    from prompt_workflow.tui.previous import PreviousInstallScreen
+    from promptmend.tui.previous import PreviousInstallScreen
 
     root = previous.resolve()
 
@@ -1603,7 +1603,7 @@ def test_previous_install_walks_copy_deploy_retire(previous: Path) -> None:
 
     drive(scenario)
     assert not (previous / ".env").exists()
-    from prompt_workflow.config import Settings
+    from promptmend.config import Settings
 
     settings = Settings.load()
     assert settings.timeout == 45
@@ -1635,8 +1635,8 @@ def test_previous_install_cancel_writes_nothing_and_deploy_warns(previous: Path)
 
 
 def test_previous_install_shown_once_skip_and_home_reopens(previous: Path) -> None:
-    from prompt_workflow import previous_install
-    from prompt_workflow.tui.previous import PreviousInstallScreen
+    from promptmend import previous_install
+    from promptmend.tui.previous import PreviousInstallScreen
 
     async def first(app: ManageApp, pilot: Pilot[int]) -> None:
         assert isinstance(app.screen, PreviousInstallScreen)
@@ -1664,7 +1664,7 @@ def test_previous_install_shown_once_skip_and_home_reopens(previous: Path) -> No
 def test_previous_install_entered_path(
     saved: Path, espanso: FakeRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from prompt_workflow.tui.previous import PreviousInstallScreen
+    from promptmend.tui.previous import PreviousInstallScreen
 
     monkeypatch.setattr(shutil, "which", lambda *a, **k: None)
     root = _old_checkout(tmp_path, espanso)
@@ -1705,7 +1705,7 @@ def test_previous_install_profiles_tab_uses_the_detected_root(
 def test_previous_install_detect_failure_is_shown(
     espanso: FakeRunner, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from prompt_workflow import previous_install
+    from promptmend import previous_install
 
     def broken(*args: Any, **kwargs: Any) -> None:
         raise OSError("no access")
@@ -1777,7 +1777,7 @@ def test_previous_install_entered_path_that_is_no_checkout(
 
 
 def test_intro_stays_until_a_key(espanso: FakeRunner) -> None:
-    from prompt_workflow.tui.intro import INTRO_HINT, IntroScreen
+    from promptmend.tui.intro import INTRO_HINT, IntroScreen
 
     async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
         assert isinstance(app.screen, IntroScreen)
@@ -1786,7 +1786,7 @@ def test_intro_stays_until_a_key(espanso: FakeRunner) -> None:
         assert isinstance(app.screen, IntroScreen)
         shown = str(app.screen.query_one("#intro").render())
         assert INTRO_HINT in shown
-        assert "prompt-workflow config set PROMPT_UI_INTRO false" in shown
+        assert "promptmend config set PROMPT_UI_INTRO false" in shown
 
     drive(scenario, intro=True)
 
@@ -1797,7 +1797,7 @@ def test_intro_closes_on_enter_escape_or_any_key_and_nothing_else(
 ) -> None:
     from textual.widgets import TabbedContent
 
-    from prompt_workflow.tui.intro import IntroScreen
+    from promptmend.tui.intro import IntroScreen
 
     async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
         assert isinstance(app.screen, IntroScreen)
@@ -1813,12 +1813,12 @@ def test_intro_closes_on_enter_escape_or_any_key_and_nothing_else(
 def test_intro_any_key_closes_it_and_is_consumed(espanso: FakeRunner) -> None:
     from textual.widgets import TabbedContent
 
-    from prompt_workflow.tui.intro import IntroScreen
+    from promptmend.tui.intro import IntroScreen
 
     async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
         intro = app.screen
         assert isinstance(intro, IntroScreen)
-        assert "prompt-workflow" in str(intro.query_one("#intro").render())
+        assert "promptmend" in str(intro.query_one("#intro").render())
         await pilot.press("q")  # closes the intro, does not quit
         await settle(pilot)
         assert not isinstance(app.screen, IntroScreen)
@@ -1832,7 +1832,7 @@ def test_intro_any_key_closes_it_and_is_consumed(espanso: FakeRunner) -> None:
 
 
 def test_intro_click_closes_it(espanso: FakeRunner) -> None:
-    from prompt_workflow.tui.intro import IntroScreen
+    from promptmend.tui.intro import IntroScreen
 
     async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
         assert isinstance(app.screen, IntroScreen)
@@ -1857,8 +1857,8 @@ def test_intro_digit_does_not_switch_tabs(espanso: FakeRunner) -> None:
 
 
 def test_previous_install_offer_waits_for_the_intro(previous: Path) -> None:
-    from prompt_workflow.tui.intro import IntroScreen
-    from prompt_workflow.tui.previous import PreviousInstallScreen
+    from promptmend.tui.intro import IntroScreen
+    from promptmend.tui.previous import PreviousInstallScreen
 
     async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
         assert app.state is not None
@@ -1875,10 +1875,10 @@ def test_previous_install_offer_waits_for_the_intro(previous: Path) -> None:
 def test_about_lists_version_runtime_and_folders(
     espanso: FakeRunner, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from prompt_workflow import config_store
-    from prompt_workflow.tui import app as app_module
-    from prompt_workflow.tui import brand
-    from prompt_workflow.tui.intro import AboutScreen
+    from promptmend import config_store
+    from promptmend.tui import app as app_module
+    from promptmend.tui import brand
+    from promptmend.tui.intro import AboutScreen
 
     monkeypatch.setattr(app_module, "__version__", "9.8.7")
 
@@ -1909,7 +1909,7 @@ def test_about_lists_version_runtime_and_folders(
 
 
 def test_about_before_the_state_is_read(espanso: FakeRunner) -> None:
-    from prompt_workflow.tui.intro import AboutScreen
+    from promptmend.tui.intro import AboutScreen
 
     def broken(group_by: str) -> State:
         raise RuntimeError("boom")
@@ -1957,7 +1957,7 @@ def test_ui_intro_setting_is_strict(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_brand_is_ascii_and_narrow_terminals_get_text_only() -> None:
-    from prompt_workflow.tui import brand
+    from promptmend.tui import brand
 
     wide, narrow = brand.splash(110, "1.2.3"), brand.splash(70, "1.2.3")
     assert wide.isascii()
@@ -1972,8 +1972,8 @@ def test_brand_is_ascii_and_narrow_terminals_get_text_only() -> None:
 
 
 def test_every_button_has_its_command_as_tooltip(previous: Path) -> None:
-    from prompt_workflow.tui import teach
-    from prompt_workflow.tui.previous import PreviousInstallScreen
+    from promptmend.tui import teach
+    from promptmend.tui.previous import PreviousInstallScreen
 
     seen: dict[str, object] = {}
 
@@ -1987,7 +1987,7 @@ def test_every_button_has_its_command_as_tooltip(previous: Path) -> None:
     known = set(teach.BUTTONS) | set(teach.NO_COMMAND)
     assert set(seen) - known == set(), "give the new button a command in tui/teach.py"
     assert {i: teach.tooltip(i) for i in seen} == seen
-    assert seen["deploy"] == "In a terminal:\n$ prompt-workflow espanso deploy"
+    assert seen["deploy"] == "In a terminal:\n$ promptmend espanso deploy"
 
 
 def test_results_show_their_command_and_home_keeps_the_session(
@@ -1997,12 +1997,12 @@ def test_results_show_their_command_and_home_keeps_the_session(
         home = pane(app, "home")
         before = _rendered(home, "#home-session")
         assert "In a terminal, try:" in before
-        assert "$ prompt-workflow config show" in before
+        assert "$ promptmend config show" in before
         await pilot.press("2")
         await press(app, pilot, "#set-setting")
         await fill(app, pilot, setting_name="PROMPT_TIMEOUT_SECONDS", setting_value="45")
         result = _rendered(pane(app, "providers"), ".result")
-        assert result.startswith("$ prompt-workflow config set PROMPT_TIMEOUT_SECONDS 45\n")
+        assert result.startswith("$ promptmend config set PROMPT_TIMEOUT_SECONDS 45\n")
         # A value that looks like a key is never shown, even refused.
         await press(app, pilot, "#set-setting")
         await fill(app, pilot, setting_name="PROMPT_PROFILE", setting_value=KEY)
@@ -2012,11 +2012,11 @@ def test_results_show_their_command_and_home_keeps_the_session(
         await pilot.press("1")
         session = _rendered(home, "#home-session")
         assert "This session, as commands:" in session
-        assert "$ prompt-workflow config set PROMPT_TIMEOUT_SECONDS 45" in session
-        assert "$ prompt-workflow config set PROMPT_PROFILE '<value withheld>'" not in session
-        assert "$ prompt-workflow config set PROMPT_PROFILE <value withheld>" in session
+        assert "$ promptmend config set PROMPT_TIMEOUT_SECONDS 45" in session
+        assert "$ promptmend config set PROMPT_PROFILE '<value withheld>'" not in session
+        assert "$ promptmend config set PROMPT_PROFILE <value withheld>" in session
         assert "    error: " in session
-        assert "$ prompt-workflow history reset" in session
+        assert "$ promptmend history reset" in session
         assert KEY not in session
         assert [e.command.split()[1:3] for e in app.session] == [
             ["config", "set"],
@@ -2028,12 +2028,12 @@ def test_results_show_their_command_and_home_keeps_the_session(
 
 
 def test_session_log_keeps_the_latest(espanso: FakeRunner) -> None:
-    from prompt_workflow.tui import panes as panes_module
-    from prompt_workflow.tui import teach
+    from promptmend.tui import panes as panes_module
+    from promptmend.tui import teach
 
-    entries = [teach.Entry(f"prompt-workflow doctor {n}", f"done {n}") for n in range(9)]
+    entries = [teach.Entry(f"promptmend doctor {n}", f"done {n}") for n in range(9)]
     text = panes_module.session_text(entries).plain
     assert "doctor 2\n" not in text
-    assert text.count("$ prompt-workflow doctor") == panes_module.SESSION_LINES
+    assert text.count("$ promptmend doctor") == panes_module.SESSION_LINES
     failed = panes_module.session_text([teach.Entry("c", "boom", error=True)]).plain
     assert "    error: boom" in failed

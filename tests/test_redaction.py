@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from prompt_workflow.redaction import compile_extra, is_bare_token, safe_repr, scan, scan_draft
+from promptmend.redaction import compile_extra, is_bare_token, safe_repr, scan, scan_draft
 
 
 # scan() flags a Luhn-valid payment card number.
@@ -183,7 +183,7 @@ def test_builtin_patterns_have_no_unbounded_repeat() -> None:
     import re._constants as sre
     import re._parser as parser
 
-    from prompt_workflow.redaction import _PATTERNS
+    from promptmend.redaction import _PATTERNS
 
     def unbounded(items: Iterable[tuple[Any, Any]]) -> bool:
         for op, av in items:
@@ -800,8 +800,8 @@ def test_email_without_password_is_soft(text: str) -> None:
 # safe_repr() and redact_words() also describe a value that matches one of the user's
 # PROMPT_EXTRA_PATTERNS once settings have loaded them (#32).
 def test_safe_repr_honours_user_patterns(monkeypatch: pytest.MonkeyPatch) -> None:
-    from prompt_workflow import redaction
-    from prompt_workflow.config import Settings
+    from promptmend import redaction
+    from promptmend.config import Settings
 
     assert safe_repr("PRJ-12345") == "'PRJ-12345'"
     monkeypatch.setenv("PROMPT_EXTRA_PATTERNS", r"PRJ-\d+")

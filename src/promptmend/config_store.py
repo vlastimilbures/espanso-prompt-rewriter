@@ -317,8 +317,7 @@ def _checkout_env(source: Path) -> Path:
         )
     if previous_install.is_running_checkout(root):
         raise MigrationError(
-            f"{root} is this install's own checkout; `prompt-workflow config migrate` moves its "
-            ".env"
+            f"{root} is this install's own checkout; `promptmend config migrate` moves its .env"
         )
     path = root / ".env"
     if not config_files.is_file(path):
@@ -696,7 +695,7 @@ class RollbackPlan:
             f"This install does not read {root / '.env'}: the settings copied from it are "
             "gone, and the match files still call this install. To use that checkout again, "
             "run its install script; to copy again, "
-            f"`prompt-workflow config migrate --from {root}`."
+            f"`promptmend config migrate --from {root}`."
             for root in self.unread
         )
         return lines
@@ -791,7 +790,7 @@ class RetirePlan:
     def describe(self) -> list[str]:
         return [
             f"{self.env_file}: moved to {self.target} (a rename, never a delete; "
-            "`prompt-workflow config rollback` puts it back)",
+            "`promptmend config rollback` puts it back)",
             f"A CLI run from {self.env_file.parent} then has its defaults and no key.",
         ]
 
@@ -858,7 +857,7 @@ def plan_retire(
         )
     directory = config_dir(env)
     root = previous_install.resolved(source.expanduser())
-    first = f"copy its settings first: `prompt-workflow config migrate --from {root}`"
+    first = f"copy its settings first: `promptmend config migrate --from {root}`"
     if not config_files.is_file(_marker(directory)):
         raise MigrationError(f"nothing was copied from {root}; {first}")
     record, data = _read_marker(directory)
@@ -880,7 +879,7 @@ def plan_retire(
     if inside:
         raise MigrationError(
             f"the match files still run {', '.join(inside)}; deploy them first "
-            "(`prompt-workflow espanso deploy`), so those triggers keep their settings"
+            "(`promptmend espanso deploy`), so those triggers keep their settings"
         )
     target = Path(record["backup"]) / f"{index}-checkout.env.inactive"
     token = _token("retire", config_files.digest(data), str(env_file), digest, str(target))

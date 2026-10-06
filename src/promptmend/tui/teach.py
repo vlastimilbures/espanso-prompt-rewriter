@@ -1,5 +1,5 @@
 """What each action of the interface is in a terminal (#111, stage 1): every button's tooltip
-names its headless command, every result shows the command it was (`$ prompt-workflow …`),
+names its headless command, every result shows the command it was (`$ promptmend …`),
 and Home keeps this session's commands, or a few recipes before there are any. No Textual
 here: `tests/test_tui_teach.py` parses every command below against the CLI, so a renamed
 command or option cannot leave them behind."""
@@ -10,7 +10,7 @@ import re
 import shlex
 from dataclasses import dataclass
 
-PROGRAM = "prompt-workflow"
+PROGRAM = "promptmend"
 # A placeholder for what the person picks in the dialog (<NAME>, <FILE>): shown as is.
 PLACEHOLDER = re.compile(r"<[A-Z][A-Z_]*>")
 WITHHELD = "<value withheld>"

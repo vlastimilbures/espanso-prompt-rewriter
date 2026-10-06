@@ -15,7 +15,7 @@ from .redaction import compile_extra, safe_repr
 
 PROVIDER_NAMES = ("ollama", "lmstudio", "openrouter", "anthropic")
 # Sent as OpenRouter's X-Title so calls are attributed to this app in its dashboard.
-APP_TITLE = "espanso-prompt-rewriter"
+APP_TITLE = "promptmend"
 
 
 def openrouter_routing(

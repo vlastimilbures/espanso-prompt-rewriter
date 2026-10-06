@@ -14,10 +14,10 @@ import pyperclip
 import pytest
 from typer.testing import CliRunner
 
-from prompt_workflow import history, recorder
-from prompt_workflow.cli import app
-from prompt_workflow.history import HistoryStore
-from prompt_workflow.providers.usage import AttemptUsage
+from promptmend import history, recorder
+from promptmend.cli import app
+from promptmend.history import HistoryStore
+from promptmend.providers.usage import AttemptUsage
 
 if TYPE_CHECKING:
     from conftest import FakeHttp, HistoryRows, SeedHistory, StubProvider
@@ -167,7 +167,7 @@ def _outcome(history_rows: HistoryRows) -> Any:
 
 def test_error_marker_outcome(cloud: None, fake_http: FakeHttp, history_rows: HistoryRows) -> None:
     fake_http.reply({"error": {"message": "bad key"}}, status_code=401)
-    assert _run(CLOUD).startswith("[prompt-workflow: OpenRouter returned HTTP 401")
+    assert _run(CLOUD).startswith("[promptmend: OpenRouter returned HTTP 401")
     assert _outcome(history_rows) == "error_marker"
     ((at),) = history_rows("attempts")
     assert (at["status"], at["error_kind"]) == (401, "non_2xx")
@@ -175,7 +175,7 @@ def test_error_marker_outcome(cloud: None, fake_http: FakeHttp, history_rows: Hi
 
 def test_override_error_is_recorded(stub_provider: StubProvider, history_rows: HistoryRows) -> None:
     # Settings loaded, so PROMPT_HISTORY is known; the call's own option was bad.
-    assert _run([*LOCAL, "--timeout", "soon"]).startswith("[prompt-workflow: ")
+    assert _run([*LOCAL, "--timeout", "soon"]).startswith("[promptmend: ")
     assert _outcome(history_rows) == "error_marker"
 
 
@@ -183,7 +183,7 @@ def test_override_error_is_recorded(stub_provider: StubProvider, history_rows: H
 def test_openrouter_only_refusal_is_recorded(
     fake_http: FakeHttp, history_rows: HistoryRows
 ) -> None:
-    assert _run([*LOCAL, "--tier", "pro"]).startswith("[prompt-workflow: --tier pro applies")
+    assert _run([*LOCAL, "--tier", "pro"]).startswith("[promptmend: --tier pro applies")
     assert _outcome(history_rows) == "error_marker"
     assert history_rows("attempts") == []
     assert fake_http.requests == []
@@ -199,7 +199,7 @@ def test_empty_input_is_an_error_marker(
 def test_gate_blocked_outcome(cloud: None, fake_http: FakeHttp, history_rows: HistoryRows) -> None:
     draft = "CONFIDENTIAL: summarise the board minutes"
     out = _run(["improve", "--provider", "openrouter", "--source", "argument", "--text", draft])
-    assert out.startswith("[prompt-workflow: Blocked cloud call.")
+    assert out.startswith("[promptmend: Blocked cloud call.")
     assert _outcome(history_rows) == "gate_blocked"
     assert history_rows("attempts") == []
     assert fake_http.requests == []
@@ -211,7 +211,7 @@ def test_local_only_refusal_is_gate_blocked(
 ) -> None:
     monkeypatch.setenv("PROMPT_LOCAL_ONLY", "true")
     refusal = "PROMPT_LOCAL_ONLY=true: openrouter would send the draft off this machine"
-    assert _run(CLOUD) == f"[prompt-workflow: {refusal}]"
+    assert _run(CLOUD) == f"[promptmend: {refusal}]"
     assert _outcome(history_rows) == "gate_blocked"
 
 
@@ -219,13 +219,13 @@ def test_plaintext_cloud_url_is_gate_blocked(
     monkeypatch: pytest.MonkeyPatch, cloud: None, fake_http: FakeHttp, history_rows: HistoryRows
 ) -> None:
     monkeypatch.setenv("OPENROUTER_BASE_URL", "http://openrouter.example/api/v1")
-    assert _run(CLOUD) == "[prompt-workflow: OPENROUTER_BASE_URL must be an https:// URL]"
+    assert _run(CLOUD) == "[promptmend: OPENROUTER_BASE_URL must be an https:// URL]"
     assert _outcome(history_rows) == "gate_blocked"
     assert fake_http.requests == []
 
 
 def test_missing_key_is_an_error_marker(fake_http: FakeHttp, history_rows: HistoryRows) -> None:
-    assert _run(CLOUD) == "[prompt-workflow: OPENROUTER_API_KEY is not configured]"
+    assert _run(CLOUD) == "[promptmend: OPENROUTER_API_KEY is not configured]"
     assert _outcome(history_rows) == "error_marker"
 
 
@@ -235,7 +235,7 @@ def test_validation_failed_keeps_the_charge(
 ) -> None:
     empty = {**REPLY, "choices": [{"message": {"content": ""}, "finish_reason": "stop"}]}
     fake_http.reply(empty)
-    assert _run(CLOUD) == "[prompt-workflow: OpenRouter returned empty content]"
+    assert _run(CLOUD) == "[promptmend: OpenRouter returned empty content]"
     assert _outcome(history_rows) == "validation_failed"
     ((at),) = history_rows("attempts")
     assert (at["charged_amount"], at["output"]) == ("0.0002", 5)
@@ -245,7 +245,7 @@ def test_malformed_reply_is_validation_failed(
     cloud: None, fake_http: FakeHttp, history_rows: HistoryRows
 ) -> None:
     fake_http.reply({"choices": []})
-    assert _run(CLOUD) == "[prompt-workflow: OpenRouter response was malformed]"
+    assert _run(CLOUD) == "[promptmend: OpenRouter response was malformed]"
     assert _outcome(history_rows) == "validation_failed"
 
 
@@ -258,7 +258,7 @@ def test_clipboard_failure_after_charged_reply(
 
     monkeypatch.setattr(pyperclip, "copy", broken)
     fake_http.reply(REPLY)
-    assert _run([*CLOUD, "--copy"]) == "[prompt-workflow: Clipboard unavailable: no clipboard]"
+    assert _run([*CLOUD, "--copy"]) == "[promptmend: Clipboard unavailable: no clipboard]"
     assert _outcome(history_rows) == "clipboard_failed"
     ((at),) = history_rows("attempts")
     assert at["charged_amount"] == "0.0002"
@@ -278,7 +278,7 @@ def test_clipboard_read_failure(
 def test_concealed_refused_outcome(
     monkeypatch: pytest.MonkeyPatch, stub_provider: StubProvider, history_rows: HistoryRows
 ) -> None:
-    import prompt_workflow.cli as cli
+    import promptmend.cli as cli
 
     monkeypatch.setattr(cli, "is_concealed", lambda: True)
     monkeypatch.setattr(pyperclip, "copy", lambda text: None)
@@ -289,7 +289,7 @@ def test_concealed_refused_outcome(
 
 def test_unexpected_error_outcome(stub_provider: StubProvider, history_rows: HistoryRows) -> None:
     stub_provider.exc = RuntimeError("kaput")
-    assert _run(LOCAL) == "[prompt-workflow: unexpected error: kaput]"
+    assert _run(LOCAL) == "[promptmend: unexpected error: kaput]"
     assert _outcome(history_rows) == "unexpected_error"
 
 
@@ -345,7 +345,7 @@ def test_failing_history_changes_nothing(
     result = runner.invoke(app, CLOUD)
     assert (result.exit_code, result.stdout) == (
         0,
-        "[prompt-workflow: OpenRouter returned HTTP 500: provider unavailable, try again; down]",
+        "[promptmend: OpenRouter returned HTTP 500: provider unavailable, try again; down]",
     )
     assert len(fake_http.requests) == 1
 
@@ -364,7 +364,7 @@ def test_read_only_history_dir_changes_nothing(
 def test_finishing_twice_writes_once(
     monkeypatch: pytest.MonkeyPatch, history_rows: HistoryRows
 ) -> None:
-    from prompt_workflow.config import Settings
+    from promptmend.config import Settings
 
     rec = recorder.Recorder("improve", "i")
     rec.track(Settings.load())

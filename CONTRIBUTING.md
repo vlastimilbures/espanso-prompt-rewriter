@@ -36,7 +36,7 @@ uv run mypy                                     # strict: src, scripts and tests
 uv run pre-commit run --all-files               # also YAML checks, gitleaks and zizmor
 ```
 
-If you change a screen of the interface (`src/prompt_workflow/tui/`), its SVG snapshots fail
+If you change a screen of the interface (`src/promptmend/tui/`), its SVG snapshots fail
 until you regenerate them, review the new SVGs and commit them (Linux or macOS):
 
 ```bash
@@ -55,7 +55,7 @@ uv run pytest -m live
 ## Ground rules
 
 - **The Espanso contract.** The CLI prints the result with no trailing newline, and every failure
-  as `[prompt-workflow: …]` with exit code 0. Espanso cannot show stderr or exit codes, so a
+  as `[promptmend: …]` with exit code 0. Espanso cannot show stderr or exit codes, so a
   traceback or a blank line reaches the user as a silent failure. Print only through
   `cli._emit()`, which strips control and invisible characters from whatever gets pasted.
   `tests/test_trigger_contract.py` compares the whole stdout of `improve` and `persona` byte
@@ -121,10 +121,10 @@ Releases are cut by `.github/workflows/release.yml`, never by hand-made tags.
    ```bash
    git switch --detach vX.Y.Z
    gh release download vX.Y.Z -R vlastimilbures/espanso-prompt-rewriter \
-     -p 'espanso_prompt_rewriter-X.Y.Z.tar.gz' -D /tmp/epr-X.Y.Z
-   gh attestation verify /tmp/epr-X.Y.Z/espanso_prompt_rewriter-X.Y.Z.tar.gz \
+     -p 'promptmend-X.Y.Z.tar.gz' -D /tmp/epr-X.Y.Z
+   gh attestation verify /tmp/epr-X.Y.Z/promptmend-X.Y.Z.tar.gz \
      -R vlastimilbures/espanso-prompt-rewriter
-   python3 scripts/brew_formula.py --sdist /tmp/epr-X.Y.Z/espanso_prompt_rewriter-X.Y.Z.tar.gz \
+   python3 scripts/brew_formula.py --sdist /tmp/epr-X.Y.Z/promptmend-X.Y.Z.tar.gz \
      -o ../homebrew-tap/Formula/prompt-workflow.rb
    ```
 
@@ -160,19 +160,19 @@ gh release create v0.10.0 --verify-tag --latest=false --title v0.10.0 --notes-fi
 
 ## Trigger start-up budget
 
-Espanso starts a fresh `prompt-workflow` process for every trigger, so everything `cli.py`
+Espanso starts a fresh `promptmend` process for every trigger, so everything `cli.py`
 imports is paid on each expansion. Measured on 2026-10-04 on an Apple M5 MacBook (macOS, load
 average about 14, so on the high side), CLI 0.15.0:
 
 | Measure | Python 3.12 | Python 3.14 |
 | --- | --- | --- |
-| `import prompt_workflow.cli`, cumulative (`-X importtime`) | 128–138 ms | 164–207 ms |
-| `prompt-workflow persona`, wall time (median of 15) | 185 ms | 238 ms |
+| `import promptmend.cli`, cumulative (`-X importtime`) | 128–138 ms | 164–207 ms |
+| `promptmend persona`, wall time (median of 15) | 185 ms | 238 ms |
 | Modules the guarded trigger runs add to a bare interpreter | 293 | 294 |
 | The same with the usage history recording (#89, 2026-10-05) | 307 | 306 |
 
 The largest parts of the import are `importlib.metadata` (about 50 ms cumulative under
-`-X importtime`, for `__version__` in `prompt_workflow/__init__.py`), httpx (about 30 ms) and
+`-X importtime`, for `__version__` in `promptmend/__init__.py`), httpx (about 30 ms) and
 Typer (about 19 ms). The `importlib.metadata` figure overstates its real cost: the modules it
 pulls in (email, zipfile, csv) load anyway, so a literal `__version__` saves only about 2 ms of
 wall time per run (median of 30 in a clean wheel venv, 3.12 and 3.14, 2026-10-06, #132). CI runner numbers
@@ -181,13 +181,13 @@ wall time per run (median of 30 in a clean wheel venv, 3.12 and 3.14, 2026-10-06
 Re-measure with:
 
 ```bash
-uv run python -X importtime -c "import prompt_workflow.cli" 2>&1 | sort -t'|' -k2 -n | tail
+uv run python -X importtime -c "import promptmend.cli" 2>&1 | sort -t'|' -k2 -n | tail
 uv run python -c "import subprocess, sys, time; t = time.perf_counter(); \
-  subprocess.run([sys.executable, '-m', 'prompt_workflow.cli', 'persona'], check=True); \
+  subprocess.run([sys.executable, '-m', 'promptmend.cli', 'persona'], check=True); \
   print(f'\n{(time.perf_counter() - t) * 1000:.0f} ms')"
 ```
 
-The second line runs through `python -m`, as the installed `prompt-workflow` script does
+The second line runs through `python -m`, as the installed `promptmend` script does
 apart from the launcher. Run either several times on an idle machine and take the median.
 
 `tests/test_trigger_contract.py` guards the budget without timing anything, since wall-clock
@@ -205,18 +205,18 @@ path. Raise the ceiling only with new measurements here.
 
 ```text
 espanso-prompt-rewriter/
-├── espanso/                      deployed into Espanso by `prompt-workflow espanso deploy`
+├── espanso/                      deployed into Espanso by `promptmend espanso deploy`
 │   ├── match/                    also shipped in the wheel, see assets.py
 │   │   ├── prompts-llm.yml       -i- -ip- -if- -iok- -il- -ilm- (-ic-): call the CLI
 │   │   ├── prompts-core.yml      -risk-: static snippet
 │   │   └── prompts-template.yml  -p-: the empty golden template, opens with your persona
-├── src/prompt_workflow/          the prompt-workflow CLI
+├── src/promptmend/               the promptmend CLI
 │   ├── cli.py                    improve and persona commands, the single output sink;
 │   │                             mounts the management commands lazily
 │   ├── commands/                 setup, config, secrets, profiles, stats, history, doctor, ui:
 │   │                             thin Typer wrappers over the services (common.py: exit codes)
 │   ├── tui/                      the full-screen Textual interface; only `ui` (commands/ui.py,
-│   │                             also a bare prompt-workflow on a terminal) loads it
+│   │                             also a bare promptmend on a terminal) loads it
 │   ├── doctor.py                 the doctor report (stable JSON, never a key or persona)
 │   ├── smoke.py                  setup's smoke test: improve against a stub on 127.0.0.1
 │   ├── previous_install.py       finds an earlier checkout install whose .env this one misses
@@ -276,12 +276,12 @@ when `XDG_CONFIG_HOME` is set on macOS or Linux; `%APPDATA%\promptmend\profiles\
 Windows), where an upgrade cannot replace it. See
 [README](README.md#profiles-and-persona); a same-named file overrides a built-in only when
 `PROMPT_PROFILE_OVERRIDES` lists it. `profiles.migrate_profiles()` copies profiles a checkout
-added or edited under `src/prompt_workflow/prompts/` into that directory (it never deletes or
+added or edited under `src/promptmend/prompts/` into that directory (it never deletes or
 overwrites).
 
 To ship a new built-in profile:
 
-1. Add `src/prompt_workflow/prompts/<name>.md` containing the system prompt as plain prose. It is
+1. Add `src/promptmend/prompts/<name>.md` containing the system prompt as plain prose. It is
    picked up automatically. The name must match `prompt_builder.PROFILE_NAME` (lower-case
    letters, digits, `-`, `_`).
 2. Optionally include `{{PERSONA_RULE}}` where the user's persona should be applied (see
@@ -291,7 +291,7 @@ To ship a new built-in profile:
 ### Add a trigger
 
 Add a match to `espanso/match/prompts-llm.yml`. Shell commands start with the quoted
-`__PROMPT_WORKFLOW__` placeholder, which `prompt-workflow espanso deploy` replaces with the absolute CLI path.
+`__PROMPT_WORKFLOW__` placeholder, which `promptmend espanso deploy` replaces with the absolute CLI path.
 Quote nothing else: `cmd.exe` mangles a command line holding more than one quoted part.
 Set `force_mode: clipboard` on every match that runs the CLI, so Espanso pastes the output
 instead of typing short replies key by key.
@@ -315,7 +315,7 @@ its id to `recorder.TRIGGER_IDS` (the test fails until each CLI match passes its
 
 Any change to a file in `espanso/match/` needs
 `uv run python scripts/update_match_history.py` (also run it at every release, after tagging):
-it records the source's digest in `src/prompt_workflow/match_history.py` (together with every
+it records the source's digest in `src/promptmend/match_history.py` (together with every
 digest already listed, which is never dropped, each release tag's version and the file at every
 commit that changed it on this branch and on the default branch, since an editable install
 runs an untagged commit), so `espanso deploy`
@@ -330,7 +330,7 @@ pro tier's profile.
 
 ### Add a setting
 
-Add a field to `Settings` in `src/prompt_workflow/config.py` with `_env("NAME", "default")`, then
+Add a field to `Settings` in `src/promptmend/config.py` with `_env("NAME", "default")`, then
 document it in the README configuration table and in `.env.example` (commented out with its
 default: `# NAME=default`). `tests/test_docs.py` fails until both are done. A setting that holds
 a secret takes `secret=True`: it then stays out of `repr()`, is saved only in the secret store,
@@ -345,7 +345,7 @@ Snippets that need no model go in `espanso/match/prompts-core.yml`, as plain Esp
 ### Add a provider
 
 1. Implement `generate(prompt, system_prompt) -> str` (the `Provider` protocol) in
-   `src/prompt_workflow/providers/`. Use `post_json()` and `finalize_content()` from
+   `src/promptmend/providers/`. Use `post_json()` and `finalize_content()` from
    `providers/base.py` so transport errors and `<think>` stripping behave like the other providers.
    Pass the response's raw stop reason to `finalize_content(..., stop_reason=...)`, so a cut-off,
    failed or filtered reply is marked instead of pasted as complete. Take an optional
@@ -358,7 +358,7 @@ Snippets that need no model go in `espanso/match/prompts-core.yml`, as plain Esp
 
 ### Improve the redaction gate
 
-Add a pattern to `_PATTERNS` in `src/prompt_workflow/redaction.py`, with a validator in
+Add a pattern to `_PATTERNS` in `src/promptmend/redaction.py`, with a validator in
 `_VALIDATORS` if the raw regex is too broad. Bound every repeat that can run over ordinary text
 and match a value only for its existence (`{8}`, not `{8,}`), then add an input to
 `test_scan_is_fast_on_adversarial_input`. Add a row to the `MUST_DETECT` corpus and a near-miss

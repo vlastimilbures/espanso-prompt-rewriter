@@ -1,6 +1,6 @@
-Usage: prompt-workflow [OPTIONS] COMMAND [ARGS]...
+Usage: promptmend [OPTIONS] COMMAND [ARGS]...
 Espanso-invoked prompt rewriter. Keeps ``improve`` as an explicit subcommand so the Espanso match
-files and docs (``prompt-workflow improve ...``) resolve.
+files and docs (``promptmend improve ...``) resolve.
 Options
 --version Print the installed version and exit
 --help Show this message and exit.

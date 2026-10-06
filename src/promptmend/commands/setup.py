@@ -62,7 +62,8 @@ def _previous_install(
         return None
     if found.shadow:
         common.warn(
-            f"`prompt-workflow` on PATH is {found.shadow.path}, not {found.shadow.launcher}: "
+            f"`{found.shadow.command}` on PATH is {found.shadow.path}, "
+            f"not {found.shadow.launcher}: "
             f"{found.shadow.hint}"
         )
     if not found.candidates:
@@ -99,14 +100,14 @@ def _settings_writable(
         # Nothing is written either: config.toml or a key would close the offer for good.
         steps.later(
             f"its settings were not copied: {exc}; then run "
-            f"`prompt-workflow config migrate --from {copy_from}`"
+            f"`promptmend config migrate --from {copy_from}`"
         )
         return False
     if plan.status != "ready":
         if copy_from is not None:
             typer.echo(f"  Nothing was copied from {copy_from}: {plan.describe()[0]}")
         return True
-    command = "prompt-workflow config migrate"
+    command = "promptmend config migrate"
     if plan.copy is not None:
         root = plan.copy.path.parent
         command += f" --from {root}"
@@ -138,8 +139,8 @@ def _settings_writable(
 
 def _profiles_step(steps: _Steps, root: Path, interactive: bool) -> None:
     """Offer to copy the profiles added or edited in an earlier checkout (copy only)."""
-    source = root / profiles.PROMPTS_PATH
-    command = f"prompt-workflow profiles migrate --checkout {root}"
+    source = root / profiles.prompts_path(root)
+    command = f"promptmend profiles migrate --checkout {root}"
     try:
         pristine = profiles.git_pristine_profiles(root)
         changed = profiles.changed_profiles(source, pristine)
@@ -173,7 +174,7 @@ def _retire_step(steps: _Steps, espanso_dir: str | None, interactive: bool) -> N
     if copied is None:
         return
     root, env_file = copied
-    command = f"prompt-workflow config retire --from {root}"
+    command = f"promptmend config retire --from {root}"
     folder = Path(espanso_dir).expanduser() if espanso_dir else None
     try:
         plan = config_store.plan_retire(root, espanso_dir=folder)
@@ -236,11 +237,11 @@ def _key_step(
                 return
         value = common._getpass(f"  {name} (input hidden, empty to skip): ").strip()
         if not value:
-            steps.later(f"{name} not set; `prompt-workflow secrets set {name}` sets it")
+            steps.later(f"{name} not set; `promptmend secrets set {name}` sets it")
             return
     else:
         if not entry.value:
-            steps.later(f"{name} is not set; `prompt-workflow secrets set {name} --stdin` sets it")
+            steps.later(f"{name} is not set; `promptmend secrets set {name} --stdin` sets it")
         else:
             typer.echo(f"  {name} is set (from {common.source_label(entry.source)}).")
         return
@@ -286,7 +287,7 @@ def _deploy_step(
         apply = typer.confirm("  Write these match files now?", default=ask_default)
     if not apply:
         typer.echo("  Dry run: nothing was written.")
-        steps.later("deploy the match files: `prompt-workflow espanso deploy`")
+        steps.later("deploy the match files: `promptmend espanso deploy`")
         return
     try:
         outcome = deploy.apply(the_plan, {})  # an edited file is kept: no silent overwrite
@@ -298,7 +299,7 @@ def _deploy_step(
     if outcome.changed:
         _restart(no_restart)
     if outcome.kept:
-        steps.later("files you edited were kept: `prompt-workflow espanso deploy` to choose")
+        steps.later("files you edited were kept: `promptmend espanso deploy` to choose")
 
 
 @app.command(
@@ -458,4 +459,4 @@ def setup(
         typer.echo(f"  to do: {item}")
     if steps.failed:
         common.fail(f"setup did not finish: {', '.join(steps.failed)} failed (see above)")
-    typer.echo("  Setup finished. `prompt-workflow doctor` checks everything again.")
+    typer.echo("  Setup finished. `promptmend doctor` checks everything again.")

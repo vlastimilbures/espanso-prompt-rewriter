@@ -1,5 +1,5 @@
 # The quoted CLI placeholder in each cmd below is replaced with the absolute CLI path by
-# `prompt-workflow espanso deploy` (or the install scripts), because GUI-launched Espanso
+# `promptmend espanso deploy` (or the install scripts), because GUI-launched Espanso
 # does not inherit shell PATH. It is quoted so a path with spaces works; keep every other
 # argument unquoted, since cmd.exe mangles a command line that starts with a quote and
 # holds more than one quoted part. The CLI finds its settings on its own (its config
@@ -11,7 +11,7 @@ matches:
   # unless ALLOW_CLOUD_OVERRIDE=true, but that gate is a heuristic, not a
   # guarantee — only use this trigger where company policy permits.
   - trigger: "-i-"
-    label: "prompt-workflow: rewrite the clipboard (OpenRouter)"
+    label: "PromptMend: rewrite the clipboard (OpenRouter)"
     left_word: true
     replace: "{{output}}"
     force_mode: clipboard
@@ -23,10 +23,10 @@ matches:
 
   # Same rewrite as -i-, sent once although the gate flagged a confidentiality label, a
   # Vietnamese ID number, an email address or an IBAN. Keys, tokens, passwords, cards and
-  # private keys stay blocked. The paste starts with a "[prompt-workflow: sent despite: …]"
+  # private keys stay blocked. The paste starts with a "[promptmend: sent despite: …]"
   # line. Use it only for a draft whose flagged content may leave the machine.
   - trigger: "-iok-"
-    label: "prompt-workflow: rewrite, allow a flagged label, ID, email or IBAN (OpenRouter)"
+    label: "PromptMend: rewrite, allow a flagged label, ID, email or IBAN (OpenRouter)"
     left_word: true
     replace: "{{output}}"
     force_mode: clipboard
@@ -40,7 +40,7 @@ matches:
   # multi-part drafts. Slower (about 6 s median, 9 s p95) but more rigorous. Same cloud
   # caveats as above.
   - trigger: "-ip-"
-    label: "prompt-workflow: rewrite on the pro tier (OpenRouter)"
+    label: "PromptMend: rewrite on the pro tier (OpenRouter)"
     left_word: true
     replace: "{{output}}"
     force_mode: clipboard
@@ -59,7 +59,7 @@ matches:
   # Many reasoning models count thinking tokens against the max tokens cap, so pair high
   # effort with 8000+ or the rewrite can come back cut short. Same cloud caveats as above.
   - trigger: "-if-"
-    label: "prompt-workflow: rewrite, pick model and settings (OpenRouter)"
+    label: "PromptMend: rewrite, pick model and settings (OpenRouter)"
     left_word: true
     replace: "{{output}}"
     force_mode: clipboard
@@ -100,7 +100,7 @@ matches:
           cmd: "\"__PROMPT_WORKFLOW__\" improve --trigger-id if --provider openrouter --tier pro --source clipboard --model {{form1.model}} --effort {{form1.effort}} --max-tokens {{form1.maxtokens}} --timeout {{form1.timeout}}"
 
   - trigger: "-il-"
-    label: "prompt-workflow: rewrite locally (Ollama)"
+    label: "PromptMend: rewrite locally (Ollama)"
     left_word: true
     replace: "{{output}}"
     force_mode: clipboard
@@ -111,7 +111,7 @@ matches:
           cmd: "\"__PROMPT_WORKFLOW__\" improve --trigger-id il --provider ollama --profile general --source clipboard"
 
   - trigger: "-ilm-"
-    label: "prompt-workflow: rewrite locally (LM Studio)"
+    label: "PromptMend: rewrite locally (LM Studio)"
     left_word: true
     replace: "{{output}}"
     force_mode: clipboard
@@ -125,7 +125,7 @@ matches:
   # to the Anthropic API. Uncomment only if company policy permits, and note
   # that the CLI still blocks sensitive content unless ALLOW_CLOUD_OVERRIDE=true.
   # - trigger: "-ic-"
-  #   label: "prompt-workflow: rewrite (Anthropic)"
+  #   label: "PromptMend: rewrite (Anthropic)"
   #   left_word: true
   #   replace: "{{output}}"
   #   force_mode: clipboard

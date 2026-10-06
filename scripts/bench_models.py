@@ -50,18 +50,18 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from prompt_workflow import prompt_builder
-from prompt_workflow.config import Settings, split_model_spec
-from prompt_workflow.factory import make_provider
-from prompt_workflow.prompt_builder import (
+from promptmend import prompt_builder
+from promptmend.config import Settings, split_model_spec
+from promptmend.factory import make_provider
+from promptmend.prompt_builder import (
     PROFILES,
     TEMPLATE_MARKER,
     render,
     repair_template_tags,
     strip_outer_fence,
 )
-from prompt_workflow.providers.base import TRUNCATED_NOTE, ProviderError
-from prompt_workflow.providers.usage import AttemptUsage
+from promptmend.providers.base import TRUNCATED_NOTE, ProviderError
+from promptmend.providers.usage import AttemptUsage
 
 MODELS: list[str] = [
     # Standard tier (-i-). The first is the shipped default.
@@ -1239,7 +1239,7 @@ def _call(
         bench_cfg,
         extra_body={"usage": {"include": True}},
         on_response=body.update,
-        title="espanso-prompt-rewriter-bench",
+        title="promptmend-bench",
         observer=observer,
     )
     return provider.generate(draft, sys_prompt), body
@@ -1462,7 +1462,7 @@ def git_state() -> tuple[str, bool | None]:
     git = shutil.which("git")
     if git is None:
         return "unknown", None
-    # The package, not this script: `python` may import prompt_workflow from another checkout.
+    # The package, not this script: `python` may import promptmend from another checkout.
     package = Path(prompt_builder.__file__).resolve().parent
 
     def output(*args: str) -> str:
@@ -1697,7 +1697,7 @@ def main() -> None:
         "--outdir", help=f"a new or empty directory (default: {DEFAULT_OUTDIR}/<UTC timestamp>)"
     )
     # A/B a candidate template without adding a throwaway file to
-    # src/prompt_workflow/prompts/, where _load_profiles() would pick it up as a profile.
+    # src/promptmend/prompts/, where _load_profiles() would pick it up as a profile.
     parser.add_argument(
         "--profile",
         choices=sorted(PROFILES),

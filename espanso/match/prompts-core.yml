@@ -1,6 +1,6 @@
 matches:
   - trigger: "-risk-"
-    label: "prompt-workflow: enterprise risk analysis"
+    label: "PromptMend: enterprise risk analysis"
     left_word: true
     replace: |
       Analyze the following issue from an enterprise risk perspective: $|$
