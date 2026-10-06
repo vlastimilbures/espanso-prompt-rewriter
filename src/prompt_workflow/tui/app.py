@@ -113,7 +113,7 @@ class MainScreen(Screen[None]):
 
 
 class ManageApp(App[int]):
-    TITLE = "prompt-workflow"  # Plus the installed version, set in __init__ (#112).
+    TITLE = brand.NAME  # Plus the installed version, set in __init__ (#112).
     SUB_TITLE = "set up and manage"
     CSS = CSS
     # The palette would offer screenshots written to the working directory and other extras

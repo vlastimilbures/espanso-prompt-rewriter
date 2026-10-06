@@ -1821,6 +1821,7 @@ def test_about_lists_version_runtime_and_folders(
 ) -> None:
     from prompt_workflow import config_store
     from prompt_workflow.tui import app as app_module
+    from prompt_workflow.tui import brand
     from prompt_workflow.tui.intro import AboutScreen
 
     monkeypatch.setattr(app_module, "__version__", "9.8.7")
@@ -1830,7 +1831,7 @@ def test_about_lists_version_runtime_and_folders(
         await settle(pilot)
         assert isinstance(app.screen, AboutScreen)
         facts = "\n".join(app.screen.facts)
-        assert "prompt-workflow 9.8.7" in facts
+        assert f"{brand.NAME} 9.8.7" in facts
         assert "Installed: uv" in facts
         assert str(config_store.config_dir()) in facts
         assert "Licence:   MIT" in facts
@@ -1907,5 +1908,5 @@ def test_brand_is_ascii_and_narrow_terminals_get_text_only() -> None:
     assert brand.TAGLINE.isascii()
     assert brand.WORDMARK[0] in wide
     assert brand.WORDMARK[0] not in narrow
-    assert narrow == f"prompt-workflow 1.2.3\n\n{brand.TAGLINE}"
+    assert narrow == f"{brand.NAME} 1.2.3\n\n{brand.TAGLINE}"
     assert max(map(len, brand.WORDMARK)) < brand.NARROW

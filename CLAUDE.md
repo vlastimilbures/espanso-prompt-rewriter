@@ -319,7 +319,7 @@ Rules for agents:
   the doctor counts; each a status word plus the tab that fixes it, and `headline()` names the
   worst (first of equals). `pill()` is the header's sub-title status (`ok` / `1 problem, 2
   warnings`), set in `ManageApp._show()`. `tui/intro.py`'s `IntroScreen` (#112; text from
-  `tui/brand.py`: ASCII wordmark, dropped at `brand.NARROW` columns or less, frame is a Textual
+  `tui/brand.py`: `brand.NAME` is the one display name the header, intro, wordmark and About read, so a rename (#169) changes one line; ASCII wordmark, dropped at `brand.NARROW` columns or less, frame is a Textual
   border) is pushed over `MainScreen` on every launch for `ManageApp(intro_seconds=0.8)`; any key
   or click closes it and is consumed. `None` shows none: `ui --no-intro`, `PROMPT_UI_INTRO=false`
   (read by `commands/ui.wants_intro()` in repair mode; the triggers never read it) and the

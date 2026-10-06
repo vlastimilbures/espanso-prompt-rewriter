@@ -9,6 +9,8 @@ from collections.abc import Mapping
 
 from .. import __version__, config, config_store
 
+# The interface's display name: the header, the intro, the wordmark and About all read it
+# here, so a rename (#169) changes this one line (and the snapshots).
 NAME = "prompt-workflow"
 TAGLINE = "A rough draft in, a precise prompt out: type -i- in any text field."
 REPO_URL = "https://github.com/vlastimilbures/espanso-prompt-rewriter"
@@ -16,11 +18,20 @@ LICENCE = "MIT"
 # A terminal this narrow (or narrower) gets the text alone: the mark would wrap.
 NARROW = 70
 
-WORDMARK = (
-    " .-------.                                 .----------.",
-    " | draft |  -->  [ prompt-workflow ]  -->  |  prompt  |",
-    " '-------'                                 '----------'",
-)
+
+def _wordmark(name: str) -> tuple[str, str, str]:
+    """Three ASCII lines: a boxed draft, an arrow through ``name``, a boxed prompt."""
+    left, right = " .-------.", ".----------."
+    middle = f" | draft |  -->  [ {name} ]  -->  |  prompt  |"
+    gap = " " * (len(middle) - len(left) - len(right))
+    return (
+        f"{left}{gap}{right}",
+        middle,
+        f"{left}{gap}{right}".replace(".", "'"),
+    )
+
+
+WORDMARK = _wordmark(NAME)
 
 
 def splash(width: int, version: str | None = None) -> str:
