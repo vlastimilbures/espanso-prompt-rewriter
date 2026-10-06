@@ -56,7 +56,7 @@ fi
 
 echo "Settings are read from a .env (copy .env.example to ~/.config/promptmend/.env;"
 echo "one in $repo_dir is still read), or the saved config.toml and secrets.toml"
-echo "(see Configuration in README.md). Then test -p- and -i- in any text field."
+echo "(see docs/configuration.md). Then test -p- and -i- in any text field."
 # Last, so its result is the final thing printed: it shows the plan, writes the match files
 # with this launcher and restarts Espanso. A match file you edited is kept, never
 # overwritten, and it ends with a WARNING naming each one (exit 0: keeping it is safe).

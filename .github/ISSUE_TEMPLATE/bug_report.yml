@@ -44,8 +44,29 @@ body:
       options: [openrouter, anthropic, ollama, lmstudio, not provider related]
     validations:
       required: true
+  - type: dropdown
+    id: channel
+    attributes:
+      label: Install channel
+      options:
+        - uv (PyPI or a GitHub Release wheel)
+        - Homebrew tap
+        - Windows one-command install (install.ps1)
+        - Checkout (editable install)
+    validations:
+      required: true
   - type: input
     id: versions
     attributes:
       label: Versions
-      description: "Output of `uv tool list | grep promptmend` and `espanso --version`, plus the model if relevant."
+      description: "Output of `promptmend --version` and `espanso --version`, plus the model if relevant."
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: promptmend doctor --json
+      description: >-
+        Output of `promptmend doctor --json`. It never shows a key, your persona or clipboard
+        text, but check it and redact anything you would not post publicly.
+      render: json

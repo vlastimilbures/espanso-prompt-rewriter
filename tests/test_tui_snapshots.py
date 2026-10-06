@@ -1,6 +1,6 @@
 """SVG snapshots of every tab of the interface (#93), from a fixed State at a fixed terminal
-size and theme, compared with the committed SVGs in tests/snapshots/. The Home snapshot is
-also the README's screenshot (docs/interface.svg).
+size and theme, compared with the committed SVGs in tests/snapshots/. The Home and Try snapshots
+are also the README's screenshots (docs/interface.svg, docs/try.svg).
 
 After an intended change, regenerate and review them:
 
@@ -39,13 +39,14 @@ pytestmark = pytest.mark.skipif(
 
 REPO = Path(__file__).resolve().parents[1]
 SNAPSHOTS = Path(__file__).parent / "snapshots"
-README_SHOT = REPO / "docs" / "interface.svg"
+README_SHOTS = {"home": REPO / "docs" / "interface.svg", "try": REPO / "docs" / "try.svg"}
 SIZE = (110, 36)
 HOME = "/home/me"
 ESPANSO = Path(f"{HOME}/.config/espanso")
 LAUNCHER = f"{HOME}/.local/bin/promptmend"
-# The header's version (#112), pinned so a release regenerates no snapshot.
-VERSION = "0.16.0"
+# The header's version (#112), pinned so a release regenerates no snapshot: the release that
+# ships the README's screenshots.
+VERSION = "0.20.0"
 
 _MESSAGES = {
     "version": (doctor.INFO, f"promptmend {VERSION}"),
@@ -270,7 +271,7 @@ def _shoot(
     ],
 )
 def test_snapshot(name: str, key: str) -> None:
-    _check(name, _shoot(key), *([README_SHOT] if name == "home" else []))
+    _check(name, _shoot(key), *([README_SHOTS[name]] if name in README_SHOTS else []))
 
 
 def test_snapshot_high_contrast() -> None:

@@ -18,6 +18,7 @@ rules. The invariants below must never be broken:
 - Never put API keys, customer data, credentials or confidential prompts in source, tests,
   logs or commits.
 - Tests stay offline: never call external APIs from unit tests; mock the HTTP client.
-- Update README.md and the CHANGELOG `## Unreleased` section with every user-visible change.
+- Update README.md or the relevant `docs/` page, and the CHANGELOG `## Unreleased` section,
+  with every user-visible change.
 - Do not run the paid bench (`scripts/bench_models.py`), `pytest -m live`, the installers or
   `espanso` commands unless asked.

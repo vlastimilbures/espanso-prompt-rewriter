@@ -73,9 +73,9 @@ class AboutScreen(ModalScreen[None]):
 
     def compose(self) -> ComposeResult:
         width = self.app.size.width
-        mark = "\n".join(brand.WORDMARK) + "\n\n" if width > brand.NARROW else ""
+        title = brand.LOGO if width > brand.NARROW else brand.TAGLINE
         with Vertical(classes="dialog", id="about"):
-            yield Static(f"{mark}{brand.TAGLINE}", markup=False, classes="dialog-title")
+            yield Static(title, markup=False, classes="dialog-title")
             yield Static("\n".join(self.facts), markup=False, id="about-facts")
             yield Button("Close", id="about-close")
 

@@ -1,7 +1,9 @@
 # Contributing
 
-Thanks for helping improve Espanso Prompt Rewriter. Bug reports, prompt-quality findings, new
-redaction patterns and documentation fixes are all welcome.
+Thanks for helping improve PromptMend. Bug reports, prompt-quality findings, new redaction
+patterns and documentation fixes are all welcome. The user documentation is the
+[README](README.md) and the pages in [docs/](docs/README.md); this file is for working on the
+code.
 
 ## Before you start
 
@@ -20,9 +22,26 @@ uv sync                  # the project plus its dev tools
 uv run pre-commit install
 ```
 
-To run your checkout from Espanso, install it as an editable tool with
-`./scripts/install_macos.sh` or `.\scripts\install_windows.ps1` (README, "Development"); users
-install the release wheel instead.
+To run your checkout from Espanso, install it as an editable tool instead of a release (users
+install a release, see [docs/install.md](docs/install.md)):
+
+```bash
+./scripts/install_macos.sh      # macOS
+.\scripts\install_windows.ps1   # Windows (PowerShell)
+```
+
+The script runs `uv tool install --editable` pinned to `uv.lock` (and checks the tool venv
+against it), then `promptmend espanso deploy --yes`, which writes the match files with the
+CLI's absolute path and restarts Espanso. It never touches Espanso's `config/` folder. The
+Windows script runs on Windows PowerShell 5.1 and PowerShell 7. If script execution is
+disabled, run it as `powershell -ExecutionPolicy Bypass -File .\scripts\install_windows.ps1`
+(`pwsh` for PowerShell 7), which allows this one run without changing your execution policy.
+On Linux, run `uv tool install --editable .` and `promptmend espanso deploy`.
+
+An editable install runs the code and profiles straight from the checkout, so a `git pull` or
+a branch switch changes `-i-` at once, while the match files change only on the next deploy.
+It also reads a `.env` in the checkout; keep the one holding your key in the config folder
+instead (`chmod 600` it), where a careless `git add` cannot pick it up.
 
 ## Checks
 
@@ -43,7 +62,9 @@ until you regenerate them, review the new SVGs and commit them (Linux or macOS):
 UPDATE_SNAPSHOTS=1 uv run pytest tests/test_tui_snapshots.py
 ```
 
-The snapshots pin the version shown in the header, so a release regenerates none of them.
+The Home and Try snapshots are also the README's screenshots (`docs/interface.svg`,
+`docs/try.svg`), written by the same run. The snapshots pin the version shown in the header,
+so a release regenerates none of them.
 
 If you change a prompt, a provider or anything on the request path, also run the opt-in live
 tests (needs `OPENROUTER_API_KEY` in `.env`, costs fractions of a cent):
@@ -78,6 +99,12 @@ uv run pytest -m live
   `fix:`, `docs:`, `refactor:`, `test:`, `chore:`, `ci:`.
 - **Changelog.** Add a line under *Unreleased* in [CHANGELOG.md](CHANGELOG.md) for anything a user
   would notice.
+- **Docs.** Update the README or the relevant `docs/` page with every user-visible change. Each
+  fact has one home (the settings tables in `docs/configuration.md`, the exit codes in
+  `docs/commands.md`, the benchmark numbers in `docs/benchmark.md`); link to it rather than
+  repeat it. README.md is also the PyPI page, so its links and images are absolute and it uses
+  no mermaid, `<details>` or alert blocks. `tests/test_docs.py` checks the commands, options,
+  settings and links.
 - **Releases.** After tagging `vX.Y.Z`, run `uv run python scripts/update_match_history.py` and
   commit any change, so deploy keeps recognising every released match file.
 
@@ -261,7 +288,7 @@ promptmend/
 │   ├── test_trigger_contract.py  exact trigger output, imports and module budget
 │   ├── test_tui.py               the interface, driven headless with Textual's Pilot
 │   ├── test_tui_snapshots.py     SVG snapshots of each tab (snapshots/, UPDATE_SNAPSHOTS=1)
-│   └── test_docs.py              README and .env.example list every setting
+│   └── test_docs.py              docs list every setting; commands, options and links exist
 ├── .github/                      CI (tests, gitleaks), Dependabot, issue and PR templates
 ├── .env.example                  key and persona; every other setting commented out
 ├── CONTRIBUTING.md               setup, checks, how to add a profile/trigger/provider
@@ -277,7 +304,7 @@ A profile for your own use does not belong in the repo: put it in the user profi
 `~/.config/promptmend/profiles/<name>.md` (`$XDG_CONFIG_HOME/promptmend/profiles/`
 when `XDG_CONFIG_HOME` is set on macOS or Linux; `%APPDATA%\promptmend\profiles\` on
 Windows), where an upgrade cannot replace it. See
-[README](README.md#profiles-and-persona); a same-named file overrides a built-in only when
+[docs/profiles.md](docs/profiles.md#your-own-profiles); a same-named file overrides a built-in only when
 `PROMPT_PROFILE_OVERRIDES` lists it. `profiles.migrate_profiles()` copies profiles a checkout
 added or edited under `src/promptmend/prompts/` into that directory (it never deletes or
 overwrites).
@@ -334,7 +361,7 @@ pro tier's profile.
 ### Add a setting
 
 Add a field to `Settings` in `src/promptmend/config.py` with `_env("NAME", "default")`, then
-document it in the README configuration table and in `.env.example` (commented out with its
+document it in the settings reference in `docs/configuration.md` and in `.env.example` (commented out with its
 default: `# NAME=default`). `tests/test_docs.py` fails until both are done. A setting that holds
 a secret takes `secret=True`: it then stays out of `repr()`, is saved only in the secret store,
 and is never written to `config.toml`.

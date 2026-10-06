@@ -158,7 +158,7 @@ def test_sent_despite_resets_per_call() -> None:
     assert provider.sent_despite == ()
 
 
-# The default cloud block message, byte for byte (README quotes it).
+# The default cloud block message, byte for byte (docs/privacy.md quotes it).
 def test_block_message_default_wording() -> None:
     with pytest.raises(ProviderError) as exc:
         GatedProvider(_Stub(), allow_override=False).generate("card 4111 1111 1111 1111", "s")

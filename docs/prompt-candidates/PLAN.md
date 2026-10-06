@@ -1,8 +1,14 @@
 # Default prompt: A/B rounds 1–2 (2026-10-02) and plan for the OpenRouter run
 
+> **Archived decision record (2026-10-02).** Kept for its history, not maintained. The package
+> was renamed in 0.19.0, so `src/prompt_workflow/` below is today's `src/promptmend/`. Current
+> results are in [docs/benchmark.md](../benchmark.md); open prompt work is in CONTRIBUTING.md,
+> "Known gaps in the default prompt".
+
 Continues "Known gaps in the default prompt" in CONTRIBUTING.md. This is the decision record of
 the 2026-10 prompt rework. **What shipped:** candidate `I2`, with the later revisions described
-in "Results of the OpenRouter run" below, became `src/prompt_workflow/prompts/default.md` (and the
+in "Results of the OpenRouter run" below, became `src/prompt_workflow/prompts/default.md`, now
+`src/promptmend/prompts/default.md` (and the
 since-retired `default-pro.md`) in 0.12.0 (34b3290, #10). 0.14.0 (9ceba39, #68) merged the two
 profiles back into one `default`, which both tiers send; `default-pro` is now only an alias.
 
@@ -186,7 +192,8 @@ supersedes D.
    - `[REVIEW]` flags on short messages ≤ A.
    - If H wins, update `espanso/match/prompts-template.yml` (self-review lines) and confirm
      `tests/test_bench.py` passes.
-   - Then copy the winner to `src/prompt_workflow/prompts/default.md`, add the 4 drafts'
+   - Then copy the winner to `src/prompt_workflow/prompts/default.md` (now under
+     `src/promptmend/`), add the 4 drafts'
      expectations (already in step 1), update "Known gaps" in CONTRIBUTING (close gaps 1–4 and
      7 if fixed; record what is still open), and put before/after numbers per model in the PR.
 
