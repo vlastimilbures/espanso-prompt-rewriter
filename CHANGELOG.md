@@ -48,6 +48,8 @@ All notable changes to this project are documented here. The format follows
   reported, `unknown` or `not applicable`, never 0 for a cost nobody reported. The command
   line's refusal of `improve` now points at the Try tab, and the set-up smoke test's stub
   replies report token counts.
+- `OLLAMA_NUM_CTX` sets Ollama's context window (`options.num_ctx`); empty (the default)
+  sends nothing (#168).
 
 ### Changed
 - The interface's second tab is now labelled "2 Providers" (it was "Providers & keys"), so

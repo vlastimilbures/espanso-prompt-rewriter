@@ -221,6 +221,7 @@ def make_provider(
             think=cfg.ollama_think,
             temperature=cfg.temperature,
             max_tokens=cfg.call_max_tokens,
+            num_ctx=cfg.ollama_num_ctx,
             observer=observer,
             local=not remote,
         )

@@ -157,6 +157,30 @@ def test_bad_pro_max_tokens(monkeypatch: pytest.MonkeyPatch, raw: str) -> None:
         Settings()
 
 
+# OLLAMA_NUM_CTX (#168): unset or empty keeps Ollama's own context size; the tiers and
+# per-call overrides leave it alone.
+def test_ollama_num_ctx(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert Settings().ollama_num_ctx is None
+    monkeypatch.setenv("OLLAMA_NUM_CTX", "")
+    assert Settings().ollama_num_ctx is None
+    monkeypatch.setenv("OLLAMA_NUM_CTX", "8192")
+    settings = Settings()
+    assert settings.ollama_num_ctx == 8192
+    assert settings.for_tier("pro").ollama_num_ctx == 8192
+    assert settings.for_call("pro", provider="ollama").ollama_num_ctx == 8192
+    assert settings.with_overrides(max_tokens="300", model="m").ollama_num_ctx == 8192
+
+
+@pytest.mark.parametrize("raw", ["0", "-1", "abc", "1.5", " "])
+def test_bad_num_ctx(monkeypatch: pytest.MonkeyPatch, raw: str) -> None:
+    monkeypatch.setenv("OLLAMA_NUM_CTX", raw)
+    with pytest.raises(
+        ValueError,
+        match=f"^OLLAMA_NUM_CTX must be empty or a whole number above 0, got '{raw}'$",
+    ):
+        Settings()
+
+
 # An empty PROMPT_TEMPERATURE means "send no temperature"; unset keeps the default.
 def test_empty_temperature(monkeypatch: pytest.MonkeyPatch) -> None:
     assert Settings().temperature == 0.2

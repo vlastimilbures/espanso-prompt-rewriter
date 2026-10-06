@@ -32,6 +32,10 @@ def test_make_provider_ollama() -> None:
     assert isinstance(provider, OllamaProvider)
     assert provider.think == cfg.ollama_think
     assert provider.temperature == cfg.temperature
+    assert provider.num_ctx is None
+    provider = make_provider("ollama", replace(cfg, ollama_num_ctx=8192))
+    assert isinstance(provider, OllamaProvider)
+    assert provider.num_ctx == 8192
 
 
 # make_provider("lmstudio") sends no api key and labels itself "LM Studio".
