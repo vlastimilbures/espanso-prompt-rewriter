@@ -355,15 +355,30 @@ Rules for agents:
   shows a muted `$ promptmend …` above the result and appends to `ManageApp.session`,
   which Home shows as a read-only log (`session_text()`, latest `SESSION_LINES`), or
   `teach.RECIPES` while it is empty. A value that looks like a key is shown as
-  `<value withheld>` (`shown_arg()`). `tui/console.py` (#111 stage 2) is Home's command line
+  `<value withheld>` (`console.shown_arg()`). `tui/console.py` (#111 stage 2) is Home's command line
   (`CommandLine`, `#home-command`; `c` on `MainScreen` switches to Home and focuses it, and
   nothing is focused at launch): `resolve()` walks the Click tree (no callback runs; the
   drift test in `tests/test_tui_teach.py` uses it too), `words_for()` gives the candidates
   (key names only after `secrets set|remove`, never elsewhere), `CommandSuggester` completes
   the last word and `describe()` the help line (a usage error through `redact_words()`, a
-  key-like line only `<value withheld>`). Enter runs nothing until the next PR: it shows
-  `teach.equivalent()` and keeps the line in an in-memory Up/Down history (not a key-like
-  one). `tests/test_tui_console.py` checks every candidate parses. `tests/test_tui_teach.py` parses every button command
+  key-like line only `<value withheld>`). Enter keeps the line in an in-memory Up/Down
+  history (not a key-like one) and acts by `decide()` on `POLICY` (one `Rule` per visible
+  leaf; a test walks the tree): `--help` and a bare `--version` always run; RUN (read-only
+  commands; `doctor` gets `--no-clipboard` unless a clipboard flag is given) and a `--dry-run`
+  of a `dry_run` rule go to `run()`, `[sys.executable, "-P", "-m", "promptmend.cli", *argv]`
+  (no shell, stdin DEVNULL, stderr into stdout, `NO_COLOR=1`, `TIMEOUT` 120 s, output capped
+  at `OUTPUT_CAP`) in `HomePane.background()`, one at a time (`HomePane.running`); its
+  `transcript()` (each line through `redact_words()`, then `exit N` or the timeout) goes in
+  the `#home-output` RichLog (hidden until the first run), the session log gets an `Entry`,
+  and the state reloads. DIALOG opens the owning tab's dialog (`HomePane.open_dialog()`:
+  `start_deploy`, `ask_detach`, `migrate_env`, `set_key`/`remove_key` with the name picked,
+  `prune` with `--older-than` filled in, `reset`), ignoring `DIALOG_DECIDES` (`--yes`, …);
+  `TERMINAL_ONLY` options and TERMINAL rules (`setup`, rollback, retire, profiles migrate)
+  say to quit and run it in a terminal; REFUSE (`improve`, `persona`, `ui`) says why.
+  `secrets set` with anything but a key's name (a value, `--stdin`) is cleared and not kept
+  (`refused_secret()`). `CommandLine(runner=)` (or `line.runner`) takes a fake in tests;
+  `tests/test_tui_console.py` refuses the real `run()` in every test but one (`--version`)
+  and checks every candidate parses. `tests/test_tui_teach.py` parses every button command
   and recipe against the Click tree (the drift test).
 - `relocate.py` — `migrate_folders(environ)` (#169), never on the trigger path
   (`tests/test_trigger_contract.py`, `doctor.HEAVY_MODULES`): `cli._LazyGroup.invoke()` runs it

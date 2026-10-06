@@ -223,10 +223,30 @@ Home also has a command line: press `c` (from any tab) and type a command, such 
 `espanso status --diff`. It completes the word you are typing (Tab or the Right arrow takes
 the suggestion: commands, options, setting names after `config set`, key names only after
 `secrets set` or `secrets remove`, profile names) and shows the command's usage and help
-below, or the error the CLI would print. Enter shows the command as you would run it in a
-terminal (`$ promptmend …`), but runs nothing yet; Up and Down go back through what you
-entered. A line that looks like it holds a key is never shown back or kept: it is cleared,
-and keys go in Providers & keys. Escape leaves the line, so the tab keys work again.
+below, or the error the CLI would print. Up and Down go back through what you entered.
+Escape leaves the line, so the tab keys work again. Enter:
+
+- runs a command that only reads or previews, and shows its output below the line
+  (`$ promptmend …`, then what it printed, then `exit N`), and in Home's session log: `doctor`
+  (without the clipboard check unless you pass `--clipboard`), `config show|get|set|unset|validate`,
+  `secrets status`, `profiles list`, `stats`, `espanso status`, `history export`, any
+  `--dry-run` preview (`espanso deploy`, `config migrate`, `config rollback`,
+  `config retire`, `profiles migrate`), any `--help` and `--version`. One runs at a
+  time, with no input and at most 120 seconds;
+- opens the dialog of the tab that does it, which asks first as always: `espanso deploy`,
+  `espanso detach`, `config migrate`, `secrets set NAME` (the value is typed hidden in the
+  dialog), `secrets remove`, `history prune` (with `--older-than` filled in) and
+  `history reset`. `--yes`, `--on-conflict`, `--no-restart` and `--preview-token` are
+  ignored there: the dialog decides;
+- says to quit and run it in a terminal for what asks as it goes: `setup`,
+  `config rollback`, `config retire`, `profiles migrate`, and a dialog's command given
+  `--espanso-dir`, `--launcher` or `--from`;
+- refuses `improve` and `persona` (the triggers run them, and `improve` reads the clipboard)
+  and `ui`.
+
+A line that looks like it holds a key, or `secrets set` with anything after the key's name,
+is never run, shown back or kept: it is cleared, and keys go in Providers & keys. A key in
+a command's output is shown as `<redacted, N chars>`.
 
 It opens with a short intro that stays until you press Enter (or any other key, or click);
 that key does nothing else. Its last line says how to turn it off for good:
