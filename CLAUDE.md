@@ -50,7 +50,9 @@ Rules for agents:
 
 - `cli.py` — main Typer command, `improve`. Reads a draft (`clipboard`/`stdin`/`argument`),
   calls a provider built by `make_provider()` (which applies the gate), and prints the result
-  with no trailing newline (Espanso inserts stdout verbatim). All failures are caught and
+  (everything after reading the input is `rewrite(raw, provider, cfg, profile, ran)`, which
+  the Try tab calls too; `ran`, a `Rewrite`, keeps the profile id and the built provider when
+  it raises, and `marker(exc)` words the failure) with no trailing newline (Espanso inserts stdout verbatim). All failures are caught and
   converted to a `[promptmend: ...]` marker printed to stdout with exit code 0, rather than a
   stack trace or blank expansion, since Espanso has no good way to surface a nonzero exit /
   stderr to the user. A golden-template rewrite (its profile contains `<output_template>`, which
@@ -301,8 +303,8 @@ Rules for agents:
   before, pinned by `tests/golden/no-args-help.txt`; `ui` without a TTY exits 3). `textual` is a
   required dependency (D-UI-2) imported only by `tui/`, which only `commands/ui.py` imports, once
   the interface opens; `tests/test_trigger_contract.py` checks neither the triggers nor `--help`,
-  `doctor`, `config show` and the other headless commands load it. Six tabs (Home, Providers &
-  keys, Profiles, Triggers, History, Diagnostics) show one `tui/state.State`, which `gather()`
+  `doctor`, `config show` and the other headless commands load it. Seven tabs (Home, Providers &
+  keys, Profiles, Triggers, History, Diagnostics, Try) show one `tui/state.State`, which `gather()`
   reads again in a worker thread after every change (a generation number drops an older load
   that finishes late); each action calls the same services as the
   headless command (`commands/settings.save_setting()` is shared with `config set`) and adds no
@@ -312,7 +314,7 @@ Rules for agents:
   time, and each re-reads the plan or manifest before writing and refuses if it changed since the
   preview. Workers run through `Pane.background()`, which reports any failure instead of
   crashing; base URLs and models are shown through `common.shown_value()`. No provider call except the explicit
-  "Test call" (`smoke.run()`); doctor runs without the clipboard. Bindings are letters and digits
+  "Test call" (`smoke.run()`) and a confirmed Try tab run; doctor runs without the clipboard. Bindings are letters and digits
   only (on `MainScreen`, so none fires under a dialog); `t` switches to the high-contrast theme;
   Textual honours `NO_COLOR`; exit is `sys.exit(app.return_code or 0)`. `tui/previous.py`'s
   `PreviousInstallScreen` (#110) opens by itself once per session when `State.previous`
@@ -386,6 +388,22 @@ Rules for agents:
   `tests/test_tui_console.py` checks every candidate parses and that no swallowed `--help`
   or `--dry-run` runs. `tests/test_tui_teach.py` parses every button command
   and recipe against the Click tree (the drift test).
+  `tui/try_pane.py`'s `TryPane` (tab `7 Try`, #111) rewrites a draft typed into its
+  `DraftArea` (`#try-draft`; Escape leaves it) and never touches the clipboard
+  (`tests/test_tui_try.py` makes pyperclip and `is_concealed` fail if called). Run takes the
+  pickers (`#try-target` stub/real, provider, profile with the user's added ones, tier; set to
+  the settings once, then kept across reloads), loads settings in repair mode, applies
+  `for_call()` and `openrouter_only()`, and calls `cli.rewrite()` in process in
+  `Pane.background()` (the draft is never in an argv), one run at a time (`running`, Run
+  disabled). Stub (default): `smoke.stub_server()` + `stub_settings()`, no `Recorder`, no
+  session-log entry (its command would call the real provider). Real: a `ConfirmModal`
+  (provider, model and base URL via `common.shown_value()`, whether it is recorded), then a
+  `recorder.Recorder("improve")` (origin `direct`, no trigger) whose `attempts` list is the
+  observer's, outcome via `cli._failure()`, `finish()` after the result is shown; it logs
+  `teach.equivalent("improve", …, "--text", "<draft withheld>")`. The result (or
+  `cli.marker()` with the sent-despite note, through `cli._clean()`) goes in a read-only
+  `TextArea` (`#try-result`, never markup); `usage_line()` (`#try-usage`) sums tokens and
+  shows the cost as reported, `unknown` or `not applicable` (the stub, local models), never 0.
 - `relocate.py` — `migrate_folders(environ)` (#169), never on the trigger path
   (`tests/test_trigger_contract.py`, `doctor.HEAVY_MODULES`): `cli._LazyGroup.invoke()` runs it
   before every subcommand except `improve`/`persona`, a `--help`/`-h` anywhere, an unknown
@@ -441,9 +459,13 @@ Rules for agents:
   candidate setup and the interface offer. Doctor's `previous_install` check; off the trigger
   path.
 - `smoke.py` — `setup`'s smoke test: a `ThreadingHTTPServer` on 127.0.0.1:0 answering the
-  OpenAI-compatible, Anthropic and Ollama shapes, and a child `python -m promptmend.cli
+  OpenAI-compatible, Anthropic and Ollama shapes (each reply reports `INPUT_TOKENS`/
+  `OUTPUT_TOKENS`, no cost), and a child `python -m promptmend.cli
   improve --provider <p>` whose env points every `*_BASE_URL` at it with a placeholder key (the
-  real key is never sent). `setup` offers a `.env` migration (applies only on an interactive
+  real key is never sent). `stub_server()` (a context manager yielding a `Stub`: port, request
+  paths) runs the stub, and `stub_settings(cfg, port)` is `stub_env()` for a `Settings`
+  (`dataclasses.replace`: base URLs, placeholder keys, `history=False`), for the Try tab's
+  in-process stub runs. `setup` offers a `.env` migration (applies only on an interactive
   yes), previews the deploy (`--deploy` applies, keeping edited files), and discloses the usage
   history (D-HIST-0).
 

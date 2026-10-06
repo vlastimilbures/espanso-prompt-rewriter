@@ -1,6 +1,6 @@
-"""The six screens of the interface, one tab each (#93). Each shows what the headless commands
-print and acts through the same service calls; none holds logic of its own. Keys are shown
-only as set or not set, never their value."""
+"""Six screens of the interface, one tab each (#93; the seventh, Try, is in try_pane.py).
+Each shows what the headless commands print and acts through the same service calls; none
+holds logic of its own. Keys are shown only as set or not set, never their value."""
 
 from __future__ import annotations
 

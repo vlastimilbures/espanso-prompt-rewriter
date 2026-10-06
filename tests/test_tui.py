@@ -197,8 +197,8 @@ def test_digits_switch_tabs_and_t_toggles_contrast(espanso: FakeRunner) -> None:
         from textual.widgets import TabbedContent
 
         for key, tab in zip(
-            "654321",
-            ("diagnostics", "history", "triggers", "profiles", "providers", "home"),
+            "7654321",
+            ("try", "diagnostics", "history", "triggers", "profiles", "providers", "home"),
             strict=True,
         ):
             await pilot.press(key)
@@ -210,7 +210,7 @@ def test_digits_switch_tabs_and_t_toggles_contrast(espanso: FakeRunner) -> None:
         await pilot.press("q")
 
     drive(scenario)
-    assert seen == [True] * 8
+    assert seen == [True] * 9
 
 
 def test_header_shows_the_name_and_installed_version(

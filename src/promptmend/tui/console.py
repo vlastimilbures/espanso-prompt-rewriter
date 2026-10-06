@@ -275,7 +275,11 @@ class Rule:
 
 # Every visible command of the CLI (tests/test_tui_console.py walks the tree), by its path.
 POLICY: dict[tuple[str, ...], Rule] = {
-    ("improve",): Rule(REFUSE, why="the Espanso triggers run it, and it reads the clipboard"),
+    ("improve",): Rule(
+        REFUSE,
+        why="the Espanso triggers run it, and it reads the clipboard; "
+        "to try a rewrite, use the Try tab (7)",
+    ),
     ("persona",): Rule(REFUSE, why="the -p- trigger runs it"),
     ("ui",): Rule(REFUSE, why="this is the interface"),
     ("setup",): Rule(TERMINAL),

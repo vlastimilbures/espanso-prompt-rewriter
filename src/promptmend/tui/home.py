@@ -23,6 +23,7 @@ TAB_LABELS = {
     "triggers": "4 Triggers",
     "history": "5 History",
     "diagnostics": "6 Diagnostics",
+    "try": "7 Try",
 }
 READY = "Ready: type -i- in any text field."
 # PROMPT_OUTPUT (#134) value -> what Home says it does.

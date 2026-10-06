@@ -1,4 +1,4 @@
-"""The interface's app: six tabs over one State, read again in a worker thread after every
+"""The interface's app: seven tabs over one State, read again in a worker thread after every
 change, a high-contrast theme, and key bindings that every terminal delivers (letters, digits
 and Ctrl; no Alt or Cmd). Textual honours NO_COLOR itself."""
 
@@ -29,6 +29,7 @@ from .panes import (
 )
 from .previous import PreviousInstallScreen, wants_offer
 from .state import State, gather
+from .try_pane import TryPane
 
 DEFAULT_THEME = "textual-dark"
 HIGH_CONTRAST = Theme(
@@ -54,6 +55,7 @@ _PANES: dict[str, type[Pane]] = {
     "triggers": TriggersPane,
     "history": HistoryPane,
     "diagnostics": DiagnosticsPane,
+    "try": TryPane,
 }
 TABS: dict[str, tuple[str, type[Pane]]] = {
     tab: (TAB_LABELS[tab], pane) for tab, pane in _PANES.items()
@@ -76,6 +78,11 @@ DataTable { height: auto; max-height: 14; margin-bottom: 1; }
 #home-command-help { color: $text-muted; }
 #home-output { height: 12; margin-top: 1; border: round $panel-lighten-2; }
 #home-session { margin-top: 1; text-wrap: nowrap; text-overflow: ellipsis; }
+#try-draft { height: 6; }
+#try-options { height: auto; margin-top: 1; }
+.try-option { width: 1fr; height: auto; margin-right: 1; }
+#try-usage { margin-top: 1; color: $text-muted; }
+#try-result { height: 10; }
 ModalScreen { align: center middle; }
 .dialog {
     width: 100; max-width: 95%; height: auto; max-height: 90%;

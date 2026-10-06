@@ -15,6 +15,9 @@ EXAMPLES = {
     "<VALUE>": "general",
     "<FILE>": "usage.json",
     "<DAYS>": "30",
+    "<PROVIDER>": "openrouter",
+    "<TIER>": "standard",
+    "<DRAFT>": "a rough draft",
     teach.CHECKOUT: "Projects/epr",
 }
 
