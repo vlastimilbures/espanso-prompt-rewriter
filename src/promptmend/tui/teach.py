@@ -26,9 +26,6 @@ BUTTONS: dict[str, tuple[tuple[str, ...], ...]] = {
         ("espanso", "deploy"),
         ("config", "retire", "--from", CHECKOUT),
     ),
-    "set-key": (("secrets", "set", "<NAME>"),),
-    "remove-key": (("secrets", "remove", "<NAME>"),),
-    "set-setting": (("config", "set", "<NAME>", "<VALUE>"),),
     "migrate-env": (("config", "migrate"),),
     "smoke": (("setup",),),
     "set-profile": (("config", "set", "PROMPT_PROFILE", "<NAME>"),),
@@ -59,6 +56,13 @@ BUTTONS: dict[str, tuple[tuple[str, ...], ...]] = {
             "<DRAFT>",
         ),
     ),
+}
+# The Settings tab's list (#199): each action of its keys -> the command it is in a terminal.
+SETTING_ACTIONS: dict[str, tuple[str, ...]] = {
+    "set": ("config", "set", "<NAME>", "<VALUE>"),  # Space toggles, Enter picks or edits
+    "reset": ("config", "unset", "<NAME>"),  # r on a setting
+    "set-key": ("secrets", "set", "<NAME>"),  # Enter on a key
+    "remove-key": ("secrets", "remove", "<NAME>"),  # r on a key
 }
 # What a button's command does not cover, said in its tooltip.
 NOTES = {
@@ -103,6 +107,13 @@ INTRO_OFF = ("config", "set", "PROMPT_UI_INTRO", "false")
 def equivalent(*argv: str) -> str:
     """The command line for ``argv``, quoted for a POSIX shell; placeholders as they are."""
     return " ".join([PROGRAM, *_quoted(argv)])
+
+
+def for_setting(action: str, name: str, value: str | None = None) -> str:
+    """The command of a Settings list action on ``name``: <NAME> filled in, and <VALUE> too
+    when ``value`` is given (WITHHELD for a value never shown)."""
+    filled = {"<NAME>": name} | ({"<VALUE>": value} if value is not None else {})
+    return equivalent(*(filled.get(word, word) for word in SETTING_ACTIONS[action]))
 
 
 def line(*argv: str) -> str:

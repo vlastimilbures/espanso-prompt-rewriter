@@ -28,6 +28,18 @@ All notable changes to this project are documented here. The format follows
   "Update check".
 
 ### Changed
+- The interface's tab `2 Providers` is now `2 Settings` (#199): every setting and both API
+  keys in one keyboard list, grouped (Output, Keys, Privacy, Models, History, Interface), each
+  with a dot (a green `●` for a switch on, a key set or a value that is not the default; a
+  grey `○` otherwise), its value and the file it comes from. Up/Down (or `j`/`k`) move, Space
+  switches a true/false setting, Enter picks from a list or edits the value (checked as the
+  CLI reads it, in the dialog), `r` resets it (`config unset`), `/` filters. On a key's row,
+  Enter and `r` open the Set key and Remove key dialogs. The persona shows only as
+  `<set, hidden>`. Each change logs its `promptmend config set|unset …` command on Home. The
+  "Change setting", "Set key" and "Remove key" buttons are gone; the provider overview and
+  the `PROMPT_LOCAL_ONLY` sentence moved to the Diagnostics tab. Home's Output row now names
+  the tab that switches it, so paste or clipboard output is one Enter away (#198). See
+  docs/interface.md, "Settings tab".
 - The interface's command line also refuses `config set|get|unset` with a key's name and a
   value, or `config set` with a key-like value, before the value reaches a child's argv.
 - A value your `PROMPT_EXTRA_PATTERNS` match now counts as a key wherever a command checks

@@ -300,7 +300,9 @@ files.
 | Windows | `%APPDATA%\promptmend\` | `%LOCALAPPDATA%\promptmend\` |
 | Linux | `~/.config/promptmend/` (`$XDG_CONFIG_HOME`) | `~/.local/share/promptmend/` (`$XDG_DATA_HOME`) |
 
-Change them with `promptmend config set` or in the interface's Providers tab. The common
+Change them with `promptmend config set`, or in the interface's
+[Settings tab](https://github.com/vlastimilbures/promptmend/blob/main/docs/interface.md#settings-tab):
+a list where Space switches a setting, Enter picks or edits it and `r` resets it. The common
 changes:
 
 ```bash

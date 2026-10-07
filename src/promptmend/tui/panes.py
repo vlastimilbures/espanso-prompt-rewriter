@@ -1,6 +1,7 @@
 """Six screens of the interface, one tab each (#93; the seventh, Try, is in try_pane.py).
 Each shows what the headless commands print and acts through the same service calls; none
-holds logic of its own. Keys are shown only as set or not set, never their value."""
+holds logic of its own. Keys are shown only as set or not set, never their value, and the
+persona only as set."""
 
 from __future__ import annotations
 
@@ -11,15 +12,17 @@ import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from datetime import timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol, cast
 
 import typer
 from rich.table import Table
 from rich.text import Text
 from textual import on, work
 from textual.app import ComposeResult
+from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, VerticalScroll
-from textual.widgets import Button, DataTable, RichLog, Select, Static
+from textual.widgets import Button, DataTable, Input, OptionList, RichLog, Select, Static
+from textual.widgets.option_list import Option
 
 from .. import config_store, deploy, doctor, history, previous_install, smoke
 from .. import profiles as profile_service
@@ -41,10 +44,10 @@ from ..console import (
 )
 from ..factory import PROVIDER_NAMES, routes
 from ..prompt_builder import ADDED, ALIASES, PROFILES, user_profiles_dir
-from . import teach
+from . import settings_model, teach
 from .console import CommandLine
 from .home import NOTE, TAB_LABELS, HomeRow, headline, home_rows
-from .modals import ConfirmModal, Field, FormModal, PickModal, TextModal
+from .modals import ConfirmModal, EditModal, Field, FormModal, PickModal, TextModal
 from .state import State, current_plan
 
 if TYPE_CHECKING:
@@ -327,7 +330,7 @@ class HomePane(Pane):
         main = self.manage.main
         values = decision.values
         triggers = main.query_one("#triggers-pane", TriggersPane)
-        providers = main.query_one("#providers-pane", ProvidersPane)
+        settings = main.query_one("#settings-pane", SettingsPane)
         usage_history = main.query_one("#history-pane", HistoryPane)
         # Each console.DIALOG command -> its tab and what opens its dialog there.
         dialogs: dict[tuple[str, ...], tuple[str, Callable[[], None]]] = {
@@ -336,9 +339,9 @@ class HomePane(Pane):
                 "triggers",
                 lambda: triggers.ask_detach(remove_all=values.get("keep_static") is False),
             ),
-            ("config", "migrate"): ("providers", providers.migrate_env),
-            ("secrets", "set"): ("providers", lambda: providers.set_key(values.get("name"))),
-            ("secrets", "remove"): ("providers", lambda: providers.remove_key(values.get("name"))),
+            ("config", "migrate"): ("settings", settings.migrate_env),
+            ("secrets", "set"): ("settings", lambda: settings.set_key(values.get("name"))),
+            ("secrets", "remove"): ("settings", lambda: settings.remove_key(values.get("name"))),
             ("history", "prune"): (
                 "history",
                 lambda: usage_history.prune(values.get("older_than")),
@@ -393,79 +396,292 @@ class HomePane(Pane):
         self.report(f"Sent to the terminal clipboard (OSC 52): {command}")
 
 
-# --- Providers ----------------------------------------------------------------------------
+# --- Settings -----------------------------------------------------------------------------
+
+# The name column fits the longest setting (OPENROUTER_PRO_REASONING_EFFORT); the source
+# column the longest file name (secrets.toml).
+NAME_WIDTH = 31
+SOURCE_WIDTH = 12
+WITHHELD_CURRENT = (
+    "The current value looks like a key, so it is not shown here. Saving an empty field "
+    "keeps it; type a new value to replace it."
+)
 
 
-class ProvidersPane(Pane):
+def setting_line(row: settings_model.Row, *, cursor: bool) -> Table:
+    """One row of the Settings list (#199): the cursor, the dot, the name, the value (cut
+    with … when narrow) and where it comes from. The dot is a glyph as well as a colour, so
+    it reads without colour too: a green ● for a switch on, a key set or a value that is not
+    the default; a grey ○ and a dimmed row otherwise."""
+    grid = Table.grid(padding=(0, 1), expand=True)
+    grid.add_column(width=2, no_wrap=True)
+    grid.add_column(width=NAME_WIDTH, no_wrap=True, overflow="ellipsis")
+    grid.add_column(ratio=1, no_wrap=True, overflow="ellipsis")
+    grid.add_column(width=SOURCE_WIDTH, no_wrap=True, overflow="ellipsis")
+    mark = Text("▶" if cursor else " ", style="bold")
+    mark.append("●" if row.on else "○", style="bold green" if row.on else "dim")
+    dim = "" if row.on else "dim"
+    grid.add_row(
+        mark, Text(row.name, style=dim), Text(row.value, style=dim), Text(row.source, style=dim)
+    )
+    return grid
+
+
+class SettingsList(OptionList):
+    """The Settings tab's list. Its keys are bound here, so they act only while it has the
+    focus: never under a dialog, in the filter or on another tab. Its `r` shadows the
+    screen's Reload."""
+
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("j", "cursor_down", "Down", show=False),
+        Binding("k", "cursor_up", "Up", show=False),
+        Binding("space", "switch", "Toggle"),
+        Binding("enter", "select", "Edit"),
+        Binding("r", "reset", "Reset"),
+        Binding("slash", "filter", "Filter"),
+    ]
+
+    @property
+    def pane(self) -> SettingsPane:
+        return self.query_ancestor(SettingsPane)
+
+    def action_switch(self) -> None:
+        self.pane.toggle()
+
+    def action_reset(self) -> None:
+        self.pane.reset()
+
+    def action_filter(self) -> None:
+        self.pane.query_one(FilterInput).focus()
+
+
+class FilterInput(Input):
+    """The Settings tab's filter: Escape clears it and goes back to the list, as do Enter
+    and Down (keeping it)."""
+
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("escape", "clear", "Clear filter"),
+        Binding("down", "leave", "List", show=False),
+    ]
+
+    def action_clear(self) -> None:
+        self.value = ""
+        self.action_leave()
+
+    def action_leave(self) -> None:
+        self.query_ancestor(SettingsPane).query_one(SettingsList).focus()
+
+
+class SettingsPane(Pane):
+    """Every setting and key in one keyboard list (#199), grouped, each with a dot saying at
+    a glance what is on. Saves go through `config set`'s service (save_setting()), a reset
+    through `config unset`'s, keys through the Set key and Remove key dialogs; each change
+    shows and logs its command."""
+
+    # The filter's text, and the rows it shows by name.
+    filter_text = ""
+    rows: dict[str, settings_model.Row]
+    # The row the ▶ is on.
+    cursor: str | None = None
+    # A change was saved and the State that shows it is still loading (see waiting()).
+    pending = False
+
     def compose(self) -> ComposeResult:
-        yield Static(
-            "Keys are shown as set or not set and where they come from, never their value.",
-            classes="note",
-            markup=False,
-        )
-        yield DataTable(id="keys", cursor_type="none", zebra_stripes=True)
-        yield Static("", markup=False, id="policy")
-        yield DataTable(id="routes", cursor_type="none", zebra_stripes=True)
-        yield _buttons(
-            ("set-key", "Set key"),
-            ("remove-key", "Remove key"),
-            ("set-setting", "Change setting"),
-            ("migrate-env", "Migrate .env"),
-            ("smoke", "Test call (local stub)"),
-        )
+        self.rows = {}
+        with Horizontal(id="settings-top"):
+            yield FilterInput(placeholder="/ filter", id="settings-filter")
+            yield Static("", id="settings-count", markup=False)
+        yield SettingsList(id="settings-list")
+        yield Static("", id="settings-help", markup=False)
+        yield _buttons(("migrate-env", "Migrate .env"), ("smoke", "Test call (local stub)"))
         yield self.result()
 
-    def setup(self) -> None:
-        self.query_one("#keys", DataTable).add_columns("Key", "State", "From", "Also set in")
-        self.query_one("#routes", DataTable).add_columns(
-            "Provider", "Model", "Base URL", "The draft", "Key"
-        )
-
     def show(self, state: State) -> None:
-        entries = state.layers.entries
-        keys = self.query_one("#keys", DataTable)
-        keys.clear()
-        for name in secret_names():
-            entry = entries[name]
-            _add_row(
-                keys,
-                name,
-                "set" if entry.value else "not set",
-                common.short_label(entry.source) if entry.value else "",
-                ", ".join(map(common.short_label, entry.shadows)),
-            )
-        cfg = state.settings
-        policy = (
-            "on: only providers that keep the draft on this machine run"
-            if cfg.local_only
-            else "off: cloud providers run, behind the data-protection gate"
-        )
-        self.query_one("#policy", Static).update(
-            f"PROMPT_LOCAL_ONLY is {policy}.\nPROMPT_PROVIDER: {cfg.provider} (the default "
-            "of a bare `improve`; the triggers name their own provider)."
-        )
-        table = self.query_one("#routes", DataTable)
-        table.clear()
-        for route in routes(cfg):
-            where = "leaves this machine" if route.remote else "stays local"
-            if route.refused:
-                where = "refused (local only)"
-            key = "not needed"
-            if route.key:
-                key = "set" if entries[route.key].value else "not set"
-            model, url = entries[route.model_setting], entries[route.url_setting]
-            _add_row(
-                table,
-                route.name,
-                common.shown_value(route.model_setting, model),
-                common.shown_value(route.url_setting, url),
-                where,
-                key,
-            )
+        self.pending = False
+        self.fill()
 
-    @on(Button.Pressed, "#set-key")
-    def _set_key(self) -> None:
-        self.set_key()
+    def fill(self) -> None:
+        """Rebuild the list from the State and the filter, keeping the cursor's setting."""
+        state = self.state
+        if state is None:
+            return
+        listing = self.query_one(SettingsList)
+        found = settings_model.rows(state, self.filter_text)
+        self.rows = {row.name: row for row in found}
+        keep = self.cursor if self.cursor in self.rows else next(iter(self.rows), None)
+        options: list[Option] = []
+        group = None
+        for row in found:
+            if row.meta.group != group:
+                group = row.meta.group
+                options.append(
+                    Option(Text(group, style="bold"), id=f"group:{group}", disabled=True)
+                )
+            options.append(Option(setting_line(row, cursor=row.name == keep), id=row.name))
+        listing.set_options(options)
+        self.cursor = keep
+        if keep is not None:
+            listing.highlighted = listing.get_option_index(keep)
+        total = len(settings_model.SETTINGS)
+        count = f"{total} settings" if not self.filter_text else f"{len(found)} of {total}"
+        self.query_one("#settings-count", Static).update(count)
+        self.show_help()
+
+    def show_help(self) -> None:
+        """The cursor row's help, and where its value comes from with the command that sets
+        it in a terminal."""
+        row = self.rows.get(self.cursor or "")
+        if row is None:
+            text = Text(f"No setting matches {self.filter_text!r}; Escape there clears it.")
+        else:
+            kind = row.meta.kind
+            command = teach.for_setting(
+                "set-key" if kind == settings_model.KEY else "set", row.name
+            ).removeprefix(f"{teach.PROGRAM} ")
+            where = f"From {row.where}" if row.where else "Not set"
+            text = Text(no_wrap=True, overflow="ellipsis")
+            text.append(f"{row.meta.help}\n")
+            text.append(f"{where} · {command}", style="dim")
+        self.query_one("#settings-help", Static).update(text)
+
+    @on(OptionList.OptionHighlighted, "#settings-list")
+    def _moved(self, event: OptionList.OptionHighlighted) -> None:
+        name = event.option.id
+        if name is None or name not in self.rows or name == self.cursor:
+            return
+        listing = self.query_one(SettingsList)
+        if self.cursor in self.rows:
+            old = self.cursor or ""
+            listing.replace_option_prompt(old, setting_line(self.rows[old], cursor=False))
+        listing.replace_option_prompt(name, setting_line(self.rows[name], cursor=True))
+        self.cursor = name
+        self.show_help()
+
+    @on(Input.Changed, "#settings-filter")
+    def _filtered(self, event: Input.Changed) -> None:
+        self.filter_text = event.value
+        self.fill()
+
+    @on(Input.Submitted, "#settings-filter")
+    def _filter_done(self) -> None:
+        self.query_one(SettingsList).focus()
+
+    def current(self) -> settings_model.Row | None:
+        return self.rows.get(self.cursor or "")
+
+    def waiting(self) -> bool:
+        """Whether a change is saved but not yet read back. The rows show the state before
+        it, so an action now would act on a stale value (a second Space saving the same
+        value again): it is refused, visibly, until show() has the fresh state."""
+        if self.pending:
+            self.app.notify("Still reading back the last change; try again.", markup=False)
+        return self.pending
+
+    def toggle(self) -> None:
+        """Space: switch a bool and save it at once."""
+        row = self.current()
+        if self.waiting():
+            return
+        if row is not None and row.meta.kind == settings_model.BOOL:
+            self.save(row.name, "false" if row.on else "true")
+
+    @on(OptionList.OptionSelected, "#settings-list")
+    def _selected(self) -> None:
+        self.edit()
+
+    def edit(self) -> None:
+        """Enter: a key's Set key dialog, a switch toggled, a choice picked from its list, or
+        a value typed in a field prefilled with the current one."""
+        row, state = self.current(), self.state
+        if row is None or state is None or self.waiting():
+            return
+        meta, entry = row.meta, state.layers.entries[row.name]
+        if meta.kind == settings_model.KEY:
+            self.set_key(row.name)
+        elif meta.kind == settings_model.BOOL:
+            self.toggle()
+        elif meta.kind == settings_model.CHOICE:
+            self._pick(meta, entry.value)
+        else:
+            self._type(meta, entry.value)
+
+    def _pick(self, meta: settings_model.Meta, current: str) -> None:
+        choices = settings_model.choices(meta, self.state)
+        now = next((n for n, c in enumerate(choices) if c in (current, current.lower())), None)
+        labels = [
+            (f"{c or settings_model.EMPTY}{'  (current)' if n == now else ''}", c)
+            for n, c in enumerate(choices)
+        ]
+
+        def picked(value: str | None) -> None:
+            if value is not None:
+                self.save(meta.name, value)
+
+        preview = f"{meta.help}\nEnter picks · Escape cancels"
+        self.app.push_screen(PickModal(meta.name, labels, preview, selected=now), picked)
+
+    def _type(self, meta: settings_model.Meta, current: str) -> None:
+        name = meta.name
+        own = name != common.EXTRA_PATTERNS
+        # A value that looks like a key is never shown, not even here: the field opens empty,
+        # the dialog says why, and an empty submit then keeps the value (it is a cancel).
+        withheld = bool(current) and common.looks_like_a_key(current, user_patterns=own)
+        value = "" if withheld else current
+
+        def check(typed: str) -> str | None:
+            if common.looks_like_a_key(typed, user_patterns=own):
+                return "That looks like a key or password, which never goes in config.toml."
+            try:
+                settings_model.parse(name, typed)
+            except ValueError as exc:
+                return str(exc)
+            return None
+
+        default = settings_model.default(name) or settings_model.EMPTY
+        preview = f"{meta.help}\nDefault: {default}"
+        if withheld:
+            preview += f"\n{WITHHELD_CURRENT}"
+
+        def typed(new: str | None) -> None:
+            if new is None or (withheld and new == ""):
+                return
+            self.save(name, new)
+
+        self.app.push_screen(EditModal(name, value, check, preview), typed)
+
+    def save(self, name: str, value: str) -> None:
+        """Save through `config set`'s service; the command is logged (a private or key-like
+        value withheld)."""
+        shown_value = teach.WITHHELD if name in common.PRIVATE else shown_arg(value)
+
+        def save() -> str:
+            saved = settings_cmd.save_setting(name, value)
+            self.pending = True  # until show() reads it back
+            notes = settings_cmd.after_save(name)
+            return "; ".join([f"{name} saved in {saved.path}", *notes])
+
+        self.attempt(save, command=teach.for_setting("set", name, shown_value))
+
+    def reset(self) -> None:
+        """r: a key's Remove key dialog, or a setting back to its default (`config unset`)."""
+        row = self.current()
+        if row is None or self.waiting():
+            return
+        name = row.name
+        if row.meta.kind == settings_model.KEY:
+            self.remove_key(name)
+            return
+
+        def unset() -> str:
+            removed, path = settings_cmd.unset_setting(name)
+            self.pending = removed  # until show() reads it back
+            if not removed:
+                elsewhere = f" It comes from {row.where}." if row.source != "default" else ""
+                return f"{name} is not saved in {path}; nothing to do.{elsewhere}"
+            notes = settings_cmd.after_save(name)
+            return "; ".join([f"{name} removed from {path}; its default applies", *notes])
+
+        self.attempt(unset, command=teach.for_setting("reset", name))
 
     def set_key(self, name: str | None = None) -> None:
         """The hidden Set key dialog, with ``name`` (a key's name) picked (`secrets set`)."""
@@ -492,11 +708,7 @@ class ProvidersPane(Pane):
             saved = f"{name} saved in the secret store ({config_store.config_dir()})"
             return f"{saved}; {note}" if note else saved
 
-        self.attempt(save, command=teach.equivalent("secrets", "set", name))
-
-    @on(Button.Pressed, "#remove-key")
-    def _remove_key(self) -> None:
-        self.remove_key()
+        self.attempt(save, command=teach.for_setting("set-key", name))
 
     def remove_key(self, name: str | None = None) -> None:
         """Pick a saved key (``name`` first, when saved), then confirm (`secrets remove`)."""
@@ -527,7 +739,7 @@ class ProvidersPane(Pane):
             if yes:
                 self.attempt(
                     lambda: self._delete(name),
-                    command=teach.equivalent("secrets", "remove", name),
+                    command=teach.for_setting("remove-key", name),
                 )
 
         self.app.push_screen(
@@ -542,28 +754,6 @@ class ProvidersPane(Pane):
             still = common.source_label(entry.source)
             return f"{name} removed from the secret store; it is still set, from {still}."
         return f"{name} removed from the secret store."
-
-    @on(Button.Pressed, "#set-setting")
-    def _set_setting(self) -> None:
-        # Never the keys (Set key hides them) nor the persona, which no screen shows.
-        names = [n for n in env_names() if n not in secret_names() and n not in common.PRIVATE]
-        fields = [
-            Field("setting-name", "Setting", names, value="PROMPT_PROVIDER"),
-            Field("setting-value", "New value", placeholder="checked as the CLI reads it"),
-        ]
-        self.app.push_screen(FormModal("Change a setting (config.toml)", fields), self._save)
-
-    def _save(self, values: dict[str, str] | None) -> None:
-        if values is None:
-            return
-        name, value = values["setting-name"], values["setting-value"]
-
-        def save() -> str:
-            saved = settings_cmd.save_setting(name, value)
-            notes = settings_cmd.after_save(name)
-            return "; ".join([f"{name} saved in {saved.path}", *notes])
-
-        self.attempt(save, command=teach.equivalent("config", "set", name, shown_arg(value)))
 
     @on(Button.Pressed, "#migrate-env")
     def _migrate(self) -> None:
@@ -1218,10 +1408,47 @@ class HistoryPane(Pane):
 # --- Diagnostics --------------------------------------------------------------------------
 
 
+def show_routes(pane: Pane, state: State) -> None:
+    """The providers at a glance (read-only, #199 moved it from the old Providers tab): the
+    PROMPT_LOCAL_ONLY and PROMPT_PROVIDER policy, and each provider's model, base URL, whether
+    the draft leaves this machine and whether its key is set."""
+    entries = state.layers.entries
+    cfg = state.settings
+    policy = (
+        "on: only providers that keep the draft on this machine run"
+        if cfg.local_only
+        else "off: cloud providers run, behind the data-protection gate"
+    )
+    pane.query_one("#policy", Static).update(
+        f"PROMPT_LOCAL_ONLY is {policy}.\nPROMPT_PROVIDER: {cfg.provider} (the default "
+        "of a bare `improve`; the triggers name their own provider)."
+    )
+    table = pane.query_one("#routes", DataTable)
+    table.clear()
+    for route in routes(cfg):
+        where = "leaves this machine" if route.remote else "stays local"
+        if route.refused:
+            where = "refused (local only)"
+        key = "not needed"
+        if route.key:
+            key = "set" if entries[route.key].value else "not set"
+        model, url = entries[route.model_setting], entries[route.url_setting]
+        _add_row(
+            table,
+            route.name,
+            common.shown_value(route.model_setting, model),
+            common.shown_value(route.url_setting, url),
+            where,
+            key,
+        )
+
+
 class DiagnosticsPane(Pane):
     def compose(self) -> ComposeResult:
+        yield Static("", markup=False, id="policy")
+        yield DataTable(id="routes", cursor_type="none", zebra_stripes=True)
         yield Static("", markup=False, id="layers")
-        yield DataTable(id="settings", cursor_type="none", zebra_stripes=True)
+        yield DataTable(id="diag-settings", cursor_type="none", zebra_stripes=True)
         yield Static("", markup=False, id="findings")
         yield Static("", markup=False, id="all-checks")
         yield Static("", markup=False, id="store")
@@ -1229,14 +1456,18 @@ class DiagnosticsPane(Pane):
         yield self.result()
 
     def setup(self) -> None:
-        self.query_one("#settings", DataTable).add_columns("Setting", "Value", "From", "Note")
+        self.query_one("#diag-settings", DataTable).add_columns("Setting", "Value", "From", "Note")
+        self.query_one("#routes", DataTable).add_columns(
+            "Provider", "Model", "Base URL", "The draft", "Key"
+        )
 
     def show(self, state: State) -> None:
+        show_routes(self, state)
         layers = state.layers
         self.query_one("#layers", Static).update(
             "\n".join(settings_cmd._layers_lines(layers, raw=False))
         )
-        table = self.query_one("#settings", DataTable)
+        table = self.query_one("#diag-settings", DataTable)
         table.clear()
         for name in env_names():
             entry = layers.entries[name]

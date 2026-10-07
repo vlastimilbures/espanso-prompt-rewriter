@@ -90,9 +90,12 @@ By default every improve trigger pastes the rewrite in place of the trigger. Wit
 `PROMPT_OUTPUT=clipboard` the rewrite goes on the clipboard instead:
 
 ```bash
-promptmend config set PROMPT_OUTPUT clipboard   # or Change setting under Providers in the interface
+promptmend config set PROMPT_OUTPUT clipboard
 promptmend config set PROMPT_OUTPUT paste       # back to pasting
 ```
+
+In the [interface](interface.md#settings-tab), press `2` for Settings: `PROMPT_OUTPUT` is the
+first row; Enter picks paste or clipboard. Home's Output row shows the current mode.
 
 It applies to every improve trigger at once, with no redeploy. Type the trigger as usual:
 after the wait the trigger text vanishes, nothing is pasted, and the rewrite is on the

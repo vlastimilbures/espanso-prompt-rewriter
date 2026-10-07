@@ -65,7 +65,8 @@ it never holds a key. Releases up to 0.18.0 used folders named `prompt-workflow`
 
 ## Change a setting
 
-Use the commands, or the Providers tab of the [interface](interface.md):
+Use the commands, or the [Settings tab](interface.md#settings-tab) of the interface, a list
+to switch, pick, edit and reset each setting:
 
 ```bash
 promptmend config show                       # every setting, its value and its source

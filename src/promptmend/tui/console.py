@@ -41,7 +41,7 @@ HISTORY_SIZE = 50
 
 WITHHELD_NOTE = (
     "That line looked like it holds a key: it was cleared, not kept. "
-    "Keys go in Providers (Set key), typed hidden."
+    "Keys go in Settings (Enter on a key's row), typed hidden."
 )
 
 

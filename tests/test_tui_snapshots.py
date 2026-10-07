@@ -128,13 +128,16 @@ def _stats() -> list[StatsRow]:
 
 
 def fixed_state(
-    group_by: str = "trigger", previous: previous_install.Detection | None = None
+    group_by: str = "trigger",
+    previous: previous_install.Detection | None = None,
+    extra: dict[str, str] | None = None,
 ) -> State:
     environ = {
         "XDG_CONFIG_HOME": f"{HOME}/.config",
         "HOME": HOME,
         # Built at runtime, so no key-shaped literal lands in the repo; shown only as "set".
         "OPENROUTER_API_KEY": "-".join(("snapshot", "key")),
+        **(extra or {}),
     }
     layers = ConfigLayers.resolve(environ, strict=False)
     report = doctor.Report(
@@ -269,7 +272,6 @@ def _shoot(
     ("name", "key"),
     [
         ("home", "1"),
-        ("providers", "2"),
         ("profiles", "3"),
         ("triggers", "4"),
         ("history", "5"),
@@ -279,6 +281,20 @@ def _shoot(
 )
 def test_snapshot(name: str, key: str) -> None:
     _check(name, _shoot(key), *([README_SHOTS[name]] if name in README_SHOTS else []))
+
+
+# The Settings list (#199, Mockup A and D): the output switched to the clipboard and a
+# persona set (shown only as set), at 80 and 70 columns, its list focused on the first row.
+def settings_state(group_by: str = "trigger") -> State:
+    extra = {"PROMPT_OUTPUT": "clipboard", "PROMPT_PERSONA": "I am a snapshot persona."}
+    return fixed_state(group_by, extra=extra)
+
+
+@pytest.mark.parametrize(("name", "size"), [("settings", (80, 24)), ("settings-70", (70, 24))])
+def test_snapshot_settings(name: str, size: tuple[int, int]) -> None:
+    svg = _shoot("2", loader=settings_state, size=size)
+    assert "snapshot persona" not in svg
+    _check(name, svg)
 
 
 def test_snapshot_high_contrast() -> None:

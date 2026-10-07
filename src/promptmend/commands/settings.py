@@ -215,15 +215,25 @@ def config_set(
 def config_unset(name: str = _NAME) -> None:
     """Remove a setting from config.toml, so its default applies again."""
     _setting(name)
+    removed, path = unset_setting(name)
+    if not removed:
+        typer.echo(f"{name} is not saved in {path}; nothing to do.")
+        return
+    typer.echo(f"{name} removed from {path}; its default applies.")
+    _warn_after_save(name)
+
+
+def unset_setting(name: str) -> tuple[bool, Path]:
+    """`config unset` without the printing, shared with the interface's reset (#199): refuse
+    a secret and legacy mode, then remove ``name`` from config.toml. Whether it was saved
+    there, and the file's path."""
     _not_a_secret(name, "remove")
     common.refuse_in_legacy_mode(config_files.SETTINGS_FILE)
     snapshot = config_store.read_settings()
     if name not in snapshot.table:
-        typer.echo(f"{name} is not saved in {snapshot.path}; nothing to do.")
-        return
+        return False, snapshot.path
     config_store.save_settings(snapshot, {name: None})
-    typer.echo(f"{name} removed from {snapshot.path}; its default applies.")
-    _warn_after_save(name)
+    return True, snapshot.path
 
 
 @config_app.command("validate")

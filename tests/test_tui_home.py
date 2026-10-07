@@ -130,7 +130,7 @@ def test_a_missing_key_is_the_headline_and_points_to_providers() -> None:
     assert found["Rewrites"].detail == "key not set"
     assert headline(home_rows(state)) == (
         "Not ready: OPENROUTER_API_KEY is not set, so -i- cannot rewrite.",
-        "providers",
+        "settings",
     )
 
 
