@@ -73,14 +73,14 @@ def plan(line: str) -> Plan:
         return Plan(HELP)
     if console.holds_a_key(line):
         return Plan(REFUSE, message=WITHHELD_NOTE)
+    if console.refused_secret(_words(line)):
+        return Plan(REFUSE, message=secret_note())
     try:
         words = console.split(line)
     except ValueError as exc:
         return Plan(ERROR, message=console.error_text(str(exc)).plain)
     if not words:
         return Plan(HELP)
-    if console.refused_secret(words):
-        return Plan(REFUSE, message=secret_note())
     argv = tuple(words)
     found: Resolved | None
     try:
@@ -91,6 +91,10 @@ def plan(line: str) -> Plan:
         found = _help_only(words)
         if found is None:
             return Plan(ERROR, message=console.error_text(exc.format_message()).plain)
+        if found.path in REFUSED:
+            # A trigger's --help only when its whole line parses (`improve --help --profile`
+            # would start a trigger that prints nothing and exits 2).
+            return _refusal(found.path, argv)
     if isinstance(found.command, TyperGroup):
         decision = console.decide(found, words)
         if decision.kind == console.RUN:
@@ -98,10 +102,33 @@ def plan(line: str) -> Plan:
         return Plan(ERROR, message=console.error_text(decision.message).plain)
     if found.values.get("help") is True:
         return Plan(RUN, argv)
-    why = REFUSED.get(found.path)
-    if why is not None:
-        return Plan(REFUSE, argv, f"Not from the shell: {why}.")
+    if found.path in REFUSED:
+        return _refusal(found.path, argv)
     return Plan(RUN, argv)
+
+
+def _refusal(path: tuple[str, ...], argv: tuple[str, ...]) -> Plan:
+    return Plan(REFUSE, argv, f"Not from the shell: {REFUSED[path]}.")
+
+
+def _words(line: str) -> list[str]:
+    """The line's words, also when it does not parse (an open quote): split on whitespace
+    then, so `secrets set NAME "value` is still seen for what it is."""
+    from .. import console
+
+    try:
+        return console.split(line)
+    except ValueError:
+        words = line.split()
+        return words[1:] if words[:1] and words[0] in console.PROGRAMS else words
+
+
+def secret_line(line: str) -> bool:
+    """A line that holds a key, or gives a key's value (`secrets set NAME VALUE`, `config
+    set NAME VALUE` for a key's name): never run, shown back or kept."""
+    from .. import console
+
+    return console.holds_a_key(line) or console.refused_secret(_words(line))
 
 
 def _help_only(words: Sequence[str]) -> Resolved | None:
@@ -120,9 +147,9 @@ def secret_note() -> str:
     from ..tui import teach
 
     return (
-        f"$ promptmend secrets set {teach.WITHHELD}: refused, and the line was not kept. "
-        "Type only the key's name (secrets set OPENROUTER_API_KEY); it then asks for the "
-        "value, hidden."
+        f"$ promptmend … {teach.WITHHELD}: a key's value on the line, refused, and the line "
+        "was not kept. Type only the key's name (secrets set OPENROUTER_API_KEY); it then "
+        "asks for the value, hidden."
     )
 
 
@@ -136,16 +163,10 @@ def runs_here(argv: Sequence[str]) -> bool:
 
 
 def kept(line: str) -> bool:
-    """Whether the history may keep ``line``: never one that holds a key, nor a `secrets
-    set` with more than a key's name."""
-    from .. import console
-
-    if console.holds_a_key(line):
-        return False
-    try:
-        return not console.refused_secret(console.split(line))
-    except ValueError:
-        return True
+    """Whether the history may keep ``line``: only a line that parses and runs. Never one
+    that holds a key or gives a key's value, nor one that does not parse (an open quote, a
+    mistyped command), where a value may hide that no check recognises."""
+    return plan(line).kind == RUN
 
 
 def run_here(argv: Sequence[str]) -> int:
@@ -240,17 +261,46 @@ def toolbar(text: str) -> str:
     return console.describe(text, typing=True).plain
 
 
-def session(**kwargs: Any) -> PromptSession[str]:
+class Editor:
     """The prompt: completion from the Click tree, the console's suggestion (Right arrow takes
-    it), live help in the bottom bar and a history in memory that keeps no key-like line.
-    ``kwargs`` go to PromptSession (tests pass a pipe input and a dummy output)."""
+    it), live help in the bottom bar and a history in memory that keeps only lines that ran.
+    Enter on a line that gives a key replaces it with <value withheld> before it is accepted,
+    so the line left on screen (and in the scrollback) no longer holds it; read() still
+    returns what was typed, for plan() to refuse. ``kwargs`` go to PromptSession (tests pass
+    a pipe input and a dummy output)."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        self.held: str | None = None
+        self.prompt = _session(self, **kwargs)
+
+    def read(self) -> str:
+        line = self.prompt.prompt()
+        held, self.held = self.held, None
+        return line if held is None else held
+
+
+def _session(editor: Editor, **kwargs: Any) -> PromptSession[str]:
     from prompt_toolkit import PromptSession
     from prompt_toolkit.auto_suggest import AutoSuggest, Suggestion
     from prompt_toolkit.completion import CompleteEvent, Completer, Completion
     from prompt_toolkit.document import Document
+    from prompt_toolkit.enums import DEFAULT_BUFFER
+    from prompt_toolkit.filters import has_focus
     from prompt_toolkit.history import InMemoryHistory
+    from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
 
     from .. import console
+    from ..tui import teach
+
+    keys = KeyBindings()
+
+    @keys.add("enter", filter=has_focus(DEFAULT_BUFFER))
+    def _enter(event: KeyPressEvent) -> None:
+        buffer = event.current_buffer
+        if secret_line(buffer.text):
+            editor.held = buffer.text
+            buffer.document = Document(teach.WITHHELD)
+        buffer.validate_and_handle()
 
     class Words(Completer):
         def get_completions(
@@ -278,6 +328,7 @@ def session(**kwargs: Any) -> PromptSession[str]:
         completer=Words(),
         auto_suggest=Suggest(),
         history=History(),
+        key_bindings=keys,
         complete_while_typing=False,
         **kwargs,
     )
@@ -298,4 +349,4 @@ def shell() -> None:
             "instead (see --help)",
             common.NEEDS_TERMINAL,
         )
-    raise typer.Exit(repl(session().prompt))
+    raise typer.Exit(repl(Editor().read))

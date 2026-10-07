@@ -75,8 +75,8 @@ def test_shell_runs_a_session_on_a_terminal(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(shell, "run_here", fake)
     with create_pipe_input() as pipe:
         pipe.send_text("promptmend config show\rimprove\rquit\r")
-        made = shell.session(input=pipe, output=DummyOutput())
-        monkeypatch.setattr(shell, "session", lambda: made)
+        made = shell.Editor(input=pipe, output=DummyOutput())
+        monkeypatch.setattr(shell, "Editor", lambda: made)
         result = runner.invoke(app, ["shell"])
     assert result.exit_code == 0, result.output
     assert fake.calls == [("config", "show")]
@@ -127,16 +127,19 @@ def test_lines_that_run(line: str, argv: tuple[str, ...]) -> None:
         ("secrets set OPENROUTER_API_KEY value", "Type only the key's name"),
         ("secrets set OPENROUTER_API_KEY --stdin", "Type only the key's name"),
         ("secrets set NOT_A_KEY_NAME", "Type only the key's name"),
+        ('secrets set OPENROUTER_API_KEY "hunter2', "Type only the key's name"),
+        ("config set OPENROUTER_API_KEY hunter2", "Type only the key's name"),
+        ("improve --help --profile", "Not from the shell: the Espanso triggers run it"),
     ],
     ids=["improve", "help-as-value", "argument", "persona", "shell", "key", "key-setting",
-         "value", "stdin", "not-a-name"],
+         "value", "stdin", "not-a-name", "open-quote", "config-key", "help-missing-value"],
 )  # fmt: skip
 def test_lines_that_are_refused(line: str, message: str) -> None:
     decided = shell.plan(line)
     assert decided.kind == shell.REFUSE
     assert message in decided.message
     assert KEY not in decided.message
-    assert not shell.runs_here(console.split(line))
+    assert not shell.runs_here(line.split())
 
 
 @pytest.mark.parametrize(
@@ -148,8 +151,9 @@ def test_lines_that_are_refused(line: str, message: str) -> None:
         ('config set "x', "error: No closing quotation"),
         ("doctor --no-such", "error: No such option: --no-such"),
         ("config --no-such", "error: No such option: --no-such"),
+        ("persona --help --no-such", "error: No such option: --no-such"),
     ],
-    ids=["command", "group", "argument", "quote", "option", "group-option"],
+    ids=["command", "group", "argument", "quote", "option", "group-option", "trigger-help"],
 )
 def test_usage_errors_run_nothing(line: str, message: str) -> None:
     decided = shell.plan(line)
@@ -289,7 +293,7 @@ def test_toolbar() -> None:
 
 def test_session_wires_completion_suggestion_toolbar_and_history() -> None:
     with create_pipe_input() as pipe:
-        made = shell.session(input=pipe, output=DummyOutput())
+        made = shell.Editor(input=pipe, output=DummyOutput()).prompt
     assert made.completer is not None
     words = made.completer.get_completions(Document("espanso st"), CompleteEvent())
     assert [c.text for c in words] == ["status"]
@@ -318,12 +322,46 @@ def test_history_keeps_no_key_like_line() -> None:
     ]
     with create_pipe_input() as pipe:
         pipe.send_text("".join(f"{line}\r" for line in lines))
-        made = shell.session(input=pipe, output=DummyOutput())
-        shell.repl(made.prompt, runner=FakeRunner(), echo=lambda _: None)
-    assert list(made.history.get_strings()) == ["doctor", 'config set "x', "improve", "exit"]
+        editor = shell.Editor(input=pipe, output=DummyOutput())
+        shell.repl(editor.read, runner=FakeRunner(), echo=lambda _: None)
+    assert list(editor.prompt.history.get_strings()) == ["doctor"]
     assert shell.kept("doctor")
-    assert not shell.kept(f"x {KEY}")
-    assert not shell.kept("secrets set OPENROUTER_API_KEY value")
+    for line in (
+        f"x {KEY}",
+        "secrets set OPENROUTER_API_KEY value",
+        'secrets set OPENROUTER_API_KEY "hunter2',  # does not parse
+        "secret set OPENROUTER_API_KEY hunter2",  # a typo: an unknown command
+        "config set OPENROUTER_API_KEY hunter2",
+        "improve",
+        "exit",
+    ):
+        assert not shell.kept(line), line
+
+
+def test_a_refused_key_line_is_replaced_on_screen_before_it_is_accepted() -> None:
+    lines = [f"secrets set OPENROUTER_API_KEY {KEY}", "secrets set OPENROUTER_API_KEY hunter2"]
+    with create_pipe_input() as pipe:
+        pipe.send_text("".join(f"{line}\r" for line in lines) + "doctor\rexit\r")
+        editor = shell.Editor(input=pipe, output=DummyOutput())
+        shown: list[str] = []
+        original = editor.prompt.prompt
+
+        def read() -> str:
+            line = original()
+            shown.append(editor.prompt.default_buffer.text or line)
+            return line
+
+        editor.prompt.prompt = read  # type: ignore[method-assign, assignment]
+        out: list[str] = []
+        fake = FakeRunner()
+        shell.repl(editor.read, runner=fake, echo=out.append)
+    # The accepted (rendered) line no longer holds the value...
+    assert shown[:2] == [teach.WITHHELD, teach.WITHHELD]
+    # ...the shell still knew what it refused, and ran only doctor.
+    assert out[1] == shell.WITHHELD_NOTE
+    assert "Type only the key's name" in out[2]
+    assert fake.calls == [("doctor",)]
+    assert list(editor.prompt.history.get_strings()) == ["doctor"]
 
 
 # --- Off the trigger path ---------------------------------------------------------------------

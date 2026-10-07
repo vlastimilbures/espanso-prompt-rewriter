@@ -307,11 +307,14 @@ Rules for agents:
   `doctor.HEAVY_MODULES` and the trigger contract's FORBIDDEN) over `promptmend/console.py`'s
   completion (`words_for()`, `suggest()`) and `describe()` as the bottom bar; without a TTY
   exit 3. `plan(line)` runs everything the parser reads as a command except `improve`,
-  `persona` and `shell` (`REFUSED`), a key-like line (`holds_a_key()`) and
-  `refused_secret()`; a leaf's `--help` counts only as the parser read it. `run_here()`
+  `persona` and `shell` (`REFUSED`; their `--help` only when the strict parse succeeds), a
+  key-like line (`holds_a_key()`) and `refused_secret()` (also on a whitespace split when
+  shlex fails; it covers `config set|get|unset <key name> VALUE` too); a leaf's `--help`
+  counts only as the parser read it. `Editor`'s Enter binding replaces a `secret_line()` with
+  `<value withheld>` before accepting it (`read()` returns the original to plan). `run_here()`
   re-checks `runs_here(argv)`, then starts `[sys.executable, "-P", "-m", "promptmend.cli",
   *argv]` with the terminal's stdio (no capture, no timeout, waits through Ctrl-C); `doctor`
-  is not forced to `--no-clipboard`. The in-memory history drops lines `kept()` refuses.
+  is not forced to `--no-clipboard`. The in-memory history keeps only lines `kept()` allows: those that plan to RUN.
   `repl(read, runner=, echo=)` is the loop tests drive; conftest refuses `run_here`. Started as the `prompt-workflow` alias (`cli._run_as_alias()`:
   `Path(sys.argv[0]).stem`), a management command or `ui` first prints
   `cli.DEPRECATED_ALIAS` on stderr, once; the triggers, `--version` and `--help` never do, and

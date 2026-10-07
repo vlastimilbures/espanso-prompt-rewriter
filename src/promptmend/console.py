@@ -307,6 +307,8 @@ DIALOG_DECIDES = ("--yes", "-y", "--on-conflict", "--no-restart", "--preview-tok
 # What a dialog cannot do (another folder or launcher, a copy from a checkout): a terminal can.
 TERMINAL_ONLY = ("--espanso-dir", "--launcher", "--from")
 SECRET_SET = ("secrets", "set")
+CONFIG_SET = ("config", "set")
+CONFIG_NAMED = (("config", "get"), CONFIG_SET, ("config", "unset"))
 
 
 @dataclass(frozen=True)
@@ -373,8 +375,17 @@ def decide(found: Resolved, words: Sequence[str]) -> Decision:
 
 def refused_secret(words: Sequence[str]) -> bool:
     """`secrets set` with more than a key's name: a value typed after it, --stdin (there is
-    no stdin here) or a name that is no key's (perhaps the key itself). Never shown or kept;
+    no stdin here) or a name that is no key's (perhaps the key itself). Also `config
+    set|get|unset` with a key's name and a word after it, or a value that looks like a key:
+    the command refuses it, but only once the value is in its argv. Never shown or kept;
     --help adds no exception (`secrets set NAME --help VALUE` is refused too)."""
+    if tuple(words[:2]) in CONFIG_NAMED:
+        rest = words[2:]
+        names = [w for w in rest if not w.startswith("-")]
+        return bool(
+            (len(names) > 1 and names[0] in config.secret_names())
+            or (tuple(words[:2]) == CONFIG_SET and any(common.looks_like_a_key(w) for w in rest))
+        )
     if tuple(words[:2]) != SECRET_SET:
         return False
     rest = words[2:]

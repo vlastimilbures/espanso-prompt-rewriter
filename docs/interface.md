@@ -86,8 +86,8 @@ Enter acts on the command by what it does:
 | Asks as it goes | `setup`, `shell`, `config rollback`, `config retire`, `profiles migrate`, and a dialog's command given `--espanso-dir`, `--launcher` or `--from` | Says to quit and run it in a terminal |
 | Refused | `improve`, `persona`, `ui` | Says why: the triggers run `improve` and `persona`, and `improve` reads the clipboard; the Try tab rewrites a typed draft instead |
 
-A line that looks like it holds a key, or `secrets set` with anything after the key's name, is
-never run, shown back or kept: it is cleared, and keys go in Providers. A key in a command's
+A line that looks like it holds a key, `secrets set` with anything after the key's name, or
+`config set|get|unset` with a key's name and a value, is never run, shown back or kept: it is cleared, and keys go in Providers. A key in a command's
 output is shown as `<redacted, N chars>`.
 
 ## Recipes and Copy last

@@ -593,6 +593,21 @@ def test_secrets_set_takes_only_a_key_name() -> None:
         assert console.refused_secret(["secrets", "set", *rest]), rest
 
 
+def test_config_never_takes_a_key_value() -> None:
+    # A key's name with a value after it under config, or a key-like value: the value would
+    # reach a child's argv before the command refuses it.
+    for words in (
+        ["config", "set", "OPENROUTER_API_KEY", "hunter2"],
+        ["config", "get", "ANTHROPIC_API_KEY", "hunter2"],
+        ["config", "unset", "OPENROUTER_API_KEY", "x"],
+        ["config", "set", "PROMPT_PROFILE", KEY],
+    ):
+        assert console.refused_secret(words), words
+    assert not console.refused_secret(["config", "get", "OPENROUTER_API_KEY"])
+    assert not console.refused_secret(["config", "set", "PROMPT_PROFILE", "general"])
+    assert not console.refused_secret(["config", "show"])
+
+
 def test_shown_withholds_keys_and_the_persona() -> None:
     assert console.shown(["config", "set", "X", KEY]) == f"promptmend config set X {teach.WITHHELD}"
     assert console.shown(["config", "set", "PROMPT_PERSONA", "I am"]) == (

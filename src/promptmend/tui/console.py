@@ -47,9 +47,9 @@ WITHHELD_NOTE = (
 
 RUNNING = "A command is still running; wait for its exit line."
 SECRET_NOTE = (
-    f"$ promptmend secrets set {teach.WITHHELD}: refused, and the line was cleared, not kept. "
-    "Type only the key's name (secrets set OPENROUTER_API_KEY); its value goes in the dialog, "
-    "hidden."
+    f"$ promptmend … {teach.WITHHELD}: a key's value on the line, refused, and the line was "
+    "cleared, not kept. Type only the key's name (secrets set OPENROUTER_API_KEY); its value "
+    "goes in the dialog, hidden."
 )
 
 
