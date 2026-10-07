@@ -488,7 +488,7 @@ def test_real_identifiers_are_kept(store: HistoryStore) -> None:
 # -- fail-open writer ----------------------------------------------------------------------
 
 
-def test_a_locked_database_drops_the_write_within_the_budget(
+def test_a_locked_database_spools_the_write_within_the_budget(
     store: HistoryStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     assert store.record(_op())
@@ -500,10 +500,10 @@ def test_a_locked_database_drops_the_write_within_the_budget(
         # Generous bound: the budget is 0.25 s; this only catches a writer that blocks.
         assert time.monotonic() - started < 5
         other.execute("ROLLBACK")
-    assert _lost(store) == 1
+    assert not store.lost_path.exists()
     health = store.health()
-    assert (health.lost_writes, health.operations) == (1, 1)
-    assert health.last_lost_utc is not None
+    assert (health.lost_writes, health.spooled, health.operations) == (0, 1, 1)
+    assert not health.tracking_incomplete
 
 
 @pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0, reason="root ignores modes")
@@ -514,7 +514,9 @@ def test_a_read_only_database_never_raises(store: HistoryStore) -> None:
         assert store.record(_op()) is False
     finally:
         store.path.chmod(stat.S_IREAD | stat.S_IWRITE)
-    assert _lost(store) == 1
+    assert store.health().spooled == 1
+    assert store.replay() == 1
+    assert store.health().operations == 2
 
 
 def test_a_corrupt_database_never_raises_and_reset_recovers(store: HistoryStore) -> None:
@@ -523,11 +525,13 @@ def test_a_corrupt_database_never_raises_and_reset_recovers(store: HistoryStore)
     assert store.record(_op()) is False
     health = store.health()
     assert health.error == "corrupt"
-    assert health.lost_writes == 1
+    assert (health.lost_writes, health.spooled) == (0, 1)
     with pytest.raises(HistoryError, match="corrupt"):
         store.stats()
+    store._mark_lost()
     store.reset()
     assert not store.lost_path.exists()
+    assert not store.spool_path.exists()
     assert store.record(_op())
     assert store.health().operations == 1
 
@@ -540,6 +544,200 @@ def test_when_database_and_sidecar_both_fail_nothing_raises(tmp_path: Path) -> N
     assert store._mark_lost() is False
     health = store.health()
     assert (health.exists, health.tracking_incomplete) == (False, True)
+
+
+# -- spool (#213) ---------------------------------------------------------------------------
+
+
+def _spool_one(store: HistoryStore, monkeypatch: pytest.MonkeyPatch, **op: Any) -> str:
+    """Spools one record (with an attempt) behind an exclusive lock; returns its id."""
+    assert store.record(_op())
+    record = _op(**op)
+    with contextlib.closing(sqlite3.connect(store.path, isolation_level=None)) as other:
+        other.execute("BEGIN EXCLUSIVE")
+        with monkeypatch.context() as patch:
+            patch.setattr(history, "_WRITE_BUDGET", 0.05)
+            assert store.record(record, [_attempt()]) is False
+        other.execute("ROLLBACK")
+    op_id: str = record["id"]
+    return op_id
+
+
+def _spool(store: HistoryStore) -> dict[str, Any]:
+    spool: dict[str, Any] = json.loads(store.spool_path.read_text("utf-8"))
+    return spool
+
+
+def test_a_spooled_record_is_stored_by_the_next_write(
+    store: HistoryStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spooled = _spool_one(store, monkeypatch)
+    assert store.health().spooled == 1
+    assert store.record(_op())
+    assert not store.spool_path.exists()
+    assert not store.lost_path.exists()
+    ops = {r["id"] for r in _rows(store, "operations")}
+    assert spooled in ops
+    assert len(ops) == 3
+    attempts = _rows(store, "attempts")
+    assert [(a["operation_id"], a["charged_amount"]) for a in attempts] == [
+        (spooled, "0.000123456789012345678901")
+    ]
+    # A second replay of the same record never duplicates a row.
+    assert store.record(_op())
+    assert len(_rows(store, "attempts")) == 1
+
+
+def test_the_spool_holds_only_the_allowlisted_columns(
+    store: HistoryStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _spool_one(store, monkeypatch)
+    spool = _spool(store)
+    assert set(spool) == {"version", "records"}
+    (entry,) = spool["records"]
+    assert set(entry) == {"operation", "attempts"}
+    assert set(entry["operation"]) == set(history.OPERATION_COLUMNS)
+    assert {key for at in entry["attempts"] for key in at} == set(history.ATTEMPT_COLUMNS)
+    # Planted keys are never read back.
+    entry["draft"] = "SENTINEL draft text"
+    entry["operation"]["draft"] = "SENTINEL draft text"
+    entry["attempts"][0]["response"] = "SENTINEL reply text"
+    store.spool_path.write_text(json.dumps(spool), "utf-8")
+    assert store.replay() == 1
+    assert b"SENTINEL" not in store.path.read_bytes()
+    assert not store.spool_path.exists()
+
+
+def test_a_secret_planted_in_the_spool_is_rejected_on_replay(
+    store: HistoryStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    keep = _spool_one(store, monkeypatch)
+    spool = _spool(store)
+    bad = json.loads(json.dumps(spool["records"][0]))
+    bad["operation"]["id"] = planted = history.new_operation_id()
+    bad["attempts"][0]["requested_model"] = KEY
+    spool["records"].insert(0, bad)
+    store.spool_path.write_text(json.dumps(spool), "utf-8")
+    assert store.record(_op())
+    ids = {r["id"] for r in _rows(store, "operations")}
+    assert keep in ids
+    assert planted not in ids
+    assert KEY.encode() not in store.path.read_bytes()
+    assert _lost(store) == 1
+    assert not store.spool_path.exists()
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        b"\x00 not json at all",
+        b"[1, 2, 3]",
+        json.dumps({"version": 99, "records": []}).encode(),
+        json.dumps({"version": 1, "records": "nope"}).encode(),
+        b" " * (512 * 1024 + 1),
+    ],
+    ids=["junk", "list", "version", "records", "oversize"],
+)
+def test_a_corrupt_spool_is_ignored_and_counted(store: HistoryStore, content: bytes) -> None:
+    store.path.parent.mkdir(parents=True)
+    store.spool_path.write_bytes(content)
+    assert store.health().tracking_incomplete
+    assert store.record(_op())
+    assert _lost(store) == 1
+    assert not store.spool_path.exists()
+    assert store.health().operations == 1
+
+
+def test_bad_spool_entries_are_skipped_and_counted(store: HistoryStore) -> None:
+    good = {
+        "operation": {**_op(), "occurred_at_utc": "2026-10-07T13:40:59.566218Z"},
+        "attempts": [],
+    }
+    bad_time = {"operation": {**_op(), "occurred_at_utc": "yesterday"}, "attempts": []}
+    store.path.parent.mkdir(parents=True)
+    records = [good, "text", {"operation": [], "attempts": []}, bad_time, {**good, "attempts": [1]}]
+    store.spool_path.write_text(json.dumps({"version": 1, "records": records}), "utf-8")
+    assert store.replay() == 1
+    assert _lost(store) == 4
+    assert [r["occurred_at_utc"] for r in _rows(store, "operations")] == [
+        "2026-10-07T13:40:59.566218Z"
+    ]
+
+
+def test_a_full_spool_counts_the_record_as_lost(
+    store: HistoryStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(history, "_SPOOL_LIMIT", 2)
+    assert store.record(_op())
+    with contextlib.closing(sqlite3.connect(store.path, isolation_level=None)) as other:
+        other.execute("BEGIN EXCLUSIVE")
+        monkeypatch.setattr(history, "_WRITE_BUDGET", 0.05)
+        for _ in range(3):
+            assert store.record(_op()) is False
+        other.execute("ROLLBACK")
+    health = store.health()
+    assert (health.spooled, health.lost_writes) == (2, 1)
+
+
+def test_a_spool_that_cannot_be_written_counts_the_record_as_lost(
+    store: HistoryStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail(*args: Any, **kwargs: Any) -> None:
+        raise OSError("disk full")
+
+    def timeout(*args: Any, **kwargs: Any) -> None:
+        raise TimeoutError("history write budget spent")
+
+    monkeypatch.setattr(HistoryStore, "_save_spool", fail)
+    monkeypatch.setattr(HistoryStore, "_write", timeout)
+    assert store.record(_op()) is False
+    assert _lost(store) == 1
+    assert not store.spool_path.exists()
+
+
+# #213: the first write on a slow machine (endpoint scanning) ran past its budget and was lost.
+def test_a_first_write_that_times_out_is_replayed_by_stats(
+    store: HistoryStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _use_real_budget(monkeypatch)
+    real_write = HistoryStore._write
+    calls: list[float] = []
+
+    def slow_first(self: HistoryStore, *args: Any, **kwargs: Any) -> None:
+        calls.append(args[2])
+        if len(calls) == 1:
+            raise TimeoutError("history write budget spent")
+        real_write(self, *args, **kwargs)
+
+    monkeypatch.setattr(HistoryStore, "_write", slow_first)
+    assert store.record(_op(trigger_id="-i-"), [_attempt()]) is False
+    assert store.health().spooled == 1
+    (row,) = store.stats()
+    assert (row.key, row.operations, row.attempts) == ("-i-", 1, 1)
+    health = store.health()
+    assert (health.spooled, health.lost_writes) == (0, 0)
+
+
+def test_an_empty_database_file_still_gets_the_creating_budget(
+    store: HistoryStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    deadlines: list[float] = []
+    monkeypatch.setattr(
+        HistoryStore, "_write", lambda self, op, rows, deadline, *a, **k: deadlines.append(deadline)
+    )
+    clock = SimpleNamespace(monotonic=lambda: 100.0, time=time.time, sleep=time.sleep)
+    monkeypatch.setattr(history, "time", clock)
+    store.path.parent.mkdir(parents=True)
+    store.path.write_bytes(b"")
+    assert store.record(_op())
+    assert deadlines == [100.0 + history._WRITE_BUDGET + history._CREATE_EXTRA]
+
+
+def test_export_replays_the_spool(store: HistoryStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    spooled = _spool_one(store, monkeypatch)
+    out = io.StringIO()
+    assert store.export(out) == 2
+    assert spooled in out.getvalue()
 
 
 def test_a_database_from_a_newer_version_is_never_written(store: HistoryStore) -> None:
@@ -856,9 +1054,10 @@ def test_creating_write_gets_extra_time(
         rows: list[tuple[object, ...]],
         deadline: float,
         prune_before: str | None = None,
+        **kwargs: Any,
     ) -> None:
         deadlines.append(deadline)
-        return real_write(self, op, rows, deadline, prune_before)
+        return real_write(self, op, rows, deadline, prune_before, **kwargs)
 
     monkeypatch.setattr(HistoryStore, "_write", spy)
     _use_real_budget(monkeypatch)

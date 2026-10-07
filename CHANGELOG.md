@@ -21,6 +21,12 @@ All notable changes to this project are documented here. The format follows
 - Interface: the Triggers tab shows the new states (`in sync`, or `missing` after a detach)
   as soon as a deploy or detach has written the files, without pressing `r` and without
   waiting for Espanso's restart (#215).
+- Usage history: a write that misses its time budget (the first one on a slow machine, or
+  under antivirus or endpoint scanning) is no longer lost. It waits in `history.spool` in the
+  data folder (the same metadata columns, at most 100 records) until the next recorded run,
+  `promptmend stats`, `promptmend history export` or `promptmend doctor` stores it.
+  `history.lost` now counts only records that could not be kept at all. doctor's `history`
+  warning says why and what to do, and its data gains `spooled` (#213).
 
 ## 0.22.0 - 2026-10-07
 

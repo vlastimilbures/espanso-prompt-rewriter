@@ -13,6 +13,7 @@ symptom in the table for its area.
 - [Gate and blocked calls](#gate-and-blocked-calls)
 - [Output problems](#output-problems)
 - [Local models](#local-models)
+- [Usage history](#usage-history)
 
 ## Start with doctor
 
@@ -95,6 +96,14 @@ its local server, then check it answers:
 curl http://localhost:11434/api/tags      # Ollama
 curl http://localhost:1234/v1/models      # LM Studio
 ```
+
+## Usage history
+
+| Symptom | Fix |
+|---------|-----|
+| doctor: `history: tracking incomplete: N write(s) lost` | The history write took longer than its time budget, often the first one (it creates the database) or on a machine whose antivirus or endpoint protection scans the data folder. Such a write now waits in `history.spool` and is stored by the next call; the count stays until `promptmend history reset`. See [Usage history](privacy.md#usage-history) |
+| doctor: `N record(s) waiting in history.spool` | The database was locked or unusable when doctor tried to store them. Run `promptmend stats`, which stores them; if doctor says the database is corrupt, `promptmend history reset` starts a new one (and deletes the spooled records) |
+| A call is missing from `promptmend stats` | Run `promptmend doctor` and check its `history` line. A call whose write took too long is stored by the next call or by `stats` itself |
 
 ## See also
 
