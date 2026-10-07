@@ -15,7 +15,9 @@ All notable changes to this project are documented here. The format follows
 - `doctor` knows the `winget` install channel (the WinGet `Links` alias, else the package
   folder, neither holding the version, so the match files survive `winget upgrade`) and names
   `winget upgrade vlastimilbures.PromptMend` when a newer release exists. Its `cli` check data
-  gains `frozen`.
+  gains `frozen`. A frozen exe still in a temporary or versioned folder (straight from the
+  zip or `Downloads\promptmend-<version>-windows-x64`) is refused as a launcher, with a hint
+  to move it to a fixed place such as `%LOCALAPPDATA%\Programs\promptmend`.
 
 ### Changed
 - In the frozen build, the interface's command line, `promptmend shell` and the setup check run

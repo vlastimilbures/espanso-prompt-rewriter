@@ -106,7 +106,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "S", "PT", "C4", "PIE", "RET",
 
 [tool.mypy]
 python_version = "3.12"
-files = ["src", "scripts", "tests"]
+files = ["src", "scripts", "tests", "packaging"]
 strict = true
 ignore_missing_imports = true
 

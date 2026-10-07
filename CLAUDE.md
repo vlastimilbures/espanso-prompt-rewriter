@@ -52,7 +52,7 @@ held to `fail_under = 95`):
 ```bash
 uv run pytest --cov                             # unit tests, offline
 uv run ruff check . && uv run ruff format --check .
-uv run mypy                                     # strict: src, scripts and tests
+uv run mypy                                     # strict: src, scripts, tests, packaging
 uv run pre-commit run --all-files               # also YAML checks, gitleaks and zizmor
 UPDATE_SNAPSHOTS=1 uv run pytest tests/test_tui_snapshots.py  # after a tui/ screen change
 ```
@@ -298,7 +298,9 @@ Rules for agents:
   `Cellar` or `.venv` dir; a frozen build (`sys.frozen`, #185) skips those lookups: on Windows
   WinGet's `%LOCALAPPDATA%\Microsoft\WinGet\Links\promptmend.exe` when it is the running exe
   (`os.path.samefile`), else the exe inside `WinGet\Packages\vlastimilbures.PromptMend_*\`,
-  channel `winget`, else the stable exe itself, `script`); `launcher_text()` guards the path, which sits in a
+  also machine scope `%ProgramFiles%\WinGet\{Links,Packages}`, channel `winget`, else the exe
+  itself, `script`, refused with a DeployError naming a fixed place when its path has an
+  X.Y.Z part or lies under the temp folder); `launcher_text()` guards the path, which sits in a
   double-quoted YAML string that Espanso runs with no shell (Windows converts `\` to `/`
   first): it refuses a quote, a backslash, a character YAML cannot hold, `{{` (Espanso fills
   its variables into every script param) and Espanso's `%HOME%`, `%CONFIG%`, `%PACKAGES%`
@@ -510,7 +512,8 @@ Rules for agents:
   `__version__`, and `-X utf8`). PyInstaller is pinned in the `build` dependency group only
   (`uv sync --group build`), never in constraints.txt or the brew formula.
   `scripts/build_windows.py build` zips it as `dist/promptmend-<version>-windows-x64.zip`
-  (`promptmend/promptmend.exe`, `promptmend/_internal/…`, sorted, fixed dates); `time <exe>`
+  (`promptmend/promptmend.exe`, `promptmend/_internal/…`, sorted, fixed dates; refused
+  without the match files and `prompts/default.md`, `REQUIRED`); `time <exe>`
   times the `-i-` trigger against `smoke`'s stub (job summary). test.yml's `frozen-windows`
   job builds, unzips and checks it (`--version`, `doctor --json` sees `frozen`, `persona`, a
   fake WinGet `Links` symlink reported as channel `winget`, `tests/test_triggers.py -k process`

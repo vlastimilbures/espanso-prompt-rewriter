@@ -130,6 +130,16 @@ def _file(path: Path) -> Path:
     return path
 
 
+@pytest.fixture(autouse=True)
+def os_temp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """The system temp folder, for deploy: a folder of its own, since pytest's tmp_path
+    itself lies under the real one."""
+    temp = tmp_path / "OsTemp"
+    temp.mkdir()
+    monkeypatch.setattr(deploy, "_temp_dir", lambda: temp)
+    return temp
+
+
 def _winget(tmp_path: Path) -> tuple[dict[str, str], Path, Path]:
     """(environ, the Links alias path, the package's exe) under a fake %LOCALAPPDATA%."""
     local = tmp_path / "Local"
@@ -188,8 +198,30 @@ def test_another_package_or_a_versioned_folder_is_not_winget(tmp_path: Path) -> 
     other = _file(packages / "Someone.Else_x" / "promptmend.exe")
     assert _resolve(other, environ) == deploy.Launcher(other, "script")
     versioned = _file(packages / PACKAGE / "1.2.3" / "promptmend.exe")
-    with pytest.raises(deploy.DeployError, match="winget"):
+    with pytest.raises(deploy.DeployError, match="versioned place"):
         _resolve(versioned, environ)
+    assert not deploy._RELEASE_IN_PATH.search(PACKAGE)
+
+
+def test_winget_machine_scope(tmp_path: Path) -> None:
+    root = tmp_path / "Program Files" / "WinGet"
+    exe = _file(root / "Packages" / PACKAGE / "promptmend" / "promptmend.exe")
+    environ = {"ProgramFiles": str(tmp_path / "Program Files")}
+    assert _resolve(exe, environ) == deploy.Launcher(exe, "winget")
+    link = root / "Links" / "promptmend.exe"
+    _link(link, exe)
+    both = {**environ, "LOCALAPPDATA": str(tmp_path / "Local")}
+    assert _resolve(exe, both) == deploy.Launcher(link, "winget")
+
+
+def test_a_downloaded_or_temporary_exe_is_refused(tmp_path: Path, os_temp: Path) -> None:
+    downloads = tmp_path / "Downloads" / "promptmend-0.22.0-windows-x64" / "promptmend"
+    for exe in (
+        _file(downloads / "promptmend.exe"),
+        _file(os_temp / "Temp1_promptmend-x.zip" / "promptmend" / "promptmend.exe"),
+    ):
+        with pytest.raises(deploy.DeployError, match=r"Programs\\promptmend, or pass --launcher"):
+            _resolve(exe, {})
 
 
 def test_a_frozen_exe_elsewhere_is_a_script(tmp_path: Path) -> None:
@@ -198,7 +230,7 @@ def test_a_frozen_exe_elsewhere_is_a_script(tmp_path: Path) -> None:
     environ, _, packaged = _winget(tmp_path)
     assert _resolve(exe, environ) == deploy.Launcher(exe, "script")
     assert _resolve(packaged, environ, windows=False) == deploy.Launcher(packaged, "script")
-    with pytest.raises(deploy.DeployError):
+    with pytest.raises(deploy.DeployError, match="was not found"):
         _resolve(tmp_path / "gone.exe", {})
 
 
@@ -224,15 +256,22 @@ def test_zip_name_and_version() -> None:
     assert bw.zip_name("1.2.3") == "promptmend-1.2.3-windows-x64.zip"
 
 
-def test_make_zip_nests_the_onedir_folder(tmp_path: Path) -> None:
-    folder = tmp_path / "promptmend"
+def _onedir(folder: Path) -> Path:
     _file(folder / "promptmend.exe")
-    _file(folder / "_internal" / "promptmend" / "prompts" / "default.md")
+    for name in bw.REQUIRED:
+        _file(folder / name)
+    return folder
+
+
+def test_make_zip_nests_the_onedir_folder(tmp_path: Path) -> None:
+    folder = _onedir(tmp_path / "promptmend")
     _file(folder / "_internal" / "base_library.zip")
     out = tmp_path / "dist" / "x.zip"
     names = bw.make_zip(folder, out)
     assert names == [
         "promptmend/_internal/base_library.zip",
+        "promptmend/_internal/promptmend/espanso/match/prompts-llm.yml",
+        "promptmend/_internal/promptmend/espanso/match/prompts-template.yml",
         "promptmend/_internal/promptmend/prompts/default.md",
         "promptmend/promptmend.exe",
     ]
@@ -246,8 +285,17 @@ def test_make_zip_nests_the_onedir_folder(tmp_path: Path) -> None:
 
 def test_make_zip_refuses_a_folder_without_the_exe(tmp_path: Path) -> None:
     _file(tmp_path / "promptmend" / "promptmend.exe")
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(FileNotFoundError, match="_internal folder"):
         bw.make_zip(tmp_path / "promptmend", tmp_path / "x.zip")
+
+
+@pytest.mark.parametrize("name", bw.REQUIRED)
+def test_make_zip_refuses_a_folder_without_its_package_data(tmp_path: Path, name: str) -> None:
+    folder = _onedir(tmp_path / "promptmend")
+    (folder / name).unlink()
+    with pytest.raises(FileNotFoundError, match="lacks the package data"):
+        bw.make_zip(folder, tmp_path / "x.zip")
+    assert not (tmp_path / "x.zip").exists()
 
 
 def test_build_runs_pyinstaller_then_zips(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -255,9 +303,7 @@ def test_build_runs_pyinstaller_then_zips(tmp_path: Path, monkeypatch: pytest.Mo
 
     def fake(argv: list[str], **kwargs: object) -> None:
         calls.append(argv)
-        onedir = tmp_path / "work" / "dist" / "promptmend"
-        _file(onedir / "promptmend.exe")
-        _file(onedir / "_internal" / "x")
+        _onedir(tmp_path / "work" / "dist" / "promptmend")
 
     monkeypatch.setattr(subprocess, "run", fake)
     out = bw.build(tmp_path / "out", tmp_path / "work")

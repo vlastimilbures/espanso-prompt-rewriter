@@ -40,7 +40,7 @@ def read_match(name: str) -> str:
 
 
 # A match's trigger line, commented out or not, and the CLI call in its script var's args.
-_TRIGGER = re.compile(r'^\s*(#\s*)?- trigger: "([^"]+)"')
+TRIGGER_LINE = re.compile(r'^\s*(#\s*)?- trigger: "([^"]+)"')
 _CMD = re.compile(r'^\s*(?:#\s*)?args: \["__PROMPT_WORKFLOW__", "(\w+)"(.*)\]')
 _OPTION = re.compile(r'"--(provider|profile|tier)", "([^"]+)"')
 
@@ -65,7 +65,7 @@ def triggers() -> list[Trigger]:
     for name in match_names():
         current: Trigger | None = None
         for line in read_match(name).splitlines():
-            if head := _TRIGGER.match(line):
+            if head := TRIGGER_LINE.match(line):
                 if current is not None:
                     found.append(current)
                 current = Trigger(head.group(2), name, active=not head.group(1))

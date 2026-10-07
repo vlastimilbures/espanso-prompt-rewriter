@@ -46,11 +46,23 @@ def zip_name(version: str) -> str:
     return f"{APP}-{version}-windows-x64.zip"
 
 
+# Package data the frozen CLI reads (assets.match_dir(), the built-in profiles): a spec that
+# lost them would build an exe whose deploy or rewrite fails only on the user's machine.
+REQUIRED = (
+    "_internal/promptmend/espanso/match/prompts-llm.yml",
+    "_internal/promptmend/espanso/match/prompts-template.yml",
+    "_internal/promptmend/prompts/default.md",
+)
+
+
 def make_zip(folder: Path, out: Path) -> list[str]:
     """Zip the onedir ``folder`` under a top folder named ``promptmend``; return the entry
-    names. Refuses a folder without ``promptmend.exe`` and ``_internal``."""
+    names. Refuses a folder without ``promptmend.exe``, ``_internal`` or the REQUIRED data."""
     if not (folder / f"{APP}.exe").is_file() or not (folder / "_internal").is_dir():
         raise FileNotFoundError(f"{folder} holds no {APP}.exe with its _internal folder")
+    missing = [name for name in REQUIRED if not (folder / name).is_file()]
+    if missing:
+        raise FileNotFoundError(f"{folder} lacks the package data {', '.join(missing)}")
     names: list[str] = []
     out.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
@@ -96,7 +108,7 @@ def trigger_args(trigger: str = TRIGGER) -> list[str]:
     for name in assets.match_names():
         current = None
         for line in assets.read_match(name).splitlines():
-            if head := assets._TRIGGER.match(line):
+            if head := assets.TRIGGER_LINE.match(line):
                 current = head.group(2)
             elif current == trigger and line.strip().startswith("args: ["):
                 args = [str(a) for a in json.loads(line.split("args:", 1)[1])]

@@ -312,6 +312,8 @@ def _launcher() -> list[str]:
     or CI install has one; on Windows a .exe launcher, given with forward slashes as deploy
     writes it), else the same entry point through the interpreter. With PROMPTMEND_EXE set
     (the CI job that builds the frozen Windows zip, #185), that exe instead."""
+    # A frozen exe likely ignores PYTHONWARNINGS/PYTHONDEVMODE (the bootloader's own config),
+    # so _LOUD may not apply there; the exit code and empty stderr checks still hold.
     if frozen := os.environ.get("PROMPTMEND_EXE"):
         return [launcher_text(Path(frozen).resolve())]
     name = "promptmend.exe" if os.name == "nt" else "promptmend"

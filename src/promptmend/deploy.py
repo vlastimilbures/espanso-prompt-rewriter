@@ -236,25 +236,62 @@ def _inside(path: Path, parent: Path) -> bool:
 WINGET_ID = "vlastimilbures.PromptMend"
 
 
+# A release number anywhere in a frozen exe's path (`promptmend-0.22.0-windows-x64`, the
+# zip's own name as a folder): the next release would unpack somewhere else.
+_RELEASE_IN_PATH = re.compile(r"\d+\.\d+\.\d+")
+FROZEN_UNSTABLE = (
+    "The promptmend folder is in a temporary or versioned place ({path}): move it to a fixed "
+    "place such as %LOCALAPPDATA%\\Programs\\promptmend, or pass --launcher"
+)
+
+
+def _temp_dir() -> Path:
+    import tempfile
+
+    return Path(tempfile.gettempdir())
+
+
+def _frozen_stable(path: Path) -> bool:
+    """A frozen exe's path that survives the next release: no release number in any part
+    and not under the temp folder (Explorer opens a zip's exe from `Temp1_<zip name>`)."""
+    if not _is_stable(path) or any(_RELEASE_IN_PATH.search(part) for part in path.parts):
+        return False
+    try:
+        path.resolve().relative_to(_temp_dir().resolve())
+    except (OSError, ValueError):
+        return True
+    return False
+
+
+def _winget_roots(environ: Mapping[str, str]) -> list[Path]:
+    """WinGet's folders for portable packages: per user, then machine-wide (`--scope
+    machine`)."""
+    roots = []
+    if local := environ.get("LOCALAPPDATA"):
+        roots.append(Path(local) / "Microsoft" / "WinGet")
+    if program_files := environ.get("ProgramFiles"):
+        roots.append(Path(program_files) / "WinGet")
+    return roots
+
+
 def _winget_launcher(executable: Path, environ: Mapping[str, str]) -> Launcher | None:
     """The WinGet install of the running frozen exe: its `Links` alias when that resolves to
     this exe, else the exe itself inside WinGet's package folder for our id."""
-    local = environ.get("LOCALAPPDATA")
-    if not local:
-        return None
-    winget = Path(local) / "Microsoft" / "WinGet"
-    link = winget / "Links" / "promptmend.exe"
-    with contextlib.suppress(OSError):
-        if os.path.samefile(link, executable):
-            return Launcher(link, "winget")
-    packages = winget / "Packages"
-    try:
-        inside = executable.resolve().relative_to(packages.resolve())
-    except (OSError, ValueError):
-        return None
-    folder = inside.parts[0] if inside.parts else ""
-    if folder.lower().startswith(f"{WINGET_ID.lower()}_") and _is_stable(inside):
-        return Launcher(executable, "winget")
+    roots = _winget_roots(environ)
+    for winget in roots:
+        link = winget / "Links" / "promptmend.exe"
+        with contextlib.suppress(OSError):
+            if os.path.samefile(link, executable):
+                return Launcher(link, "winget")
+    for winget in roots:
+        try:
+            inside = executable.resolve().relative_to((winget / "Packages").resolve())
+        except (OSError, ValueError):
+            continue
+        folder = inside.parts[0] if inside.parts else ""
+        stable = not any(_RELEASE_IN_PATH.search(part) for part in inside.parts)
+        if folder.lower().startswith(f"{WINGET_ID.lower()}_") and _is_stable(inside) and stable:
+            return Launcher(executable, "winget")
     return None
 
 
@@ -278,12 +315,11 @@ def resolve_launcher(
             found = _winget_launcher(exe_path, os.environ if environ is None else environ)
             if found is not None:
                 return found
-        if exe_path.is_absolute() and exe_path.is_file() and _is_stable(exe_path):
-            return Launcher(exe_path, "script")
-        raise DeployError(
-            "Could not find a stable promptmend launcher (install it with winget, or pass "
-            "--launcher)"
-        )
+        if not (exe_path.is_absolute() and exe_path.is_file()):
+            raise DeployError(f"The running promptmend.exe was not found ({exe_path})")
+        if not _frozen_stable(exe_path):
+            raise DeployError(FROZEN_UNSTABLE.format(path=exe_path))
+        return Launcher(exe_path, "script")
     runner = runner or run_command
     prefix = Path(sys.prefix) if prefix is None else prefix
     script = Path(sys.argv[0]) if script is None else script

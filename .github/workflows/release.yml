@@ -141,8 +141,8 @@ jobs:
       - name: Build the zip
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
-          uv sync --locked --group build
-          uv run --group build python scripts/build_windows.py build
+          uv sync --locked --no-dev --group build
+          uv run --no-dev --group build python scripts/build_windows.py build
       - name: Check the zip
         working-directory: ${{ runner.temp }}
         env:

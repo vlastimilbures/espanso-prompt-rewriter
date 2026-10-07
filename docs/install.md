@@ -152,13 +152,17 @@ It is what the coming WinGet package (`vlastimilbures.PromptMend`) will install;
 package is published, the zip is for trying out. It is not signed, so SmartScreen or
 Defender may warn the first time it runs.
 
-1. Unzip it to a folder that stays where it is, such as `%LOCALAPPDATA%\Programs`. The exe
-   needs the `_internal` folder next to it.
+1. Unzip it to `%LOCALAPPDATA%\Programs`, so the exe is
+   `%LOCALAPPDATA%\Programs\promptmend\promptmend.exe`; it needs the `_internal` folder next
+   to it. Deploy refuses an exe still in a temporary folder (opened straight from the zip) or
+   in a folder named for its version (`promptmend-<version>-windows-x64`), since the next
+   release would move it.
 2. Run its `setup` from that folder (`.\promptmend.exe setup` in PowerShell), so the match
    files call that exe.
 
-To update, unzip the new release over the same folder: the path stays the same, so the match
-files keep working. Once the WinGet package is published,
+To update, delete the old `%LOCALAPPDATA%\Programs\promptmend` folder, then unzip the new
+release to the same place: the path stays the same, so the match files keep working. Once the
+WinGet package is published,
 `winget upgrade vlastimilbures.PromptMend` updates it instead, and `doctor` names that command.
 
 ## Linux
