@@ -30,7 +30,7 @@ def ui(
         False, "--no-intro", help="Open without the intro (or set PROMPT_UI_INTRO=false)."
     ),
 ) -> None:
-    """Open the full-screen interface: status, providers and keys, profiles, triggers, usage
+    """Open the full-screen interface: status, settings and keys, profiles, triggers, usage
     history and diagnostics. It needs a terminal; every screen has a headless command (see
     --help), which scripts and screen readers can use instead."""
     if not on_a_terminal():

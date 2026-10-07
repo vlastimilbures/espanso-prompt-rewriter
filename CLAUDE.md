@@ -345,9 +345,9 @@ Rules for agents:
   before, pinned by `tests/golden/no-args-help.txt`; `ui` without a TTY exits 3). `textual` is a
   required dependency (D-UI-2) imported only by `tui/`, which only `commands/ui.py` imports, once
   the interface opens; `tests/test_trigger_contract.py` checks neither the triggers nor `--help`,
-  `doctor`, `config show` and the other headless commands load it. Seven tabs (Home, Providers
-  (`2 Providers`, keys included; the label was `Providers & keys` before the Try tab, so all
-  seven fit at 80 columns), Profiles, Triggers, History, Diagnostics, Try) show one `tui/state.State`, which `gather()`
+  `doctor`, `config show` and the other headless commands load it. Seven tabs (Home, Settings
+  (`2 Settings`, tab id `settings`, was `2 Providers` before #199; all seven fit at 80
+  columns), Profiles, Triggers, History, Diagnostics, Try) show one `tui/state.State`, which `gather()`
   reads again in a worker thread after every change (a generation number drops an older load
   that finishes late); each action calls the same services as the
   headless command (`commands/settings.save_setting()` is shared with `config set`) and adds no
@@ -384,9 +384,31 @@ Rules for agents:
   the doctor counts; each a status word plus the tab that fixes it, and `headline()` names the
   worst (first of equals; Markdown backticks stripped, #174). `pill()` is the header's
   sub-title status (`ok` / `1 problem, 2 warnings`), set first (before "set up and manage", so
-  a narrow terminal keeps it, #174) in `ManageApp._show()`. The Providers and Diagnostics
+  a narrow terminal keeps it, #174) in `ManageApp._show()`; its `Output` row's detail names
+  the Settings tab (`CHANGE_OUTPUT`, #198). The Settings help line and the Diagnostics
   tables show a settings file under the home folder as `~/…` via `common.short_label()`
-  (display only; headless `config show` keeps `source_label()`). `tui/intro.py`'s `IntroScreen` (#112; text from
+  (display only; headless `config show` keeps `source_label()`). The Settings tab (#199) is
+  `panes.SettingsPane` over `tui/settings_model.py` (pure, no Textual;
+  `tests/test_tui_settings_model.py`): `SETTINGS` gives every `env_names()` key exactly once
+  a group (`GROUPS`: Output, Keys, Privacy, Models, History, Interface), a kind (`bool`,
+  `choice`, `int`, `text`, `key` for `secret_names()`), choices from the code (`OUTPUTS`,
+  `PROVIDER_NAMES`, `""` + `EFFORTS`/`DATA_COLLECTION`, `PROFILE_CHOICES` filled by
+  `choices()` with the built-in and the user's added profiles) and a one-line help; `rows()`
+  gives each row's value (keys set/not set, `PROMPT_PERSONA` only `<set, hidden>`, else
+  `common.shown_value()`), its dot (`on`: a bool true, a key set, or a value not at its
+  default or set in a file/env) and its source file name (`source_name()`; `where` is the
+  `short_label()` for the help line). `SettingsList` (an `OptionList`, group headers as
+  disabled options, the `▶` cursor re-rendered on highlight) binds j/k, Space (bool: save at
+  once), Enter (`PickModal(selected=)`, current marked; `EditModal`, prefilled, which keeps a
+  value `settings_model.parse()` rejects or that looks like a key in the dialog with the
+  reason; a key row's `set_key()`), `r` (`settings_cmd.unset_setting()`, shared with `config
+  unset`; a key row's `remove_key()`) and `/` (`FilterInput`: Escape clears and returns, Enter
+  or Down returns). Its keys act only while it has the focus: `MainScreen` focuses it when the
+  tab opens and drops the focus when another tab opens, so `r` is Reload elsewhere. Saves go
+  through `save_setting()`; each logs `teach.for_setting()` (from `teach.SETTING_ACTIONS`,
+  which the drift test parses; the persona's value as `<value withheld>`). The provider
+  overview (`show_routes()`: `PROMPT_LOCAL_ONLY`/`PROMPT_PROVIDER` sentence and routes table)
+  is on Diagnostics. `tui/intro.py`'s `IntroScreen` (#112; text from
   `tui/brand.py`: `brand.NAME` is the one display name the header, intro and About read, so a rename (#169) changes one line; `brand.MARK` is the ASCII logo (a `[+]` speech bubble beside figlet-small "PromptMend"), `brand.LOGO` the mark plus `TAGLINE`, which README's hero repeats exactly (`tests/test_docs.py`); the mark is dropped at `brand.NARROW` columns or less, frame is a Textual
   border) is pushed over `MainScreen` on every launch for `ManageApp(intro=True)`; it has no
   timer (#173): any key (Enter, Escape, …) or click closes it and is consumed. Its muted

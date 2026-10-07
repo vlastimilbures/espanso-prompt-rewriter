@@ -18,15 +18,15 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from textual.pilot import Pilot
-from textual.widgets import Button, Input, Select, Static, TabbedContent
+from textual.widgets import Button, Input, OptionList, Select, Static, TabbedContent
 
 from promptmend import config, config_store, deploy, doctor, history, smoke
 from promptmend import profiles as profile_service
 from promptmend.history import HistoryStore
-from promptmend.tui import panes
+from promptmend.tui import panes, settings_model
 from promptmend.tui.app import HIGH_CONTRAST, ManageApp
 from promptmend.tui.home import pill
-from promptmend.tui.modals import ConfirmModal, FormModal, TextModal
+from promptmend.tui.modals import ConfirmModal, EditModal, FormModal, PickModal, TextModal
 from promptmend.tui.previous import PreviousInstallScreen
 from promptmend.tui.state import State, gather
 
@@ -156,6 +156,49 @@ async def fill(app: ManageApp, pilot: Pilot[int], **values: str) -> None:
     await press(app, pilot, "#submit")
 
 
+def settings_pane(app: ManageApp) -> panes.SettingsPane:
+    return app.main.query_one("#settings-pane", panes.SettingsPane)
+
+
+def settings_rows(app: ManageApp) -> dict[str, settings_model.Row]:
+    return settings_pane(app).rows
+
+
+async def on_row(app: ManageApp, pilot: Pilot[int], name: str, *keys: str) -> None:
+    """Open Settings, put the list's cursor on ``name`` and press ``keys`` there."""
+    await pilot.press("2")
+    await settle(pilot)
+    listing = settings_pane(app).query_one(panes.SettingsList)
+    assert listing.has_focus
+    listing.highlighted = listing.get_option_index(name)
+    await pilot.pause()
+    assert settings_pane(app).cursor == name
+    if keys:
+        await pilot.press(*keys)
+        await settle(pilot)
+
+
+async def edit_to(app: ManageApp, pilot: Pilot[int], name: str, value: str) -> None:
+    """Enter on ``name``'s row, then type ``value`` into its field and save."""
+    await on_row(app, pilot, name, "enter")
+    assert isinstance(app.screen, EditModal)
+    app.screen.query_one("#edit-value", Input).value = value
+    await pilot.pause()
+    await press(app, pilot, "#submit")
+
+
+async def pick(app: ManageApp, pilot: Pilot[int], name: str, value: str) -> None:
+    """Enter on ``name``'s row, then pick ``value`` from its list."""
+    await on_row(app, pilot, name, "enter")
+    screen = app.screen
+    assert isinstance(screen, PickModal)
+    listing = screen.query_one("#pick", OptionList)
+    listing.highlighted = [v for _, v in screen.choices].index(value)
+    await pilot.pause()
+    await pilot.press("enter")
+    await settle(pilot)
+
+
 @pytest.fixture
 def record_ops(seed_history: SeedHistory) -> Callable[..., None]:
     """record_ops(n) seeds n recorded -i- calls to OpenRouter."""
@@ -198,7 +241,7 @@ def test_digits_switch_tabs_and_t_toggles_contrast(espanso: FakeRunner) -> None:
 
         for key, tab in zip(
             "7654321",
-            ("try", "diagnostics", "history", "triggers", "profiles", "providers", "home"),
+            ("try", "diagnostics", "history", "triggers", "profiles", "settings", "home"),
             strict=True,
         ):
             await pilot.press(key)
@@ -260,9 +303,6 @@ def test_a_failing_load_is_shown_not_raised(espanso: FakeRunner) -> None:
 @pytest.mark.parametrize(
     ("tab", "button"),
     [
-        ("2", "#set-key"),
-        ("2", "#remove-key"),
-        ("2", "#set-setting"),
         ("2", "#smoke"),
         ("3", "#set-profile"),
         ("5", "#export"),
@@ -328,7 +368,7 @@ def test_home_shows_doctor_and_checks_again(espanso: FakeRunner) -> None:
         assert "Not ready: OPENROUTER_API_KEY is not set, so -i- cannot rewrite." in shown
         assert "fail  Rewrites" not in shown  # the label is FAIL, as in Diagnostics
         assert "FAIL  Rewrites" in shown
-        assert "-> 2 Providers" in shown
+        assert "-> 2 Settings" in shown
         await press(app, pilot, "#home-reload")
         await pilot.press("r")
         await settle(pilot)
@@ -364,81 +404,94 @@ def test_home_warns_of_a_persona_matching_the_patterns(
     drive(scenario)
 
 
-# --- Providers ----------------------------------------------------------------------------
+# --- Settings -----------------------------------------------------------------------------
 
 
-def test_providers_set_a_key_never_shows_it(saved: Path, espanso: FakeRunner) -> None:
+def test_settings_set_a_key_never_shows_it(saved: Path, espanso: FakeRunner) -> None:
     async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
-        await pilot.press("2")
-        await press(app, pilot, "#set-key")
+        assert settings_rows(app)["OPENROUTER_API_KEY"].value == "not set"
+        # Space on a key's row does nothing; Enter opens the hidden Set key dialog.
+        await on_row(app, pilot, "OPENROUTER_API_KEY", "space")
+        assert not isinstance(app.screen, FormModal)
+        await pilot.press("enter")
+        await settle(pilot)
         assert isinstance(app.screen, FormModal)
+        assert app.screen.query_one("#key-name", Select).value == "OPENROUTER_API_KEY"
         assert app.screen.query_one("#key-value", Input).password
-        await fill(app, pilot, key_name="OPENROUTER_API_KEY", key_value=f"  {KEY} ")
+        await fill(app, pilot, key_value=f"  {KEY} ")
         assert KEY not in app.export_screenshot()
-        assert table_rows(app, "providers", "#keys")["OPENROUTER_API_KEY"][1] == "set"
-        assert KEY not in pane(app, "providers").last_message
+        row = settings_rows(app)["OPENROUTER_API_KEY"]
+        assert (row.value, row.on, row.source) == ("set", True, "secrets.toml")
+        assert KEY not in pane(app, "settings").last_message
+        assert app.session[-1].command == "promptmend secrets set OPENROUTER_API_KEY"
 
     drive(scenario)
     assert config_store.saved_secret_names() == ("OPENROUTER_API_KEY",)
     assert KEY in (saved / "secrets.toml").read_text("utf-8")
 
 
-def test_providers_refuse_an_empty_key_and_legacy_mode(espanso: FakeRunner) -> None:
+def test_settings_refuse_an_empty_key_and_legacy_mode(espanso: FakeRunner) -> None:
     async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
-        await pilot.press("2")
-        await press(app, pilot, "#set-key")
+        await on_row(app, pilot, "OPENROUTER_API_KEY", "enter")
         # Enter in a field submits the dialog, like its Save button.
         app.screen.query_one("#key-value", Input).focus()
         await pilot.press("space", "enter")
         await settle(pilot)
-        assert "no value entered" in pane(app, "providers").last_message
-        await press(app, pilot, "#set-key")
+        assert "no value entered" in pane(app, "settings").last_message
+        await pilot.press("enter")
+        await settle(pilot)
         await fill(app, pilot, key_value=KEY)
-        message = pane(app, "providers").last_message
+        message = pane(app, "settings").last_message
         assert message.startswith("error: PROMPTMEND_ENV is set")
         assert KEY not in message
-        await press(app, pilot, "#remove-key")
-        assert "PROMPTMEND_ENV is set" in pane(app, "providers").last_message
+        await pilot.press("r")
+        await settle(pilot)
+        assert "PROMPTMEND_ENV is set" in pane(app, "settings").last_message
 
     drive(scenario)
 
 
-def test_providers_remove_a_key_after_confirming(saved: Path, espanso: FakeRunner) -> None:
+def test_settings_remove_a_key_after_confirming(saved: Path, espanso: FakeRunner) -> None:
     config_store.save_secret("ANTHROPIC_API_KEY", KEY)
 
     async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
-        await pilot.press("2")
-        await press(app, pilot, "#remove-key")
-        await fill(app, pilot, key_name="ANTHROPIC_API_KEY")
+        # r on a key's row is Remove key (never Reload), with that key picked.
+        await on_row(app, pilot, "ANTHROPIC_API_KEY", "r")
+        assert isinstance(app.screen, FormModal)
+        assert app.screen.query_one("#key-name", Select).value == "ANTHROPIC_API_KEY"
+        await press(app, pilot, "#submit")
         assert isinstance(app.screen, ConfirmModal)
         await press(app, pilot, "#cancel")
         assert config_store.saved_secret_names() == ("ANTHROPIC_API_KEY",)
-        await press(app, pilot, "#remove-key")
+        await pilot.press("r")
+        await settle(pilot)
         await fill(app, pilot)
         await pilot.press("y")
         await settle(pilot)
-        assert pane(app, "providers").last_message == (
+        assert pane(app, "settings").last_message == (
             "ANTHROPIC_API_KEY removed from the secret store."
         )
-        await press(app, pilot, "#remove-key")
-        assert "holds no key" in pane(app, "providers").last_message
+        assert app.session[-1].command == "promptmend secrets remove ANTHROPIC_API_KEY"
+        assert settings_rows(app)["ANTHROPIC_API_KEY"].value == "not set"
+        await pilot.press("r")
+        await settle(pilot)
+        assert "holds no key" in pane(app, "settings").last_message
 
     drive(scenario)
     assert config_store.saved_secret_names() == ()
 
 
-def test_providers_remove_a_key_still_set_elsewhere(
+def test_settings_remove_a_key_still_set_elsewhere(
     saved: Path, espanso: FakeRunner, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config_store.save_secret("OPENROUTER_API_KEY", KEY)
     monkeypatch.setenv("OPENROUTER_API_KEY", KEY)
 
     async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
-        await pilot.press("2")
-        await press(app, pilot, "#remove-key")
+        await on_row(app, pilot, "OPENROUTER_API_KEY", "r")
         await fill(app, pilot)
         await press(app, pilot, "#confirm")
-        assert pane(app, "providers").last_message.endswith("it is still set, from environment.")
+        assert pane(app, "settings").last_message.endswith("it is still set, from environment.")
 
     drive(scenario)
 
@@ -452,16 +505,15 @@ def test_an_unexpected_error_is_shown_not_raised(
     monkeypatch.setattr(config_store, "save_secret", bug)
 
     async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
-        await pilot.press("2")
-        await press(app, pilot, "#set-key")
+        await on_row(app, pilot, "OPENROUTER_API_KEY", "enter")
         await fill(app, pilot, key_value=KEY)
-        message = pane(app, "providers").last_message
+        message = pane(app, "settings").last_message
         assert message == "error: unexpected RuntimeError: kaput"
 
     drive(scenario)
 
 
-def test_providers_migrate_reports_a_refusal(
+def test_settings_migrate_reports_a_refusal(
     saved: Path, espanso: FakeRunner, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def refused(environ: Mapping[str, str] | None = None) -> None:
@@ -472,59 +524,291 @@ def test_providers_migrate_reports_a_refusal(
     async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
         await pilot.press("2")
         await press(app, pilot, "#migrate-env")
-        assert pane(app, "providers").last_message == "error: the marker is damaged"
+        assert pane(app, "settings").last_message == "error: the marker is damaged"
 
     drive(scenario)
 
 
-def test_providers_change_a_setting_and_reload(
+def test_settings_space_toggles_history(saved: Path, espanso: FakeRunner) -> None:
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        row = settings_rows(app)["PROMPT_HISTORY"]
+        assert (row.value, row.on, row.source) == ("on", True, "default")
+        await on_row(app, pilot, "PROMPT_HISTORY", "space")
+        assert not _state(app).settings.history
+        row = settings_rows(app)["PROMPT_HISTORY"]
+        assert (row.value, row.on, row.source) == ("off", False, "config.toml")
+        assert app.session[-1].command == "promptmend config set PROMPT_HISTORY false"
+        assert pane(app, "settings").last_message.startswith("PROMPT_HISTORY saved in ")
+        # The cursor stays on the row after the reload; Enter on a switch toggles it too.
+        assert settings_pane(app).cursor == "PROMPT_HISTORY"
+        await pilot.press("enter")
+        await settle(pilot)
+        assert _state(app).settings.history
+        # Space on a row that is not a switch does nothing.
+        await on_row(app, pilot, "PROMPT_OUTPUT", "space")
+        assert not isinstance(app.screen, PickModal)
+        assert len(app.session) == 2
+
+    drive(scenario)
+    assert "PROMPT_HISTORY = true" in (saved / "config.toml").read_text("utf-8")
+
+
+def test_settings_enter_picks_the_output_and_r_resets_it(saved: Path, espanso: FakeRunner) -> None:
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        await on_row(app, pilot, "PROMPT_OUTPUT", "enter")
+        screen = app.screen
+        assert isinstance(screen, PickModal)
+        # The current value is marked and highlighted; Escape changes nothing.
+        assert screen.choices == [("paste  (current)", "paste"), ("clipboard", "clipboard")]
+        assert screen.query_one("#pick", OptionList).highlighted == 0
+        await pilot.press("escape")
+        await settle(pilot)
+        assert app.session == []
+        await pick(app, pilot, "PROMPT_OUTPUT", "clipboard")
+        assert _state(app).settings.output == "clipboard"
+        row = settings_rows(app)["PROMPT_OUTPUT"]
+        assert (row.value, row.on, row.source) == ("clipboard", True, "config.toml")
+        assert app.session[-1].command == "promptmend config set PROMPT_OUTPUT clipboard"
+        # Home's Output row says it, and where to change it (#198).
+        rows = {r.label: r for r in app.main.query_one("#home-pane", panes.HomePane).rows}
+        assert (rows["Output"].text, rows["Output"].detail) == (
+            "copy to the clipboard",
+            "change: 2 Settings",
+        )
+        # r resets it (config unset): back to the default, logged as its command.
+        await pilot.press("r")
+        await settle(pilot)
+        assert _state(app).settings.output == "paste"
+        assert app.session[-1].command == "promptmend config unset PROMPT_OUTPUT"
+        assert "removed from" in pane(app, "settings").last_message
+        assert settings_rows(app)["PROMPT_OUTPUT"].on is False
+        await pilot.press("r")
+        await settle(pilot)
+        assert "nothing to do" in pane(app, "settings").last_message
+
+    drive(scenario)
+    assert "PROMPT_OUTPUT" not in (saved / "config.toml").read_text("utf-8")
+
+
+def test_settings_reset_says_where_a_value_comes_from(
+    saved: Path, espanso: FakeRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PROMPT_TIMEOUT_SECONDS", "40")
+
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        await on_row(app, pilot, "PROMPT_TIMEOUT_SECONDS", "r")
+        message = pane(app, "settings").last_message
+        assert message.endswith("nothing to do. It comes from environment.")
+
+    drive(scenario)
+
+
+def test_settings_edit_checks_the_value_in_the_dialog(
+    saved: Path, espanso: FakeRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        await on_row(app, pilot, "PROMPT_TIMEOUT_SECONDS", "enter")
+        screen = app.screen
+        assert isinstance(screen, EditModal)
+        field = screen.query_one("#edit-value", Input)
+        assert field.value == "30"
+        assert field.has_focus
+        assert "Default: 30" in screen.preview
+        # A bad value stays in the dialog with the parser's message; nothing is saved.
+        field.value = "soon"
+        await press(app, pilot, "#submit")
+        assert app.screen is screen
+        error = str(screen.query_one("#edit-error", Static).render())
+        assert error.startswith("PROMPT_TIMEOUT_SECONDS must be a number above 0")
+        field.value = KEY
+        await pilot.pause()
+        await pilot.press("enter")  # Enter in the field submits too
+        await settle(pilot)
+        assert app.screen is screen
+        assert "looks like a key" in str(screen.query_one("#edit-error", Static).render())
+        assert KEY not in str(screen.query_one("#edit-error", Static).render())
+        await pilot.press("escape")
+        await settle(pilot)
+        assert app.session == []
+        await edit_to(app, pilot, "PROMPT_TIMEOUT_SECONDS", "45")
+        assert _state(app).settings.timeout == 45
+        assert settings_rows(app)["PROMPT_TIMEOUT_SECONDS"].value == "45.0"  # as saved
+        result = _rendered(pane(app, "settings"), ".result")
+        assert result.startswith("$ promptmend config set PROMPT_TIMEOUT_SECONDS 45\n")
+
+    drive(scenario)
+    text = (saved / "config.toml").read_text("utf-8")
+    assert "PROMPT_TIMEOUT_SECONDS = " in text
+    assert KEY not in text
+
+
+def test_settings_local_only_shows_in_the_diagnostics_routes(
     saved: Path, espanso: FakeRunner, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("PROMPT_PROFILE", "general")
 
     async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
-        await pilot.press("2")
-        await press(app, pilot, "#set-setting")
-        options = app.screen.query_one("#setting-name", Select)._options
-        assert "PROMPT_PERSONA" not in [value for _, value in options]
-        await fill(app, pilot, setting_name="PROMPT_LOCAL_ONLY", setting_value="true")
+        await on_row(app, pilot, "PROMPT_LOCAL_ONLY", "space")
         assert _state(app).settings.local_only
-        routes = table_rows(app, "providers", "#routes")
+        routes = table_rows(app, "diagnostics", "#routes")
         assert routes["openrouter"][3] == routes["anthropic"][3] == "refused (local only)"
         assert routes["ollama"][3] == "stays local"
-        # A bad value is refused as the CLI would refuse it; a key never reaches config.toml.
-        await press(app, pilot, "#set-setting")
-        await fill(app, pilot, setting_name="PROMPT_LOCAL_ONLY", setting_value="maybe")
-        assert pane(app, "providers").last_message.startswith("error: PROMPT_LOCAL_ONLY")
-        await press(app, pilot, "#set-setting")
-        await fill(app, pilot, setting_name="PROMPT_PROFILE", setting_value=KEY)
-        assert "looks like a key" in pane(app, "providers").last_message
-        await press(app, pilot, "#set-setting")
-        await fill(app, pilot, setting_name="PROMPT_PROFILE", setting_value="default")
-        assert "overrides the saved value" in pane(app, "providers").last_message
+        policy = str(pane(app, "diagnostics").query_one("#policy").render())
+        assert policy.startswith("PROMPT_LOCAL_ONLY is on")
+        # A real environment variable outranks what is saved, and the result says so.
+        await pick(app, pilot, "PROMPT_PROFILE", "default")
+        assert "overrides the saved value" in pane(app, "settings").last_message
 
     drive(scenario)
-    text = (saved / "config.toml").read_text("utf-8")
-    assert "PROMPT_LOCAL_ONLY = true" in text
-    assert KEY not in text
+    assert "PROMPT_LOCAL_ONLY = true" in (saved / "config.toml").read_text("utf-8")
+
+
+def test_settings_never_show_the_persona(
+    saved: Path, espanso: FakeRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    persona = "I am the head of a secret project"
+
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        assert settings_rows(app)["PROMPT_PERSONA"].value == "(empty)"
+        await edit_to(app, pilot, "PROMPT_PERSONA", persona)
+        row = settings_rows(app)["PROMPT_PERSONA"]
+        assert (row.value, row.on) == ("<set, hidden>", True)
+        assert persona not in app.export_screenshot()
+        assert app.session[-1].command == "promptmend config set PROMPT_PERSONA <value withheld>"
+        assert persona not in pane(app, "settings").last_message
+        # Its own dialog is prefilled (only the owner sees it); the list never shows it.
+        await pilot.press("enter")
+        await settle(pilot)
+        assert app.screen.query_one("#edit-value", Input).value == persona
+        await pilot.press("escape")
+        await settle(pilot)
+        await pilot.press("6")
+        assert persona not in app.export_screenshot()
+
+    drive(scenario)
+    assert persona in (saved / "config.toml").read_text("utf-8")
+
+
+def test_settings_filter(espanso: FakeRunner) -> None:
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        settings = settings_pane(app)
+        count = settings.query_one("#settings-count", Static)
+        assert str(count.render()) == f"{len(settings_model.SETTINGS)} settings"
+        await on_row(app, pilot, "PROMPT_OUTPUT", "slash")
+        assert settings.query_one(panes.FilterInput).has_focus
+        await pilot.press(*"hist")
+        await settle(pilot)
+        assert list(settings.rows) == ["PROMPT_HISTORY", "PROMPT_HISTORY_RETENTION_DAYS"]
+        assert str(count.render()) == f"2 of {len(settings_model.SETTINGS)}"
+        assert settings.cursor == "PROMPT_HISTORY"
+        # A group's name matches too; Enter and Down go back to the list, keeping the filter.
+        await pilot.press("enter")
+        assert settings.query_one(panes.SettingsList).has_focus
+        await pilot.press("slash", *"keys")  # the filter's text is selected: typing replaces it
+        await settle(pilot)
+        assert list(settings.rows) == ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY"]
+        await pilot.press("down")
+        assert settings.query_one(panes.SettingsList).has_focus
+        await pilot.press("slash", *"zzz")
+        await settle(pilot)
+        assert settings.rows == {}
+        assert "No setting matches 'zzz'" in str(settings.query_one("#settings-help").render())
+        # Nothing to act on: the keys do nothing.
+        settings.toggle()
+        settings.edit()
+        settings.reset()
+        assert app.session == []
+        # Escape clears it and goes back to the list.
+        await pilot.press("escape")
+        await settle(pilot)
+        assert settings.query_one(panes.SettingsList).has_focus
+        assert len(settings.rows) == len(settings_model.SETTINGS)
+
+    drive(scenario)
+
+
+def test_settings_keys_act_only_on_their_tab(espanso: FakeRunner) -> None:
+    calls: list[str] = []
+
+    def loader(group_by: str) -> State:
+        calls.append(group_by)
+        return gather(group_by)
+
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        await on_row(app, pilot, "PROMPT_HISTORY")
+        await pilot.press("1")
+        await settle(pilot)
+        assert app.focused is None
+        # r is Reload again, and Space nothing.
+        await pilot.press("r", "space")
+        await settle(pilot)
+        assert app.session == []
+        assert len(calls) == 2
+
+    drive(scenario, loader=loader)
+
+
+@pytest.mark.parametrize(
+    ("name", "key", "modal"),
+    [
+        ("OPENROUTER_API_KEY", "enter", FormModal),
+        ("OPENROUTER_API_KEY", "r", FormModal),
+        ("PROMPT_PROVIDER", "enter", PickModal),
+        ("PROMPT_PRO_PROFILE", "enter", PickModal),
+        ("OLLAMA_MODEL", "enter", EditModal),
+    ],
+    ids=["set-key", "remove-key", "pick", "pick-profile", "edit"],
+)
+def test_cancelling_a_settings_dialog_changes_nothing(
+    saved: Path, espanso: FakeRunner, name: str, key: str, modal: type[Widget]
+) -> None:
+    config_store.save_secret("OPENROUTER_API_KEY", KEY)
+    before = sorted((p, p.read_bytes()) for p in saved.rglob("*") if p.is_file())
+
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        await on_row(app, pilot, name, key)
+        assert isinstance(app.screen, modal)
+        await pilot.press("escape")
+        await settle(pilot)
+        assert not isinstance(app.screen, modal)
+        assert app.session == []
+
+    drive(scenario)
+    assert sorted((p, p.read_bytes()) for p in saved.rglob("*") if p.is_file()) == before
+
+
+def test_settings_profile_choices_include_your_own(saved: Path, espanso: FakeRunner) -> None:
+    _user_profile("mine")
+
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        await on_row(app, pilot, "PROMPT_PRO_PROFILE", "enter")
+        screen = app.screen
+        assert isinstance(screen, PickModal)
+        values = [v for _, v in screen.choices]
+        assert values[0] == ""
+        assert screen.choices[0][0] == "(empty)  (current)"
+        assert {"default", "general", "mine"} <= set(values)
+        await pilot.press("escape")
+        await settle(pilot)
+        await pick(app, pilot, "PROMPT_PRO_PROFILE", "mine")
+        assert _state(app).settings.pro_profile == "mine"
+
+    drive(scenario)
 
 
 # A change that makes a flagged persona go out says so, as `config set` does: the finding
 # names only, and the setting stays saved.
-def test_providers_change_warns_about_a_flagged_persona(
+def test_settings_change_warns_about_a_flagged_persona(
     saved: Path, espanso: FakeRunner, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     address = "jane.doe" + "@" + "example.com"
     monkeypatch.setenv("PROMPT_PERSONA", f"I am an analyst, mail {address}.")
 
     async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
-        await pilot.press("2")
-        await press(app, pilot, "#set-setting")
-        await fill(app, pilot, setting_name="PROMPT_PROFILE", setting_value="general")
-        assert "PROMPT_PERSONA" not in pane(app, "providers").last_message
-        await press(app, pilot, "#set-setting")
-        await fill(app, pilot, setting_name="PROMPT_PROFILE", setting_value="default")
-        message = pane(app, "providers").last_message
+        await pick(app, pilot, "PROMPT_PROFILE", "general")
+        assert "PROMPT_PERSONA" not in pane(app, "settings").last_message
+        await pick(app, pilot, "PROMPT_PROFILE", "default")
+        message = pane(app, "settings").last_message
         assert message.startswith("PROMPT_PROFILE saved in ")
         assert "PROMPT_PERSONA matches the data-protection patterns: email" in message
         assert address not in message
@@ -533,7 +817,7 @@ def test_providers_change_warns_about_a_flagged_persona(
     assert 'PROMPT_PROFILE = "default"' in (saved / "config.toml").read_text("utf-8")
 
 
-def test_providers_migrate_env_with_preview(saved: Path, espanso: FakeRunner) -> None:
+def test_settings_migrate_env_with_preview(saved: Path, espanso: FakeRunner) -> None:
     saved.mkdir(parents=True)
     (saved / ".env").write_text(
         f"PROMPT_PROFILE=general\nOPENROUTER_API_KEY={KEY}\n", encoding="utf-8"
@@ -549,15 +833,15 @@ def test_providers_migrate_env_with_preview(saved: Path, espanso: FakeRunner) ->
         assert (saved / ".env").is_file()
         await press(app, pilot, "#migrate-env")
         await press(app, pilot, "#confirm")
-        assert pane(app, "providers").last_message.startswith("Migrated. Backup:")
+        assert pane(app, "settings").last_message.startswith("Migrated. Backup:")
         await press(app, pilot, "#migrate-env")
-        assert "already" in pane(app, "providers").last_message
+        assert "already" in pane(app, "settings").last_message
 
     drive(scenario)
     assert config_store.saved_secret_names() == ("OPENROUTER_API_KEY",)
 
 
-def test_providers_test_call_uses_the_stub_service(
+def test_settings_test_call_uses_the_stub_service(
     espanso: FakeRunner, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     called = []
@@ -576,13 +860,13 @@ def test_providers_test_call_uses_the_stub_service(
         assert called == []
         await press(app, pilot, "#smoke")
         await fill(app, pilot, provider="ollama")
-        assert pane(app, "providers").last_message == "ok: improve reached the stub"
+        assert pane(app, "settings").last_message == "ok: improve reached the stub"
 
     drive(scenario)
     assert called == ["ollama"]
 
 
-def test_providers_test_call_adds_no_history_row(
+def test_settings_test_call_adds_no_history_row(
     espanso: FakeRunner, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """#116: the real Test call (a child improve against the stub) is not usage."""
@@ -594,11 +878,11 @@ def test_providers_test_call_adds_no_history_row(
         await press(app, pilot, "#smoke")
         await fill(app, pilot, provider="ollama")
         for _ in range(100):  # the child process runs in a worker
-            if pane(app, "providers").last_message.startswith("ok: "):
+            if pane(app, "settings").last_message.startswith("ok: "):
                 break
             await asyncio.sleep(0.1)
             await settle(pilot)
-        assert pane(app, "providers").last_message.startswith("ok: improve reached the stub")
+        assert pane(app, "settings").last_message.startswith("ok: improve reached the stub")
 
     drive(scenario)
     assert store.health().operations in (None, 0)
@@ -1109,13 +1393,28 @@ def test_files_under_home_show_as_tilde(
     monkeypatch.setenv("OPENROUTER_API_KEY", KEY)
 
     async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
-        keys = table_rows(app, "providers", "#keys")
-        assert keys["OPENROUTER_API_KEY"][2:4] == [
-            "environment",
-            "~/.config/promptmend/secrets.toml",
-        ]
+        # The list shows the file name; its help line the place, ~/… under the home folder.
+        await on_row(app, pilot, "PROMPT_PROFILE")
+        row = settings_rows(app)["PROMPT_PROFILE"]
+        assert (row.source, row.where) == ("environment", "environment")
+        await on_row(app, pilot, "PROMPT_HISTORY")
+        await on_row(app, pilot, "OPENROUTER_API_KEY")
+        help_line = str(settings_pane(app).query_one("#settings-help").render())
+        assert "From environment · secrets set OPENROUTER_API_KEY" in help_line
+        monkeypatch.delenv("PROMPT_PROFILE")
+        monkeypatch.delenv("OPENROUTER_API_KEY")
+        app.reload()
+        await settle(pilot)
+        assert settings_rows(app)["PROMPT_PROFILE"].source == "config.toml"
+        assert settings_rows(app)["PROMPT_PROFILE"].where == "~/.config/promptmend/config.toml"
+        assert settings_rows(app)["OPENROUTER_API_KEY"].source == "secrets.toml"
+        monkeypatch.setenv("PROMPT_PROFILE", "default")
+        monkeypatch.setenv("OPENROUTER_API_KEY", KEY)
+        app.reload()
+        await settle(pilot)
         await pilot.press("6")
         rows = table_rows(app, "diagnostics", "#settings")
+        assert rows["OPENROUTER_API_KEY"][3] == "overrides ~/.config/promptmend/secrets.toml"
         assert rows["PROMPT_PROFILE"][2:4] == [
             "environment",
             "overrides ~/.config/promptmend/config.toml",
@@ -1324,7 +1623,7 @@ def test_bare_command_in_a_real_process(tmp_path: Path) -> None:
 # --- review of #109: regressions ----------------------------------------------------------
 
 
-def test_providers_never_show_credentials_in_a_base_url(
+def test_settings_never_show_credentials_in_a_base_url(
     espanso: FakeRunner, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     secret = "hunter" + "2pass"
@@ -1389,7 +1688,7 @@ def test_a_failing_worker_is_reported_not_raised(
         await pilot.press("2")
         await press(app, pilot, "#smoke")
         await fill(app, pilot)
-        assert pane(app, "providers").last_message == "error: unexpected RuntimeError: kaput"
+        assert pane(app, "settings").last_message == "error: unexpected RuntimeError: kaput"
         await pilot.press("4")
         await press(app, pilot, "#deploy")
         await press(app, pilot, "#submit")
@@ -2033,9 +2332,10 @@ def test_copy_last_takes_another_tabs_entry_withheld(
         monkeypatch.setattr(app, "copy_to_clipboard", copied.append)
         copy = app.main.query_one("#home-copy", Button)
         assert copy.disabled
-        await pilot.press("2")
-        await press(app, pilot, "#set-setting")
-        await fill(app, pilot, setting_name="PROMPT_PROFILE", setting_value=KEY)
+        # The edit dialog refuses a key-like value; behind it, save_setting() refuses too.
+        await on_row(app, pilot, "PROMPT_PROFILE")
+        settings_pane(app).save("PROMPT_PROFILE", KEY)
+        await settle(pilot)
         assert app.session[-1].error
         await pilot.press("1")
         assert not copy.disabled
@@ -2055,14 +2355,12 @@ def test_results_show_their_command_and_home_keeps_the_session(
         before = _rendered(home, "#home-session")
         assert "In a terminal, try:" in before
         assert "$ promptmend config show" in before
-        await pilot.press("2")
-        await press(app, pilot, "#set-setting")
-        await fill(app, pilot, setting_name="PROMPT_TIMEOUT_SECONDS", setting_value="45")
-        result = _rendered(pane(app, "providers"), ".result")
+        await edit_to(app, pilot, "PROMPT_TIMEOUT_SECONDS", "45")
+        result = _rendered(pane(app, "settings"), ".result")
         assert result.startswith("$ promptmend config set PROMPT_TIMEOUT_SECONDS 45\n")
         # A value that looks like a key is never shown, even refused.
-        await press(app, pilot, "#set-setting")
-        await fill(app, pilot, setting_name="PROMPT_PROFILE", setting_value=KEY)
+        settings_pane(app).save("PROMPT_PROFILE", KEY)
+        await settle(pilot)
         await pilot.press("5")
         await press(app, pilot, "#reset")
         await press(app, pilot, "#confirm")
@@ -2132,9 +2430,9 @@ def _files(folder: Path) -> list[tuple[Path, bytes]]:
         ("espanso deploy --yes", "triggers", FormModal, None, None),
         ("history reset -y", "history", ConfirmModal, None, None),
         ("history prune --older-than 9", "history", FormModal, "#days", "9"),
-        ("secrets set ANTHROPIC_API_KEY", "providers", FormModal, "#key-name", "ANTHROPIC_API_KEY"),
-        ("secrets remove ANTHROPIC_API_KEY", "providers", FormModal, "#key-name", None),
-        ("secrets remove", "providers", FormModal, "#key-name", None),
+        ("secrets set ANTHROPIC_API_KEY", "settings", FormModal, "#key-name", "ANTHROPIC_API_KEY"),
+        ("secrets remove ANTHROPIC_API_KEY", "settings", FormModal, "#key-name", None),
+        ("secrets remove", "settings", FormModal, "#key-name", None),
     ],
 )
 def test_command_line_opens_the_dialog_and_cancel_writes_nothing(

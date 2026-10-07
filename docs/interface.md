@@ -1,9 +1,9 @@
 # The interface
 
 `promptmend` opens a full-screen terminal interface for setting up and managing PromptMend:
-providers and keys, profiles, the Espanso match files, the usage history, diagnostics, and a
+settings and keys, profiles, the Espanso match files, the usage history, diagnostics, and a
 tab to try a rewrite before a trigger pastes one. This page covers its tabs, the command line
-on Home, the Try tab and the keys. Everything it does, a headless command does too (see
+on Home, the Settings and Try tabs and the keys. Everything it does, a headless command does too (see
 [Commands](commands.md)).
 
 ## Contents
@@ -12,6 +12,7 @@ on Home, the Try tab and the keys. Everything it does, a headless command does t
 - [Tabs](#tabs)
 - [Home](#home)
 - [Command line](#command-line)
+- [Settings tab](#settings-tab)
 - [Recipes and Copy last](#recipes-and-copy-last)
 - [Try tab](#try-tab)
 - [Keys](#keys)
@@ -40,11 +41,11 @@ retire the old `.env`. See [From a checkout install](install.md#from-a-checkout-
 | Key | Tab | What it shows and does |
 |-----|-----|------------------------|
 | `1` | Home | Whether you are ready, the most urgent problem, the session log and the command line |
-| `2` | Providers | Each provider's settings and keys (set or not set); change a setting, set or remove a key, migrate a `.env`, run the Test call |
+| `2` | Settings | Every setting and key in one list: switch, pick, edit or reset a setting, set or remove a key, migrate a `.env`, run the Test call (see [Settings tab](#settings-tab)) |
 | `3` | Profiles | Built-in and your own profiles; pick the default profile, edit a profile in `$VISUAL` or `$EDITOR`, copy a checkout's profiles |
 | `4` | Triggers | The match files and their states, the diff, deploy and detach |
 | `5` | History | Usage statistics by trigger, provider, model or day; export, prune, reset |
-| `6` | Diagnostics | The `doctor` checks, and an import-time check of the CLI |
+| `6` | Diagnostics | Each provider's model, base URL, key and whether the draft leaves this machine; every setting's source; the `doctor` checks, and an import-time check of the CLI |
 | `7` | Try | Rewrite a typed draft against a stub or a confirmed provider |
 
 Every button's tooltip shows the command that does the same in a terminal, and every result
@@ -65,7 +66,7 @@ fixes it. Below, each row has a status word (ok, warn, FAIL) and the tab that fi
 - what `-i-` and `-ip-` run;
 - the match files and Espanso;
 - the usage history;
-- the output mode (`PROMPT_OUTPUT`: paste or clipboard);
+- the output mode (`PROMPT_OUTPUT`: paste or clipboard), which the Settings tab switches;
 - the `doctor` checks.
 
 The header shows the same status (`ok`, or `1 problem, 2 warnings`). Home also lists this
@@ -92,8 +93,37 @@ Enter acts on the command by what it does:
 | Refused | `improve`, `persona`, `ui` | Says why: the triggers run `improve` and `persona`, and `improve` reads the clipboard; the Try tab rewrites a typed draft instead |
 
 A line that looks like it holds a key, `secrets set` with anything after the key's name, or
-`config set|get|unset` with a key's name and a value, is never run, shown back or kept: it is cleared, and keys go in Providers. A key in a command's
+`config set|get|unset` with a key's name and a value, is never run, shown back or kept: it is cleared, and keys go in Settings. A key in a command's
 output is shown as `<redacted, N chars>`.
+
+## Settings tab
+
+The Settings tab (`2`) lists every setting and both API keys, grouped (Output, Keys, Privacy,
+Models, History, Interface). Each row has a dot, the name, the value and where the value comes
+from (`config.toml`, `secrets.toml`, `.env`, `environment` or `default`):
+
+- a green `●` is a switch that is on, a key that is set, or a value that is not the default;
+- a grey `○` and a dimmed row is a switch that is off, a key that is not set, or a default.
+
+The dot is a glyph as well as a colour, so it reads in the high-contrast theme and with
+`NO_COLOR` too. Keys show only `set` or `not set`, and `PROMPT_PERSONA` only `<set, hidden>`.
+The line under the list explains the setting under the cursor, says where its value comes
+from and gives the command that changes it in a terminal.
+
+The list has the focus when the tab opens. Its keys:
+
+| Key | Action |
+|-----|--------|
+| Up, Down, `j`, `k` | Move |
+| Space | Switch a true/false setting, saved at once |
+| Enter | Switch a true/false setting; pick from a list (the current value marked); type a value (prefilled, the persona too), checked as the CLI reads it: a rejected value or one that looks like a key stays in the dialog with the reason, and nothing is saved. On a key's row, the Set key dialog |
+| `r` | Back to the default (`config unset`). On a key's row, the Remove key dialog. Only while the list has the focus: elsewhere `r` reloads |
+| `/` | Filter by name or group; Escape clears it and goes back to the list |
+
+Every change is saved in `config.toml` as `promptmend config set` saves it (keys in the secret
+store), and shows and logs its command (`$ promptmend config set PROMPT_OUTPUT clipboard`,
+the persona as `<value withheld>`). An environment variable of the same name still wins, and
+the result says so.
 
 ## Recipes and Copy last
 
@@ -144,10 +174,11 @@ models, never a made-up 0.
 | `1`-`7` | Switch tabs |
 | `c` | Open Home's command line |
 | `a` | About: version, whether a newer release exists and the command to update, install channel, folders and licence |
-| `r` | Reload |
+| `r` | Reload (in the Settings list: reset the setting) |
 | `t` | Switch to the high-contrast theme |
 | `q` | Quit |
-| Escape | Leave the command line or the Try tab's draft, so the tab keys work again |
+| Escape | Leave the command line or the Try tab's draft, so the tab keys work again; clear the Settings filter |
+| Up, Down, `j`, `k`, Space, Enter, `/` | Move and change in the [Settings list](#settings-tab) |
 
 ## Intro
 

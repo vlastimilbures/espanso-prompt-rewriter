@@ -342,7 +342,7 @@ def test_not_focused_at_launch_and_c_focuses_it() -> None:
         await pilot.press("escape")
         assert not _line(app).has_focus
         await pilot.press("2")
-        assert _tab(app) == "providers"
+        assert _tab(app) == "settings"
 
     drive(scenario)
 
@@ -415,7 +415,7 @@ def test_a_key_line_is_cleared_and_never_recalled(nothing_runs: Callable[[], Non
         await settle(pilot)
         assert line.value == ""
         assert line.history == []
-        assert "Providers" in _help(app)
+        assert "Settings" in _help(app)
         assert KEY not in _help(app)
         await pilot.press("up")
         assert line.value == ""
@@ -837,7 +837,7 @@ def test_secrets_set_with_a_value_is_cleared_and_not_kept(rest: str) -> None:
         assert line.value == ""
         assert line.history == []
         assert rest not in _help(app)
-        assert teach.WITHHELD in _help(app) or "Providers" in _help(app)
+        assert teach.WITHHELD in _help(app) or "Settings" in _help(app)
         assert app.session == []
         await pilot.press("up")
         assert line.value == ""
@@ -916,7 +916,7 @@ def test_the_key_recipe_prefills_only_the_name(nothing_runs: Callable[[], None])
         # Enter opens the hidden key dialog, as for a typed line.
         await pilot.press("enter")
         await settle(pilot)
-        assert _tab(app) == "providers"
+        assert _tab(app) == "settings"
         assert isinstance(app.screen, FormModal)
         assert app.screen.values() == {"key-name": "OPENROUTER_API_KEY", "key-value": ""}
 

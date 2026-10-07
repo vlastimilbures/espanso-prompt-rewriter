@@ -24,7 +24,7 @@ _RANK = {OK: 0, WARN: 1, FAIL: 2}
 # Tab id -> its label; the digit in each label is its key (app.TABS adds the panes).
 TAB_LABELS = {
     "home": "1 Home",
-    "providers": "2 Providers",
+    "settings": "2 Settings",
     "profiles": "3 Profiles",
     "triggers": "4 Triggers",
     "history": "5 History",
@@ -34,6 +34,8 @@ TAB_LABELS = {
 READY = "Ready: type -i- in any text field."
 # PROMPT_OUTPUT (#134) value -> what Home says it does.
 OUTPUTS = {"paste": "paste into the app", "clipboard": "copy to the clipboard"}
+# The Output row's pointer to the tab that switches it (#198).
+CHANGE_OUTPUT = f"change: {TAB_LABELS['settings']}"
 _NUMBERS = ("no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine")
 
 
@@ -86,7 +88,7 @@ def _trigger_row(state: State, label: str, name: str) -> HomeRow:
     provider = (trigger.provider if trigger else None) or cfg.provider
     route = next((r for r in routes(cfg) if r.name == provider), None)
     if route is None:  # a provider name no route knows: nothing more to say about it
-        return HomeRow(FAIL, label, provider, "", "providers", f"{name} names {provider}")
+        return HomeRow(FAIL, label, provider, "", "settings", f"{name} names {provider}")
     entries = state.layers.entries
     model_setting = route.model_setting
     if trigger is not None and trigger.tier == "pro" and provider == "openrouter":
@@ -94,12 +96,12 @@ def _trigger_row(state: State, label: str, name: str) -> HomeRow:
     text = f"{provider} · {common.shown_value(model_setting, entries[model_setting])}"
     if route.refused:
         problem = f"PROMPT_LOCAL_ONLY is on, so {name} ({provider}) is refused"
-        return HomeRow(FAIL, label, text, "refused", "providers", problem)
+        return HomeRow(FAIL, label, text, "refused", "settings", problem)
     if route.key and not entries[route.key].value:
         problem = f"{route.key} is not set, so {name} cannot rewrite"
-        return HomeRow(FAIL, label, text, "key not set", "providers", problem)
+        return HomeRow(FAIL, label, text, "key not set", "settings", problem)
     detail = "key set" if route.key else ("no key needed" if route.remote else "stays local")
-    return HomeRow(OK, label, text, detail, "providers")
+    return HomeRow(OK, label, text, detail, "settings")
 
 
 def _espanso_words(check: doctor.Check | None) -> str:
@@ -180,7 +182,8 @@ def home_rows(state: State) -> list[HomeRow]:
         _trigger_row(state, "Pro (-ip-)", "-ip-"),
         _triggers_row(state),
         _history_row(state),
-        HomeRow(OK, "Output", OUTPUTS.get(output, output), "", "providers"),
+        # Always names where to change it (#198), though it is never a problem.
+        HomeRow(OK, "Output", OUTPUTS.get(output, output), CHANGE_OUTPUT, "settings"),
         _checks_row(state),
     ]
 

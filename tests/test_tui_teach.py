@@ -34,8 +34,34 @@ def parse(argv: tuple[str, ...]) -> None:
 ALL = sorted(
     {argv for commands in teach.BUTTONS.values() for argv in commands}
     | {recipe.argv for recipe in teach.RECIPES}
+    | set(teach.SETTING_ACTIONS.values())
     | {teach.INTRO_OFF}
 )
+
+
+# Each Settings list action (#199), filled in for every row it applies to, parses too.
+def test_every_settings_list_command_parses() -> None:
+    from promptmend.tui import settings_model
+
+    for meta in settings_model.SETTINGS:
+        if meta.kind == settings_model.KEY:
+            commands = [teach.for_setting(a, meta.name) for a in ("set-key", "remove-key")]
+        else:
+            commands = [
+                teach.for_setting("set", meta.name, "x"),
+                teach.for_setting("set", meta.name, teach.WITHHELD),
+                teach.for_setting("reset", meta.name),
+            ]
+        for command in commands:
+            words = command.split()
+            assert words[0] == teach.PROGRAM
+            parse(tuple(" ".join(words[1:]).replace(teach.WITHHELD, "v").split()))
+    assert teach.for_setting("set", "PROMPT_OUTPUT", "") == (
+        "promptmend config set PROMPT_OUTPUT ''"
+    )
+    assert teach.for_setting("set", "PROMPT_OUTPUT") == (
+        "promptmend config set PROMPT_OUTPUT <VALUE>"
+    )
 
 
 @pytest.mark.parametrize("argv", ALL, ids=" ".join)

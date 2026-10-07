@@ -7,7 +7,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import ClassVar
 
-from textual import work
+from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingType
 from textual.screen import Screen
@@ -24,7 +24,7 @@ from .panes import (
     HomePane,
     Pane,
     ProfilesPane,
-    ProvidersPane,
+    SettingsPane,
     TriggersPane,
 )
 from .previous import PreviousInstallScreen, wants_offer
@@ -50,7 +50,7 @@ HIGH_CONTRAST = Theme(
 # Tab id -> (label, pane). The digit in each label is its key.
 _PANES: dict[str, type[Pane]] = {
     "home": HomePane,
-    "providers": ProvidersPane,
+    "settings": SettingsPane,
     "profiles": ProfilesPane,
     "triggers": TriggersPane,
     "history": HistoryPane,
@@ -80,6 +80,18 @@ DataTable { height: auto; max-height: 14; margin-bottom: 1; }
 #home-command-help { color: $text-muted; }
 #home-output { height: 12; margin-top: 1; border: round $panel-lighten-2; }
 #home-session { margin-top: 1; text-wrap: nowrap; text-overflow: ellipsis; }
+/* The Settings tab (#199): a one-line filter, the list filling the tab, two help lines. */
+#settings-pane { overflow-y: hidden; }
+#settings-top { height: 1; }
+#settings-filter { border: none; height: 1; padding: 0 1; width: 1fr; }
+#settings-count { width: auto; color: $text-muted; padding: 0 1; }
+#settings-list { height: 1fr; min-height: 4; border: none; padding: 0; }
+#settings-list > .option-list--option-disabled { color: $text; text-style: bold; }
+#settings-help { height: 2; }
+#settings-pane .buttons { margin-top: 0; }
+#settings-pane .buttons { height: 1; }
+#settings-pane .buttons Button { min-width: 0; height: 1; border: none; }
+#settings-pane .result { margin-top: 0; height: auto; max-height: 3; }
 #try-draft { height: 6; }
 #try-options { height: auto; margin-top: 1; }
 .try-option { width: 1fr; height: auto; margin-right: 1; }
@@ -124,6 +136,16 @@ class MainScreen(Screen[None]):
 
     def action_show(self, tab: str) -> None:
         self.query_one(TabbedContent).active = tab
+
+    @on(TabbedContent.TabActivated)
+    def _tab_shown(self, event: TabbedContent.TabActivated) -> None:
+        """The Settings list takes the focus as its tab opens (#199), so the arrows move in it
+        at once; leaving the tab drops it, so its keys (`r`, Space) never act unseen."""
+        settings = self.query_one("#settings-pane")
+        if event.pane.id == "settings":
+            self.call_after_refresh(settings.query_one("#settings-list").focus)
+        elif self.focused is not None and settings in self.focused.ancestors_with_self:
+            self.set_focus(None)
 
     def action_command(self) -> None:
         """Home's command line (#111), focused. Typed into, it keeps every letter and digit

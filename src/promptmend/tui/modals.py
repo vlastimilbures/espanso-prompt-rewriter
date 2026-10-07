@@ -1,5 +1,5 @@
-"""The interface's dialogs: a confirmation, a read-only text view (a diff), a small form and
-a list to pick from (Home's recipes).
+"""The interface's dialogs: a confirmation, a read-only text view (a diff), a small form, a
+list to pick from (Home's recipes, a setting's choices) and one value to edit (a setting).
 
 A destructive action always goes through one of them: nothing is deleted, overwritten or
 deployed until its button is pressed, and Cancel (or Escape, or n) is the focused default.
@@ -8,7 +8,7 @@ The pick list, which changes nothing by itself, focuses its list instead.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import ClassVar
 
@@ -114,10 +114,19 @@ class PickModal(_Dialog[str | None]):
     cancelled. Picking changes nothing by itself, so the list has the focus when it opens
     (Enter or a click picks); Escape or Cancel closes it."""
 
-    def __init__(self, title: str, choices: Sequence[tuple[str, str]], preview: str = "") -> None:
+    def __init__(
+        self,
+        title: str,
+        choices: Sequence[tuple[str, str]],
+        preview: str = "",
+        *,
+        selected: int | None = None,
+    ) -> None:
         super().__init__(title, preview, None)
         # (label, value) pairs; a label is plain text, never markup.
         self.choices = choices
+        # The choice highlighted as it opens (a setting's current value, #199).
+        self.selected = selected
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
@@ -130,11 +139,54 @@ class PickModal(_Dialog[str | None]):
                 yield Button("Cancel", id="cancel")
 
     def on_mount(self) -> None:
-        self.query_one("#pick", OptionList).focus()
+        pick = self.query_one("#pick", OptionList)
+        if self.selected is not None:
+            pick.highlighted = self.selected
+        pick.focus()
 
     @on(OptionList.OptionSelected, "#pick")
     def _picked(self, event: OptionList.OptionSelected) -> None:
         self.dismiss(self.choices[event.option_index][1])
+
+    @on(Button.Pressed, "#cancel")
+    def _cancel(self) -> None:
+        self.dismiss(None)
+
+
+class EditModal(_Dialog[str | None]):
+    """One value to type, prefilled (a setting, #199); returns it, or None when cancelled.
+    ``check`` reads it as the CLI would: its message (a parser error) stays in the dialog, in
+    the error colour, and nothing is returned until the value passes. The field has the focus:
+    Enter there saves, Escape cancels."""
+
+    def __init__(
+        self, title: str, value: str, check: Callable[[str], str | None], preview: str = ""
+    ) -> None:
+        super().__init__(title, preview, None)
+        self.value = value
+        self.check = check
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield from self.heading()
+            yield Input(self.value, id="edit-value")
+            yield Static("", id="edit-error", markup=False)
+            with Horizontal(classes="buttons"):
+                yield Button("Cancel", id="cancel")
+                yield Button("Save", id="submit", variant="primary")
+
+    def on_mount(self) -> None:
+        self.query_one("#edit-value", Input).focus()
+
+    @on(Button.Pressed, "#submit")
+    @on(Input.Submitted)
+    def _submit(self) -> None:
+        value = self.query_one("#edit-value", Input).value
+        problem = self.check(value)
+        if problem is None:
+            self.dismiss(value)
+            return
+        self.query_one("#edit-error", Static).update(problem)
 
     @on(Button.Pressed, "#cancel")
     def _cancel(self) -> None:
