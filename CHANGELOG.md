@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Documentation
+- The Homebrew install adds `brew tap` and `brew trust --formula`: recent Homebrew refuses
+  to load a formula from an untrusted third-party tap.
+
 ## 0.20.0 - 2026-10-07
 
 ### Added

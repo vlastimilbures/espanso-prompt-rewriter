@@ -53,6 +53,8 @@ To run the code from a git checkout instead, see
 ### Homebrew (recommended)
 
 ```bash
+brew tap vlastimilbures/tap
+brew trust --formula vlastimilbures/tap/promptmend
 brew install vlastimilbures/tap/promptmend
 ```
 
@@ -65,6 +67,12 @@ environment on Homebrew's Python.
 A tap is a third-party repository: Homebrew runs its formulas with your user's rights and
 updates them on every `brew update`. Only add a tap you trust; `brew untap vlastimilbures/tap`
 removes it.
+
+Recent Homebrew also refuses to load a formula from a third-party tap until you trust it
+(`Refusing to load formula … from untrusted tap`). `brew trust --formula` trusts this one
+formula only; `brew trust vlastimilbures/tap` would trust everything the tap adds later too.
+On a Homebrew without tap trust, skip that line. See
+[Tap trust](https://docs.brew.sh/Tap-Trust).
 
 ### uv
 
