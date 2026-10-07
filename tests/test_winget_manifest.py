@@ -24,7 +24,7 @@ else:
 
 SHA = "ab" * 32
 VERSION = "1.2.3"
-SCHEMA = "1.12.0"
+SCHEMA = "1.10.0"
 
 
 def _parsed(**kwargs: Any) -> dict[str, dict[str, Any]]:

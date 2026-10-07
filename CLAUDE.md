@@ -517,7 +517,21 @@ Rules for agents:
   times the `-i-` trigger against `smoke`'s stub (job summary). test.yml's `frozen-windows`
   job builds, unzips and checks it (`--version`, `doctor --json` sees `frozen`, `persona`, a
   fake WinGet `Links` symlink reported as channel `winget`, `tests/test_triggers.py -k process`
-  with `PROMPTMEND_EXE` set, which makes the replay start that exe, and the latency).
+  with `PROMPTMEND_EXE` set, which makes the replay start that exe, and the latency), then
+  renders the WinGet manifests for the zip, runs `winget validate`, and installs it with
+  `winget install --manifest` (a copy of the manifests whose `--url` is a loopback
+  `http.server`; `LocalManifestFiles` and `LocalArchiveMalwareScanOverride` enabled), checks
+  the real `Links` alias (`--version`, doctor's channel `winget`) and uninstalls it.
+- `packaging/winget/` — the WinGet manifest templates (#185) of `vlastimilbures.PromptMend`
+  (schema 1.10.0, the newest the runner's winget 1.11 validates without a warning; version,
+  installer `zip` + `NestedInstallerType: portable`, `promptmend\promptmend.exe` aliased
+  `promptmend`, defaultLocale en-US), with `__NAME__` placeholders.
+  `scripts/winget_manifest.py --version X.Y.Z --zip <zip>` (or `--sha256`;
+  `--url`, `--release-date`, `-o`, default `dist/winget`) fills them (SHA-256 upper case, the
+  Release asset URL, notes URL = the tag's Release), refuses a bad version/hash/URL/date, a
+  zip named for another version or a leftover placeholder, and writes winget-pkgs' layout
+  `manifests/v/vlastimilbures/PromptMend/X.Y.Z/` (`tests/test_winget_manifest.py`). Nothing
+  here submits to microsoft/winget-pkgs: that is a manual step with the owner's go.
 - `relocate.py` — `migrate_folders(environ)` (#169), never on the trigger path
   (`tests/test_trigger_contract.py`, `doctor.HEAVY_MODULES`): `cli._LazyGroup.invoke()` runs it
   before every subcommand except `improve`/`persona`, a `--help`/`-h` anywhere, an unknown
@@ -693,6 +707,9 @@ to PyPI by trusted publishing with `skip-existing`. Homebrew is a hand step per 
 `scripts/brew_formula.py --sdist <released sdist>`, run on the tag, writes the formula for the
 `vlastimilbures/homebrew-tap` repo (`Language::Python::Virtualenv`, one sdist resource per
 runtime pin in uv.lock, markers evaluated for macOS/Linux; `tests/test_brew_formula.py`).
+WinGet likewise: `scripts/winget_manifest.py --zip <released, attestation-verified zip>`
+renders the manifests; submitting them to microsoft/winget-pkgs is a manual, owner-approved
+step (never from an agent).
 `scripts/release_notes.py` gives the workflow the
 version and its notes and refuses a CHANGELOG whose newest `## X.Y.Z - YYYY-MM-DD` heading is not
 the `pyproject.toml` version (`## Unreleased` may come first); `tests/test_release.py` runs the

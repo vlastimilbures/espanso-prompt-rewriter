@@ -173,6 +173,25 @@ Releases are cut by `.github/workflows/release.yml`, never by hand-made tags.
    and `brew audit --strict promptmend`, then commit and push. Automating this (a
    workflow job opening a pull request in the tap) would need a token with write access to the
    tap; it is left for later.
+6. WinGet (#185): render the manifests of `vlastimilbures.PromptMend` for the released zip,
+   from a checkout of the tag (the templates are in `packaging/winget/`):
+
+   ```bash
+   gh release download vX.Y.Z -R vlastimilbures/promptmend \
+     -p 'promptmend-X.Y.Z-windows-x64.zip' -D /tmp/epr-X.Y.Z
+   gh attestation verify /tmp/epr-X.Y.Z/promptmend-X.Y.Z-windows-x64.zip \
+     -R vlastimilbures/promptmend
+   python3 scripts/winget_manifest.py --version X.Y.Z \
+     --zip /tmp/epr-X.Y.Z/promptmend-X.Y.Z-windows-x64.zip --release-date YYYY-MM-DD
+   ```
+
+   It writes `dist/winget/manifests/v/vlastimilbures/PromptMend/X.Y.Z/` (the version,
+   installer and en-US locale manifests, with the Release asset's URL and SHA-256), the
+   layout of [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs). CI's
+   `frozen-windows` job already ran `winget validate` and a `winget install --manifest` on
+   the same templates. Submitting them (a pull request to microsoft/winget-pkgs from the
+   owner's fork, or `wingetcreate submit`) is a manual step that only the owner approves;
+   Microsoft's validation and review take days.
 
 With the repository variable `RELEASE_ON_PUSH` set to `true`, step 2 also happens on every push
 to `main` whose version has no published Release yet. It is off by default, so merging a branch
