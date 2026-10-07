@@ -21,7 +21,9 @@ on Home, the Try tab and the keys. Everything it does, a headless command does t
 ## Open it
 
 Run `promptmend` (or `promptmend ui`) in a terminal. Without a terminal, a bare `promptmend`
-prints the help and `ui` exits 3.
+prints the help and `ui` exits 3. For the same command line without the full screen, with
+each command run in your terminal, use `promptmend shell` (see
+[Commands](commands.md#shell)).
 
 The interface does what the management commands do, through the same code. Keys are shown
 only as set or not set. Removing a key, deploying, detaching, migrating or deleting history
@@ -81,7 +83,7 @@ Enter acts on the command by what it does:
 |------|----------|-----------------|
 | Reads, previews, changes a setting or writes an export | `doctor`, `config show\|get\|set\|unset\|validate`, `secrets status`, `profiles list`, `stats`, `espanso status`, `history export`, any `--dry-run` preview, any `--help` and `--version` | Runs it and shows `$ promptmend …`, its output and `exit N` below the line and in the session log. One runs at a time, with no input and at most 120 seconds. `doctor` skips the clipboard check unless you pass `--clipboard` |
 | Asks first | `espanso deploy`, `espanso detach`, `config migrate`, `secrets set NAME`, `secrets remove`, `history prune`, `history reset` | Opens the dialog of the tab that does it (`history prune` with `--older-than` filled in; a key is typed hidden in the dialog). `--yes`, `--on-conflict`, `--no-restart` and `--preview-token` are ignored there: the dialog decides |
-| Asks as it goes | `setup`, `config rollback`, `config retire`, `profiles migrate`, and a dialog's command given `--espanso-dir`, `--launcher` or `--from` | Says to quit and run it in a terminal |
+| Asks as it goes | `setup`, `shell`, `config rollback`, `config retire`, `profiles migrate`, and a dialog's command given `--espanso-dir`, `--launcher` or `--from` | Says to quit and run it in a terminal |
 | Refused | `improve`, `persona`, `ui` | Says why: the triggers run `improve` and `persona`, and `improve` reads the clipboard; the Try tab rewrites a typed draft instead |
 
 A line that looks like it holds a key, or `secrets set` with anything after the key's name, is

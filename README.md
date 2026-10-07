@@ -272,6 +272,7 @@ More: [docs/usage.md](https://github.com/vlastimilbures/promptmend/blob/main/doc
 | Command | What it does |
 |---------|--------------|
 | `promptmend` / `promptmend ui` | Opens the full-screen interface |
+| `promptmend shell` | A command line with completion and live help, run in your terminal |
 | `promptmend setup` | First run: provider, profile, key, match files and a smoke test |
 | `promptmend doctor` | Checks the install, settings, keys, Espanso, match files and history |
 | `promptmend config show` | Every setting, its value and where it comes from |

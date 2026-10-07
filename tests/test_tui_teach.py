@@ -7,7 +7,8 @@ from __future__ import annotations
 import pytest
 from typer.core import TyperGroup
 
-from promptmend.tui import console, teach
+from promptmend import console
+from promptmend.tui import teach
 
 # What a placeholder stands for, so the command can be parsed.
 EXAMPLES = {

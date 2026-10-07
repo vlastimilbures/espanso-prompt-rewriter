@@ -302,7 +302,17 @@ Rules for agents:
 - `commands/` — the management commands (#92): `setup`, `config show|get|set|unset|validate|
   migrate|rollback`, `secrets set|status|remove`, `profiles list|migrate`, `stats`,
   `history export|prune|reset`, `doctor` (plus `espanso` in `cli.py`, which gained
-  `deploy --dry-run`). Started as the `prompt-workflow` alias (`cli._run_as_alias()`:
+  `deploy --dry-run`). `commands/shell.py` (#183) is `promptmend shell`: a prompt_toolkit
+  REPL (imported only once it opens; `prompt_toolkit` and `promptmend.console` are in
+  `doctor.HEAVY_MODULES` and the trigger contract's FORBIDDEN) over `promptmend/console.py`'s
+  completion (`words_for()`, `suggest()`) and `describe()` as the bottom bar; without a TTY
+  exit 3. `plan(line)` runs everything the parser reads as a command except `improve`,
+  `persona` and `shell` (`REFUSED`), a key-like line (`holds_a_key()`) and
+  `refused_secret()`; a leaf's `--help` counts only as the parser read it. `run_here()`
+  re-checks `runs_here(argv)`, then starts `[sys.executable, "-P", "-m", "promptmend.cli",
+  *argv]` with the terminal's stdio (no capture, no timeout, waits through Ctrl-C); `doctor`
+  is not forced to `--no-clipboard`. The in-memory history drops lines `kept()` refuses.
+  `repl(read, runner=, echo=)` is the loop tests drive; conftest refuses `run_here`. Started as the `prompt-workflow` alias (`cli._run_as_alias()`:
   `Path(sys.argv[0]).stem`), a management command or `ui` first prints
   `cli.DEPRECATED_ALIAS` on stderr, once; the triggers, `--version` and `--help` never do, and
   `_LazyGroup.main()` makes every usage line say `promptmend`. `cli.py`'s `_LazyGroup` imports a command's module only when it runs or
@@ -389,7 +399,10 @@ Rules for agents:
   log shows it (withheld values and placeholders included) through `App.copy_to_clipboard()`
   (OSC 52, write only, the terminal may drop it; never pyperclip). A value that looks like a key is shown as
   `<value withheld>` (`console.shown_arg()`). `tui/console.py` (#111 stage 2) is Home's command line
-  (`CommandLine`, `#home-command`; `c` on `MainScreen` switches to Home and focuses it, and
+  (its Textual widgets only: `CommandSuggester`, `CommandLine`, `Host`; everything without
+  Textual, `resolve()` to `describe()`, `POLICY`, `run()`, lives in `promptmend/console.py`,
+  #183, which `promptmend shell` shares and which must not import textual; conftest refuses
+  `run` in both modules) (`CommandLine`, `#home-command`; `c` on `MainScreen` switches to Home and focuses it, and
   nothing is focused at launch): `resolve()` walks the Click tree (no callback runs; the
   drift test in `tests/test_tui_teach.py` uses it too), `words_for()` gives the candidates
   (key names only after `secrets set|remove`, never elsewhere), `CommandSuggester` completes

@@ -1,0 +1,343 @@
+"""`promptmend shell` (#183): the REPL over the console's completion, live help and refusals.
+No test starts a real child (conftest refuses shell.run_here; the runner tests fake Popen) or
+reads the real terminal (prompt_toolkit gets a pipe input and a dummy output)."""
+
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+from collections.abc import Iterator, Sequence
+from typing import Any, ClassVar
+
+import pytest
+from prompt_toolkit.completion import CompleteEvent
+from prompt_toolkit.document import Document
+from prompt_toolkit.input import create_pipe_input
+from prompt_toolkit.output import DummyOutput
+from typer.testing import CliRunner
+
+from promptmend import console
+from promptmend.cli import app
+from promptmend.commands import common, shell
+from promptmend.tui import teach
+
+runner = CliRunner()
+# Built at runtime, so no key-shaped literal lands in the repo (gitleaks).
+KEY = "sk-or-v1-" + "ab12" * 16
+# The real runner, kept before conftest replaces shell.run_here with a refusal in every test.
+REAL_RUN_HERE = shell.run_here
+
+
+class FakeRunner:
+    def __init__(self, code: int = 0) -> None:
+        self.code = code
+        self.calls: list[tuple[str, ...]] = []
+
+    def __call__(self, argv: Sequence[str]) -> int:
+        self.calls.append(tuple(argv))
+        return self.code
+
+
+def _lines(*lines: str | type[BaseException]) -> Any:
+    """A read() that returns each line in turn, or raises each exception class given."""
+    feed: Iterator[str | type[BaseException]] = iter(lines)
+
+    def read() -> str:
+        item = next(feed)
+        if isinstance(item, str):
+            return item
+        raise item
+
+    return read
+
+
+def _repl(*lines: str | type[BaseException], code: int = 0) -> tuple[int, FakeRunner, list[str]]:
+    fake = FakeRunner(code)
+    out: list[str] = []
+    result = shell.repl(_lines(*lines), runner=fake, echo=out.append)
+    return result, fake, out
+
+
+# --- The command ----------------------------------------------------------------------------
+
+
+def test_shell_needs_a_terminal() -> None:
+    result = runner.invoke(app, ["shell"])
+    assert result.exit_code == common.NEEDS_TERMINAL
+    assert "needs a terminal" in result.output
+
+
+def test_shell_runs_a_session_on_a_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(common, "stdin_is_tty", lambda: True)
+    monkeypatch.setattr(common, "stdout_is_tty", lambda: True)
+    fake = FakeRunner()
+    monkeypatch.setattr(shell, "run_here", fake)
+    with create_pipe_input() as pipe:
+        pipe.send_text("promptmend config show\rimprove\rquit\r")
+        made = shell.session(input=pipe, output=DummyOutput())
+        monkeypatch.setattr(shell, "session", lambda: made)
+        result = runner.invoke(app, ["shell"])
+    assert result.exit_code == 0, result.output
+    assert fake.calls == [("config", "show")]
+    assert "Not from the shell: the Espanso triggers run it" in result.output
+
+
+def test_shell_is_listed_and_documented() -> None:
+    result = runner.invoke(app, ["--help"])
+    assert "shell" in result.output
+    assert console.POLICY[("shell",)].kind == console.TERMINAL
+
+
+# --- What Enter does --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("line", "argv"),
+    [
+        ("doctor", ("doctor",)),  # a real terminal: never forced to --no-clipboard
+        ("promptmend config show", ("config", "show")),
+        ("prompt-workflow stats --by model", ("stats", "--by", "model")),
+        ("espanso deploy", ("espanso", "deploy")),  # asks here, as on any terminal
+        ("secrets set OPENROUTER_API_KEY", ("secrets", "set", "OPENROUTER_API_KEY")),
+        ("config set --help", ("config", "set", "--help")),
+        ("improve --help", ("improve", "--help")),
+        ("config --help", ("config", "--help")),
+        ("--version", ("--version",)),
+        ("ui", ("ui",)),
+        ("setup", ("setup",)),
+    ],
+    ids=lambda v: v if isinstance(v, str) else "",
+)
+def test_lines_that_run(line: str, argv: tuple[str, ...]) -> None:
+    assert shell.plan(line) == shell.Plan(shell.RUN, argv)
+    assert shell.runs_here(argv)
+
+
+@pytest.mark.parametrize(
+    ("line", "message"),
+    [
+        ("improve", "Not from the shell: the Espanso triggers run it"),
+        ("improve --profile --help", "Not from the shell: the Espanso triggers run it"),
+        ("improve --source argument --text hi", "use the Try tab of `promptmend ui`"),
+        ("persona", "Not from the shell: the -p- trigger runs it"),
+        ("shell", "Not from the shell: this is the shell"),
+        (f"secrets set OPENROUTER_API_KEY {KEY}", "holds a key"),
+        (f"config set PROMPT_PROFILE {KEY}", "holds a key"),
+        ("secrets set OPENROUTER_API_KEY value", "Type only the key's name"),
+        ("secrets set OPENROUTER_API_KEY --stdin", "Type only the key's name"),
+        ("secrets set NOT_A_KEY_NAME", "Type only the key's name"),
+    ],
+    ids=["improve", "help-as-value", "argument", "persona", "shell", "key", "key-setting",
+         "value", "stdin", "not-a-name"],
+)  # fmt: skip
+def test_lines_that_are_refused(line: str, message: str) -> None:
+    decided = shell.plan(line)
+    assert decided.kind == shell.REFUSE
+    assert message in decided.message
+    assert KEY not in decided.message
+    assert not shell.runs_here(console.split(line))
+
+
+@pytest.mark.parametrize(
+    ("line", "message"),
+    [
+        ("espanso deplo", "error: No such command 'deplo'."),
+        ("config", "error: config needs a command."),
+        ("config set PROMPT_HISTORY", "error: Missing argument VALUE."),
+        ('config set "x', "error: No closing quotation"),
+        ("doctor --no-such", "error: No such option: --no-such"),
+        ("config --no-such", "error: No such option: --no-such"),
+    ],
+    ids=["command", "group", "argument", "quote", "option", "group-option"],
+)
+def test_usage_errors_run_nothing(line: str, message: str) -> None:
+    decided = shell.plan(line)
+    assert decided.kind == shell.ERROR
+    assert decided.message == message
+
+
+def test_a_group_flag_that_is_not_help_is_a_usage_error() -> None:
+    # resolve() takes a group's own flags; decide() runs only --help or a bare --version.
+    decided = shell.plan("--version --version")
+    assert decided == shell.Plan(shell.ERROR, message="error: promptmend needs a command.")
+
+
+@pytest.mark.parametrize("line", ["", "   ", "help", "?", "promptmend"])
+def test_help_lines(line: str) -> None:
+    assert shell.plan(line).kind == shell.HELP
+
+
+@pytest.mark.parametrize("line", ["exit", "quit", " exit "])
+def test_exit_lines(line: str) -> None:
+    assert shell.plan(line).kind == shell.EXIT
+
+
+def test_runs_here_reparses_exactly() -> None:
+    assert not shell.runs_here(("improve",))
+    assert not shell.runs_here(("improve", "--profile", "--help"))
+    assert not shell.runs_here(("no-such",))
+    assert not shell.runs_here(("exit",))
+    assert shell.runs_here(("config", "set", "PROMPT_PERSONA", "it's me"))
+
+
+# --- The loop -------------------------------------------------------------------------------
+
+
+def test_repl_runs_lines_and_reports_a_failed_exit() -> None:
+    code, fake, out = _repl("doctor", "stats", "exit", code=4)
+    assert code == 0
+    assert fake.calls == [("doctor",), ("stats",)]
+    assert out[1:] == ["exit 4", "exit 4"]
+
+
+def test_repl_prints_nothing_after_a_clean_exit() -> None:
+    _, fake, out = _repl("doctor", "quit")
+    assert fake.calls == [("doctor",)]
+    assert out == [shell.recipes()]
+
+
+def test_repl_ends_on_eof_and_survives_ctrl_c() -> None:
+    code, fake, out = _repl(KeyboardInterrupt, "", "help", EOFError)
+    assert code == 0
+    assert fake.calls == []
+    assert out == [shell.recipes()] * 3
+
+
+def test_repl_refuses_and_never_echoes_a_key() -> None:
+    _, fake, out = _repl(f"secrets set OPENROUTER_API_KEY {KEY}", "improve", "config", "exit")
+    assert fake.calls == []
+    assert not [line for line in out if KEY in line]
+    assert out[1] == shell.WITHHELD_NOTE
+    assert out[2].startswith("Not from the shell")
+    assert out[3] == "error: config needs a command."
+
+
+def test_recipes_name_every_recipe_and_how_to_leave() -> None:
+    text = shell.recipes()
+    for recipe in teach.RECIPES:
+        assert teach.equivalent(*recipe.argv) in text
+    assert shell.LEAVE in text
+
+
+# --- The runner -----------------------------------------------------------------------------
+
+
+class FakePopen:
+    instances: ClassVar[list[FakePopen]] = []
+
+    def __init__(self, args: Sequence[str], **kwargs: Any) -> None:
+        self.args = list(args)
+        self.kwargs = kwargs
+        self.waits = 0
+        FakePopen.instances.append(self)
+
+    def wait(self) -> int:
+        self.waits += 1
+        if self.waits == 1:
+            raise KeyboardInterrupt  # Ctrl-C reached the child; the shell keeps waiting
+        return 130
+
+
+def test_run_here_starts_promptmend_on_this_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
+    FakePopen.instances = []
+    monkeypatch.setattr(subprocess, "Popen", FakePopen)
+    assert REAL_RUN_HERE(("doctor",)) == 130
+    (child,) = FakePopen.instances
+    assert child.args == [sys.executable, "-P", "-m", "promptmend.cli", "doctor"]
+    assert child.kwargs == {}  # inherited stdin, stdout and stderr; no shell, no timeout
+    assert child.waits == 2
+
+
+def test_run_here_refuses_what_the_shell_does_not_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(subprocess, "Popen", FakePopen)
+    FakePopen.instances = []
+    for argv in (("improve",), ("improve", "--profile", "--help"), ("secrets", "set", KEY)):
+        with pytest.raises(ValueError, match="refused"):
+            REAL_RUN_HERE(argv)
+    assert FakePopen.instances == []
+
+
+def test_conftest_refuses_a_real_child() -> None:
+    with pytest.raises(AssertionError, match="started a real promptmend"):
+        shell.run_here(("--version",))
+
+
+# --- The line editor ----------------------------------------------------------------------------
+
+
+def test_completions() -> None:
+    assert ("espanso", -3) in shell.completions("esp")
+    assert shell.completions("espanso st") == [("status", -2)]
+    assert ("status", 0) in shell.completions("espanso ")
+    assert ("doctor", 0) in shell.completions("promptmend ")
+    assert ("doctor", 0) in shell.completions("")
+    assert shell.completions("promptmend") == []
+    assert shell.completions('config set "PROMPT_') == []
+    assert shell.completions(f"secrets set OPENROUTER_API_KEY {KEY[:-2]}") == []
+    names = {w for w, _ in shell.completions("secrets set ")}
+    assert "OPENROUTER_API_KEY" in names
+
+
+def test_toolbar() -> None:
+    assert shell.toolbar("espanso status").startswith("Usage: promptmend espanso status")
+    assert "Matches: status" in shell.toolbar("espanso st")
+    assert shell.toolbar(f"secrets set OPENROUTER_API_KEY {KEY}").startswith(teach.WITHHELD)
+    assert KEY not in shell.toolbar(f"config set X {KEY}")
+    assert shell.toolbar("espanso deplo ").startswith("error: No such command")
+
+
+def test_session_wires_completion_suggestion_toolbar_and_history() -> None:
+    with create_pipe_input() as pipe:
+        made = shell.session(input=pipe, output=DummyOutput())
+    assert made.completer is not None
+    words = made.completer.get_completions(Document("espanso st"), CompleteEvent())
+    assert [c.text for c in words] == ["status"]
+    assert made.auto_suggest is not None
+    found = made.auto_suggest.get_suggestion(made.default_buffer, Document("espanso st"))
+    assert found is not None
+    assert found.text == "atus"
+    assert made.auto_suggest.get_suggestion(made.default_buffer, Document("doctor ")) is None
+    key_line = Document(f"secrets set OPENROUTER_API_KEY {KEY[:-1]}")
+    assert made.auto_suggest.get_suggestion(made.default_buffer, key_line) is None
+    toolbar = made.bottom_toolbar
+    assert callable(toolbar)
+    assert toolbar() == console.describe("", typing=True).plain  # the empty line's recipes
+
+
+def test_history_keeps_no_key_like_line() -> None:
+    lines = [
+        "doctor",
+        "doctor",
+        f"secrets set OPENROUTER_API_KEY {KEY}",
+        "secrets set OPENROUTER_API_KEY value",
+        'config set "x',
+        "improve",
+        "   ",
+        "exit",
+    ]
+    with create_pipe_input() as pipe:
+        pipe.send_text("".join(f"{line}\r" for line in lines))
+        made = shell.session(input=pipe, output=DummyOutput())
+        shell.repl(made.prompt, runner=FakeRunner(), echo=lambda _: None)
+    assert list(made.history.get_strings()) == ["doctor", 'config set "x', "improve", "exit"]
+    assert shell.kept("doctor")
+    assert not shell.kept(f"x {KEY}")
+    assert not shell.kept("secrets set OPENROUTER_API_KEY value")
+
+
+# --- Off the trigger path ---------------------------------------------------------------------
+
+
+def test_console_and_shell_load_neither_textual_nor_prompt_toolkit() -> None:
+    probe = (
+        "import json, sys\n"
+        "import promptmend.console, promptmend.commands.shell\n"
+        "print(json.dumps(sorted(sys.modules)))\n"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-P", "-c", probe], capture_output=True, check=True, timeout=60
+    )
+    loaded = json.loads(proc.stdout)
+    for module in ("textual", "prompt_toolkit"):
+        assert not [m for m in loaded if m == module or m.startswith(module + ".")], module

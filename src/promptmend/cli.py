@@ -58,6 +58,7 @@ _LAZY_COMMANDS = {
     "history": ("usage", "history_app"),
     "doctor": ("doctor", "app"),
     "ui": ("ui", "app"),
+    "shell": ("shell", "app"),
 }
 
 

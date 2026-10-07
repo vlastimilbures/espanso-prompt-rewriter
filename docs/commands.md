@@ -11,6 +11,7 @@ does before you run it. Run any command with `--help` for its full option list.
 - [Scripting contract](#scripting-contract)
 - [persona](#persona)
 - [Management commands](#management-commands)
+- [shell](#shell)
 - [Reading stats](#reading-stats)
 - [How management commands behave](#how-management-commands-behave)
 - [Exit codes](#exit-codes)
@@ -76,6 +77,7 @@ read gives the `[role]` placeholder. See [Persona](profiles.md#persona).
 |---------|--------------|
 | `promptmend --version` | Prints the installed version |
 | `promptmend` / `promptmend ui` | Opens the [full-screen interface](interface.md) when stdin and stdout are a terminal. Otherwise a bare `promptmend` prints the help and exits 2, and `ui` exits 3 |
+| `promptmend shell` | A command line with completion and live help that runs each command in this terminal; see [shell](#shell). Exits 3 without a terminal |
 | `promptmend setup` | First run: provider and default profile (saved in `config.toml`), the API key (hidden prompt), a deploy preview it applies only if you agree, and a smoke test against a stub on `127.0.0.1` (never a paid call, never your real key). Offers to migrate a `.env`, and for an earlier checkout install it finds (or the one `--migrate-from PATH` names) to copy its settings and edited profiles and to retire its `.env` once the match files no longer run it, changing nothing unless you say yes. `--non-interactive` asks nothing (key with `--api-key-stdin`; the deploy stays a preview unless `--deploy`) |
 | `promptmend config show [--raw]` | Every setting, its value and where it comes from (default, a file or the environment), and which lower files it overrides. Keys and the persona are shown only as set or not set; a value set to empty on purpose reads `(empty)` |
 | `promptmend config get NAME` / `set NAME VALUE` / `unset NAME` | Reads one setting (the raw value; an empty line for an empty one); saves it in `config.toml` after checking it as the CLI reads it; removes it so the default applies. A key is refused here. `set` warns on stderr, naming the findings only, when the change leaves a `PROMPT_PERSONA` that `config validate` would flag; the value stays saved |
@@ -88,6 +90,30 @@ read gives the `[role]` placeholder. See [Persona](profiles.md#persona).
 | `promptmend stats [--by trigger\|provider\|model\|day] [--json]` | Calls, latency, tokens and costs from the [usage history](privacy.md#usage-history) |
 | `promptmend history export [--format json\|csv] [-o FILE]` / `prune [--older-than DAYS]` / `reset` | Exports the history (metadata only), deletes old records (asking first when the age is shorter than `PROMPT_HISTORY_RETENTION_DAYS`), or deletes them all |
 | `promptmend doctor [--json]` | Version, CLI path and install channel, config validity, keys set or not, Espanso found and running, each deployed match file (`in sync`, `stale`, `modified`, `missing`), launcher drift, history health, SQLite version, the folders, and a clipboard read test that reports only the length (`--no-clipboard` skips it). Safe to paste into an issue: it never shows a key, your persona or clipboard text |
+
+## shell
+
+`promptmend shell` is a plain command line for the terminal, for when you would rather not
+use the full-screen interface. It completes and explains commands the way Home's
+[command line](interface.md#command-line) does, but runs each one in the same terminal.
+
+- Type a command without `promptmend` (a leading `promptmend` is dropped). Tab completes the
+  word you are typing (commands, options, setting names after `config set`, key names only
+  after `secrets set` or `secrets remove`, profile names); the Right arrow takes the grey
+  suggestion. The bar below the line shows the command's usage and help as you type, or the
+  error the CLI would print.
+- Enter runs the command as `promptmend …` in this terminal. A command that asks (such as
+  `espanso deploy`, `config migrate` or `secrets set NAME`, which asks for the key hidden)
+  asks here. A nonzero exit prints `exit N`; Ctrl-C stops the running command, not the
+  shell. A usage error runs nothing.
+- Refused: `improve` and `persona` (the triggers run them, and `improve` reads the
+  clipboard; to try a rewrite, use the interface's [Try tab](interface.md#try-tab)) and
+  `shell` itself.
+- A line that looks like it holds a key, or `secrets set` with anything after the key's
+  name, never runs and is never shown back. Up and Down go through this session's lines; the
+  history stays in memory, never in a file, and never keeps such a line.
+- An empty line or `help` lists a few useful commands; `exit`, `quit` or Ctrl-D leaves (exit
+  0). Ctrl-C at the prompt clears the line.
 
 ## Reading stats
 
@@ -124,7 +150,7 @@ ordinary exit codes.
 | 0 | Done |
 | 1 | Failed or refused, or you declined a confirmation |
 | 2 | Usage error: an unknown option, setting or value |
-| 3 | An answer was needed but stdin is not a terminal, or `ui` ran without a terminal |
+| 3 | An answer was needed but stdin is not a terminal, or `ui` or `shell` ran without a terminal |
 | 4 | `doctor` or `config validate` found a problem |
 
 `improve` and `persona` always exit 0 (see [Scripting contract](#scripting-contract)).
