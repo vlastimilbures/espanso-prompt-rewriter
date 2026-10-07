@@ -264,7 +264,7 @@ def toolbar(text: str) -> str:
 class Editor:
     """The prompt: completion from the Click tree, the console's suggestion (Right arrow takes
     it), live help in the bottom bar and a history in memory that keeps only lines that ran.
-    Enter on a line that gives a key replaces it with <value withheld> before it is accepted,
+    Accepting a line that gives a key replaces it with <value withheld> first,
     so the line left on screen (and in the scrollback) no longer holds it; read() still
     returns what was typed, for plan() to refuse. ``kwargs`` go to PromptSession (tests pass
     a pipe input and a dummy output)."""
@@ -282,25 +282,13 @@ class Editor:
 def _session(editor: Editor, **kwargs: Any) -> PromptSession[str]:
     from prompt_toolkit import PromptSession
     from prompt_toolkit.auto_suggest import AutoSuggest, Suggestion
+    from prompt_toolkit.buffer import Buffer
     from prompt_toolkit.completion import CompleteEvent, Completer, Completion
     from prompt_toolkit.document import Document
-    from prompt_toolkit.enums import DEFAULT_BUFFER
-    from prompt_toolkit.filters import has_focus
     from prompt_toolkit.history import InMemoryHistory
-    from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
 
     from .. import console
     from ..tui import teach
-
-    keys = KeyBindings()
-
-    @keys.add("enter", filter=has_focus(DEFAULT_BUFFER))
-    def _enter(event: KeyPressEvent) -> None:
-        buffer = event.current_buffer
-        if secret_line(buffer.text):
-            editor.held = buffer.text
-            buffer.document = Document(teach.WITHHELD)
-        buffer.validate_and_handle()
 
     class Words(Completer):
         def get_completions(
@@ -328,11 +316,22 @@ def _session(editor: Editor, **kwargs: Any) -> PromptSession[str]:
         completer=Words(),
         auto_suggest=Suggest(),
         history=History(),
-        key_bindings=keys,
         complete_while_typing=False,
         **kwargs,
     )
     prompt.bottom_toolbar = lambda: toolbar(prompt.default_buffer.text)
+    # Every way to accept a line ends in the buffer's accept handler: Enter, Meta-Enter,
+    # Ctrl-O, Enter from a search. Wrapped, a key-giving line is replaced before the prompt
+    # exits with it, so the line left on screen never holds the value, whichever key it was.
+    accept = prompt.default_buffer.accept_handler
+
+    def withhold(buffer: Buffer) -> bool:
+        if secret_line(buffer.text):
+            editor.held = buffer.text
+            buffer.document = Document(teach.WITHHELD)
+        return bool(accept and accept(buffer))
+
+    prompt.default_buffer.accept_handler = withhold
     return prompt
 
 

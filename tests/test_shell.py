@@ -338,10 +338,12 @@ def test_history_keeps_no_key_like_line() -> None:
         assert not shell.kept(line), line
 
 
-def test_a_refused_key_line_is_replaced_on_screen_before_it_is_accepted() -> None:
-    lines = [f"secrets set OPENROUTER_API_KEY {KEY}", "secrets set OPENROUTER_API_KEY hunter2"]
+def _accepted(text: str) -> tuple[list[str], list[str], FakeRunner, shell.Editor]:
+    """Feed ``text`` to an editor and return what each accepted line showed on screen, what
+    the shell printed, the runner and the editor."""
     with create_pipe_input() as pipe:
-        pipe.send_text("".join(f"{line}\r" for line in lines) + "doctor\rexit\r")
+        pipe.send_text(text)
+        pipe.close()  # then EOF ends the loop, whatever the keys did
         editor = shell.Editor(input=pipe, output=DummyOutput())
         shown: list[str] = []
         original = editor.prompt.prompt
@@ -355,6 +357,12 @@ def test_a_refused_key_line_is_replaced_on_screen_before_it_is_accepted() -> Non
         out: list[str] = []
         fake = FakeRunner()
         shell.repl(editor.read, runner=fake, echo=out.append)
+    return shown, out, fake, editor
+
+
+def test_a_refused_key_line_is_replaced_on_screen_before_it_is_accepted() -> None:
+    lines = [f"secrets set OPENROUTER_API_KEY {KEY}", "secrets set OPENROUTER_API_KEY hunter2"]
+    shown, out, fake, editor = _accepted("".join(f"{x}\r" for x in lines) + "doctor\rexit\r")
     # The accepted (rendered) line no longer holds the value...
     assert shown[:2] == [teach.WITHHELD, teach.WITHHELD]
     # ...the shell still knew what it refused, and ran only doctor.
@@ -362,6 +370,20 @@ def test_a_refused_key_line_is_replaced_on_screen_before_it_is_accepted() -> Non
     assert "Type only the key's name" in out[2]
     assert fake.calls == [("doctor",)]
     assert list(editor.prompt.history.get_strings()) == ["doctor"]
+
+
+# Every way to accept a line: Enter, Meta-Enter (Esc then Enter), Ctrl-O (accept and get the
+# next history line), and Enter from a Ctrl-R search. (No vi mode: the shell is emacs only.)
+ACCEPTS = {"enter": "\r", "meta-enter": "\x1b\r", "ctrl-o": "\x0f", "search": "\x12\r"}
+
+
+@pytest.mark.parametrize("accept", list(ACCEPTS), ids=list(ACCEPTS))
+def test_every_accept_key_withholds_a_key_line(accept: str) -> None:
+    # A key after it, so the input parser hands over the accept key too.
+    shown, out, fake, _ = _accepted(f"config get {KEY}{ACCEPTS[accept]}exit\r")
+    assert shown[0] == teach.WITHHELD
+    assert out[1] == shell.WITHHELD_NOTE
+    assert fake.calls == []
 
 
 # --- Off the trigger path ---------------------------------------------------------------------
