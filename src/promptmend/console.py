@@ -447,13 +447,14 @@ def run(argv: Sequence[str]) -> Ran:
     module in the working directory never runs."""
     import os
     import subprocess
-    import sys
+
+    from .entry import self_command
 
     if not runnable(argv):
         raise ValueError(f"refused to run {shown(argv)}: the command line does not run it")
     try:
         done = subprocess.run(  # noqa: S603 - our own interpreter and module, an argv list
-            [sys.executable, "-P", "-m", "promptmend.cli", *argv],
+            [*self_command(), *argv],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,

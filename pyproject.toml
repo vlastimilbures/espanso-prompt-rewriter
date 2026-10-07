@@ -69,6 +69,11 @@ dev = [
   "pre-commit>=4.6,<5",
   "PyYAML>=6.0,<7",
 ]
+# The frozen Windows build (#185, packaging/windows/): `uv sync --group build`. Never in the
+# runtime dependencies, constraints.txt or the Homebrew formula.
+build = [
+  "pyinstaller==6.22.3",
+]
 
 [build-system]
 requires = ["hatchling>=1.27"]
@@ -101,7 +106,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "S", "PT", "C4", "PIE", "RET",
 
 [tool.mypy]
 python_version = "3.12"
-files = ["src", "scripts", "tests"]
+files = ["src", "scripts", "tests", "packaging"]
 strict = true
 ignore_missing_imports = true
 

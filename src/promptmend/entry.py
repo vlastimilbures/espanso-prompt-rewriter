@@ -50,6 +50,16 @@ def discard_stderr() -> None:
         os.close(null)
 
 
+def self_command() -> list[str]:
+    """The argv prefix that runs this CLI again in a child process. A frozen build (the
+    Windows zip, #185) is its own program: its executable runs the CLI, and it has no
+    interpreter to take ``-m``. Otherwise this interpreter runs the module with ``-P``, so a
+    module planted in the working directory never runs."""
+    if getattr(sys, "frozen", False):
+        return [sys.executable]
+    return [sys.executable, "-P", "-m", "promptmend.cli"]
+
+
 def main() -> None:
     quiet_trigger(sys.argv[1:])
     from .cli import app
