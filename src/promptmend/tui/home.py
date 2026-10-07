@@ -7,12 +7,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .. import deploy, doctor
+from .. import __version__, deploy, doctor, update_check
 from ..commands import common
 from ..factory import routes
 from .state import State
 
 OK, WARN, FAIL = doctor.OK, doctor.WARN, doctor.FAIL
+# A newer release (#197): highlighted, but no problem, so worst() and headline() count it as
+# ok and an update never makes Home "Almost ready".
+NOTE = "note"
+# The longest update command the Version row shows; a longer one is left to About.
+SHORT_COMMAND = 32
 _RANK = {OK: 0, WARN: 1, FAIL: 2}
 
 # Tab id -> its label; the digit in each label is its key (app.TABS adds the panes).
@@ -33,7 +38,7 @@ _NUMBERS = ("no", "one", "two", "three", "four", "five", "six", "seven", "eight"
 
 @dataclass(frozen=True)
 class HomeRow:
-    """``status`` is ok, warn or fail; ``detail`` is the short note on the right (key set);
+    """``status`` is ok, warn, fail or note; ``detail`` is the short note on the right (key set);
     ``jump`` the tab id that shows more; ``problem`` the headline's sentence when not ok."""
 
     status: str
@@ -45,7 +50,8 @@ class HomeRow:
 
 
 def _status(check_status: str) -> str:
-    """A doctor status as a row status: info (version, a skipped check) counts as ok."""
+    """A doctor status as a row status: info (version, a skipped check) and note count as
+    ok."""
     return check_status if check_status in _RANK else OK
 
 
@@ -59,6 +65,21 @@ def _count(n: int, noun: str) -> str:
 
 def _checks(state: State) -> dict[str, doctor.Check]:
     return {c.id: c for c in state.report.checks}
+
+
+def _version_row(state: State) -> HomeRow:
+    """The installed version and whether a newer release exists, with its update command (a
+    long one, uv's or install.ps1's, would squeeze every row: About shows it instead)."""
+    update = state.update
+    if update.state == update_check.AVAILABLE:
+        install = _checks(state).get("install")
+        command = doctor.upgrade_hint(install.data if install else {})
+        if len(command) > SHORT_COMMAND:
+            command = "press a for the command"
+        text = f"{__version__} · {update.latest} available"
+        return HomeRow(NOTE, "Version", text, command)
+    words = {update_check.LATEST: " · latest", update_check.OFF: " · check off"}
+    return HomeRow(OK, "Version", f"{__version__}{words.get(update.state, '')}")
 
 
 def _trigger_row(state: State, label: str, name: str) -> HomeRow:
@@ -153,10 +174,12 @@ def _checks_row(state: State) -> HomeRow:
 
 
 def home_rows(state: State) -> list[HomeRow]:
-    """Home's rows, in the order a person reads them: what rewrites, the deployed triggers,
-    the history, where the rewrite goes (PROMPT_OUTPUT, #134) and every check."""
+    """Home's rows, in the order a person reads them: the version (#197), what rewrites, the
+    deployed triggers, the history, where the rewrite goes (PROMPT_OUTPUT, #134) and every
+    check."""
     output = state.settings.output
     return [
+        _version_row(state),
         _trigger_row(state, "Rewrites", "-i-"),
         _trigger_row(state, "Pro (-ip-)", "-ip-"),
         _triggers_row(state),

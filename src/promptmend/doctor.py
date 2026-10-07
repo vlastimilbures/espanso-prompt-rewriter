@@ -2,9 +2,10 @@
 
 Read-only: it runs only `espanso path config`, `espanso status` and the launcher lookup
 (`uv tool dir`, `brew --prefix`) through deploy.run_command, reads the settings in repair
-mode, and reads the clipboard only to report its length. The report never holds a key, the
-persona or clipboard text, since people paste it into bug reports. Its JSON shape is stable
-(SCHEMA_VERSION): ids and keys are only ever added.
+mode, asks PyPI for the newest release at most once a day (update_check, unless
+PROMPT_UPDATE_CHECK is false), and reads the clipboard only to report its length. The report
+never holds a key, the persona or clipboard text, since people paste it into bug reports. Its
+JSON shape is stable (SCHEMA_VERSION): ids and keys are only ever added.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import __version__, config, config_files, deploy
+from . import __version__, config, config_files, deploy, update_check
 from .config import ConfigLayers, secret_names
 
 SCHEMA_VERSION = 1
@@ -46,7 +47,7 @@ CHECK_IDS = (
 # Every key of each check's data, in every report: a check that could not run has them all
 # as None, so a consumer never meets a missing key.
 DATA_KEYS = {
-    "version": ("version", "python", "platform"),
+    "version": ("version", "python", "platform", "latest", "update_available", "checked_at"),
     "cli": ("path", "executable"),
     "install": ("channel", "launcher", "editable"),
     "config": ("mode", "files", "valid", "findings"),
@@ -118,13 +119,30 @@ class Report:
         }
 
 
-def _version_check() -> Check:
+def upgrade_hint(install: Mapping[str, Any]) -> str:
+    """The update command for the install check's data: a checkout's own wins over the
+    launcher's channel, since an editable tool sits in uv's bin folder too."""
+    channel = "editable" if install.get("editable") else str(install.get("channel") or "")
+    return update_check.upgrade_command(channel)
+
+
+def _version_check(update: update_check.UpdateStatus, install: Check | None) -> Check:
+    """The installed version and whether PyPI has a newer one (#197): information only, never
+    a warning, with the update command for doctor's install channel (a checkout's own)."""
+    available = update.state == update_check.AVAILABLE
+    known = update.state in (update_check.AVAILABLE, update_check.LATEST)
     data = {
         "version": __version__,
         "python": platform.python_version(),
         "platform": sys.platform,
+        "latest": update.latest,
+        "update_available": available if known else None,
+        "checked_at": update.checked_at,
     }
-    return Check("version", INFO, f"promptmend {__version__}", data)
+    message = f"promptmend {__version__}"
+    if available:
+        message += f", {update.latest} available: {upgrade_hint(install.data if install else {})}"
+    return Check("version", INFO, message, data)
 
 
 def _cli_check() -> Check:
@@ -583,11 +601,15 @@ def run(
     launcher: str | None = None,
     clipboard: bool = True,
     runner: deploy.Runner | None = None,
+    update: update_check.UpdateStatus | None = None,
 ) -> Report:
-    """Every check in CHECK_IDS. ``launcher`` and ``espanso_dir`` override the lookups."""
+    """Every check in CHECK_IDS. ``launcher`` and ``espanso_dir`` override the lookups;
+    ``update`` is an update check already made (the interface's)."""
     run_command = runner or deploy.run_command
     layers = ConfigLayers.resolve(strict=False)
     settings = layers.settings()
+    if update is None:
+        update = update_check.check(settings)
     try:
         ConfigLayers.resolve().settings()
         strict_error = None
@@ -612,10 +634,13 @@ def run(
         live = [e for e in manifest.entries.values() if not deploy.is_gone(e)]
         compare = min(e.launcher for e in live or manifest.entries.values())
 
+    # The version check names the install channel's update command, so it is built after the
+    # install check; the report keeps CHECK_IDS order.
+    install = _safely("install", lambda: _install_check(found, launcher_error))
     checks: list[Check] = [
-        _version_check(),
+        _safely("version", lambda: _version_check(update, install)),
         _safely("cli", _cli_check),
-        _safely("install", lambda: _install_check(found, launcher_error)),
+        install,
         _safely("config", lambda: _config_check(layers, strict_error)),
         _safely("keys", lambda: _keys_check(layers, settings.provider, settings.local_only)),
         _safely("persona", lambda: _persona_check(settings, _persona_readable())),

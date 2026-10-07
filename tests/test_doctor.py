@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from promptmend import assets, config, deploy, doctor
+from promptmend import assets, config, deploy, doctor, update_check
 from promptmend.config import ConfigLayers, Settings
 from promptmend.history import Health
 
@@ -55,6 +55,82 @@ def test_install_without_a_launcher_guesses(
     root.mkdir()
     (root / "pyproject.toml").write_text("", "utf-8")
     assert doctor._install_check(None, "x").data["channel"] == "editable"
+
+
+# --- version and update (#197) ------------------------------------------------------------
+
+
+def _install(channel: str, editable: bool = False) -> doctor.Check:
+    return doctor.Check("install", "ok", "", {"channel": channel, "editable": editable})
+
+
+def test_version_with_a_newer_release(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(doctor, "__version__", "0.21.0")
+    update = update_check.UpdateStatus(update_check.AVAILABLE, "0.22.0", "2026-10-07T12:00:00Z")
+    check = doctor._version_check(update, _install("homebrew"))
+    assert check.status == doctor.INFO
+    assert check.message == "promptmend 0.21.0, 0.22.0 available: brew upgrade promptmend"
+    assert {k: check.data[k] for k in ("latest", "update_available", "checked_at")} == {
+        "latest": "0.22.0",
+        "update_available": True,
+        "checked_at": "2026-10-07T12:00:00Z",
+    }
+    assert set(check.data) == set(doctor.DATA_KEYS["version"])
+    # A checkout's own update wins over its uv launcher.
+    editable = doctor._version_check(update, _install("uv", editable=True))
+    assert editable.message.endswith("available: git pull")
+    assert doctor._version_check(update, None).message.endswith("see docs/install.md")
+
+
+@pytest.mark.parametrize(
+    ("state", "available"),
+    [(update_check.LATEST, False), (update_check.UNKNOWN, None), (update_check.OFF, None)],
+)
+def test_version_without_a_newer_release(
+    monkeypatch: pytest.MonkeyPatch, state: str, available: bool | None
+) -> None:
+    monkeypatch.setattr(doctor, "__version__", "0.21.0")
+    check = doctor._version_check(update_check.UpdateStatus(state), _install("uv"))
+    assert (check.status, check.message) == (doctor.INFO, "promptmend 0.21.0")
+    assert check.data["update_available"] is available
+
+
+def test_run_checks_for_an_update_unless_given_one(
+    espanso: Path, no_clipboard: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asked: list[bool] = []
+
+    def fake_check(cfg: Settings) -> update_check.UpdateStatus:
+        asked.append(cfg.update_check)
+        return update_check.UpdateStatus(update_check.AVAILABLE, "99.0.0", "now")
+
+    monkeypatch.setattr(update_check, "check", fake_check)
+    report = doctor.run(espanso_dir=espanso, launcher=LAUNCHER, runner=_runner())
+    version = _status("version", report)
+    assert asked == [True]
+    assert (version.status, version.data["latest"]) == (doctor.INFO, "99.0.0")
+    assert "99.0.0 available" in version.message
+    assert [c.id for c in report.checks] == list(doctor.CHECK_IDS)
+    given = update_check.UpdateStatus(update_check.LATEST, "1.0.0", "then")
+    report = doctor.run(espanso_dir=espanso, launcher=LAUNCHER, runner=_runner(), update=given)
+    assert asked == [True]
+    assert _status("version", report).data["latest"] == "1.0.0"
+
+
+def test_run_checks_with_the_default_when_the_setting_is_bad(
+    espanso: Path, no_clipboard: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PROMPT_UPDATE_CHECK", "maybe")
+    asked: list[bool] = []
+
+    def fake_check(cfg: Settings) -> update_check.UpdateStatus:
+        asked.append(cfg.update_check)
+        return update_check.UpdateStatus()
+
+    monkeypatch.setattr(update_check, "check", fake_check)
+    report = doctor.run(espanso_dir=espanso, launcher=LAUNCHER, runner=_runner())
+    assert asked == [True]
+    assert _status("version", report).data["update_available"] is None
 
 
 # --- config and keys ----------------------------------------------------------------------

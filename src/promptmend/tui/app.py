@@ -179,7 +179,8 @@ class ManageApp(App[int]):
         install = (
             next((c.data for c in report.checks if c.id == "install"), None) if report else None
         )
-        self.push_screen(AboutScreen(brand.about_facts(install, __version__)))
+        update = self.state.update if self.state else None
+        self.push_screen(AboutScreen(brand.about_facts(install, __version__, update)))
 
     def log_action(self, entry: teach.Entry) -> None:
         """Keep an action in the session log and show it on Home."""

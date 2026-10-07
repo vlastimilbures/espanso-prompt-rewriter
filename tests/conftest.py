@@ -78,6 +78,14 @@ def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
             monkeypatch.setattr(module, "run", no_child)
     if (shell := sys.modules.get("promptmend.commands.shell")) is not None:
         monkeypatch.setattr(shell, "run_here", no_child)
+    # ...nor ask pypi.org for the newest release (#197): every check is unknown, unless a test
+    # puts the real fetch back (test_update_check.REAL_FETCH) and answers it with fake_http.
+    from promptmend import update_check
+
+    def no_pypi() -> str:
+        raise httpx.ConnectError("tests never reach pypi.org")
+
+    monkeypatch.setattr(update_check, "_fetch", no_pypi)
     # The user patterns safe_repr() hides are set by every settings load: start each test
     # without the previous test's.
     from promptmend import redaction

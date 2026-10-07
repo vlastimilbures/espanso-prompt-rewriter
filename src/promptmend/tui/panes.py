@@ -43,7 +43,7 @@ from ..factory import PROVIDER_NAMES, routes
 from ..prompt_builder import ADDED, ALIASES, PROFILES, user_profiles_dir
 from . import teach
 from .console import CommandLine
-from .home import TAB_LABELS, HomeRow, headline, home_rows
+from .home import NOTE, TAB_LABELS, HomeRow, headline, home_rows
 from .modals import ConfirmModal, Field, FormModal, PickModal, TextModal
 from .state import State, current_plan
 
@@ -185,6 +185,11 @@ def _jump(tab: str | None) -> str:
     return f"-> {TAB_LABELS[tab]}" if tab else ""
 
 
+# Home's word and colour for a newer release (#197): its own, apart from doctor's four, so the
+# word says it in either theme and without colour.
+_NOTE_LABEL = ("new", "bold magenta")
+
+
 def home_table(rows: Sequence[HomeRow]) -> Table:
     """Home's rows as a grid: the status word (coloured, but the word says it), the label, the
     text (cut with … when the terminal is narrow), the detail and, for a row that is not ok,
@@ -195,9 +200,9 @@ def home_table(rows: Sequence[HomeRow]) -> Table:
     grid.add_column(ratio=1, no_wrap=True, overflow="ellipsis")
     grid.add_column(no_wrap=True, justify="right")
     for row in rows:
-        label, color = doctor_cmd._LABEL[row.status]
+        label, color = _NOTE_LABEL if row.status == NOTE else doctor_cmd._LABEL[row.status]
         side = [row.detail] if row.detail else []
-        if row.status != doctor.OK:
+        if row.status not in (doctor.OK, NOTE):
             side.append(_jump(row.jump))
         grid.add_row(
             Text(label, style=color),

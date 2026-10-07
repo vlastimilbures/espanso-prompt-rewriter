@@ -204,7 +204,9 @@ text field and wait without typing or switching windows (see [Usage](usage.md)).
 ## Update
 
 Update through the channel you installed with, then check the result with
-`promptmend doctor`.
+`promptmend doctor`. `doctor` and the [interface](interface.md#home)'s Home tab tell you when
+a newer release exists, with the command below for your channel (a checkout install:
+`git pull`, see [Install from a checkout](#install-from-a-checkout)).
 
 | Channel | Update command |
 |---------|----------------|

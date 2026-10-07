@@ -375,7 +375,11 @@ Rules for agents:
   The header shows `PromptMend <version>` (#112); the snapshots pin the version (`VERSION`,
   "0.20.0", the release that ships those screenshots), so a release changes none.
   Home (Mockup B, #112) is `tui/home.py`'s pure `home_rows(state)` (no reads of its own, no
-  Textual; `tests/test_tui_home.py`): rows for `-i-`, `-ip-`, the match files/Espanso, the
+  Textual; `tests/test_tui_home.py`): first `Version` (#197, from `State.update`, which
+  `gather()` checks once and hands to `doctor.run(update=)`; a newer release is status
+  `NOTE`, word `new`, detail the update command up to `SHORT_COMMAND` chars, else a pointer
+  to About; `worst()`/`headline()` count it as ok and `pill()` never sees it; the
+  snapshots pin it to `latest`), then rows for `-i-`, `-ip-`, the match files/Espanso, the
   history, `Output` (`PROMPT_OUTPUT`, #134: paste or clipboard), and
   the doctor counts; each a status word plus the tab that fixes it, and `headline()` names the
   worst (first of equals; Markdown backticks stripped, #174). `pill()` is the header's
@@ -501,6 +505,18 @@ Rules for agents:
   symlink, the named `.env` inside it, a file holding the new name, else a failed move; doctor
   runs after the move) or holds conflicts left behind; data `config_dir`, `data_dir`,
   `legacy`, `conflicts`.
+- `update_check.py` — whether a newer release exists (#197), for `doctor` and the
+  interface only (FORBIDDEN in `tests/test_trigger_contract.py`). `check(cfg)` never raises:
+  `PROMPT_UPDATE_CHECK=false` is `off` (no request, no file read); else
+  `user_data_dir()/update-check.json` (`checked_at`, `latest`) younger than 24 h is reused (a
+  future or damaged one counts as expired), otherwise one `httpx.Client(timeout=3)` GET of
+  `https://pypi.org/pypi/promptmend/json` (env proxies honoured), newest plain `X.Y.Z` release
+  not all yanked, compared as int tuples (an install newer than PyPI is `latest`), cached with
+  `write_atomic()`; any error is `unknown`. `upgrade_command(channel)` gives docs/install.md's
+  command per channel; `doctor.upgrade_hint()` prefers `editable` (git pull). doctor's
+  `version` check (built after `install`, report order unchanged) stays INFO and adds
+  `latest`, `update_available`, `checked_at`. `tests/conftest.py` stubs `_fetch` in every
+  test; `tests/test_update_check.py` puts the real one back (`REAL_FETCH`) under `fake_http`.
 - `previous_install.py` — finds an earlier checkout install (#110) from the launcher in the
   deployed match files (`deploy.deployed_launchers()`) and manifest, the uv tool receipt and a
   path the user entered; never a disk scan, and a checkout's `.env` is only checked for

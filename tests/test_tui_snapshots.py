@@ -23,13 +23,13 @@ from typing import Any
 import pytest
 from textual.widgets import Button
 
-from promptmend import assets, deploy, doctor, previous_install
+from promptmend import assets, deploy, doctor, previous_install, update_check
 from promptmend.config import ConfigLayers
 from promptmend.console import Ran
 from promptmend.history import StatsRow
 from promptmend.prompt_builder import UserProfile
 from promptmend.tui import app as app_module
-from promptmend.tui import brand
+from promptmend.tui import brand, home
 from promptmend.tui.app import HIGH_CONTRAST, ManageApp
 from promptmend.tui.console import CommandLine
 from promptmend.tui.state import State
@@ -48,6 +48,9 @@ LAUNCHER = f"{HOME}/.local/bin/promptmend"
 # The header's version (#112), pinned so a release regenerates no snapshot: the release that
 # ships the README's screenshots.
 VERSION = "0.20.0"
+# The update check (#197), pinned: this is the latest release, so no snapshot asks pypi.org or
+# changes when a newer release comes out.
+UPDATE = update_check.UpdateStatus(update_check.LATEST, VERSION, "2026-10-07T09:00:00+00:00")
 
 _MESSAGES = {
     "version": (doctor.INFO, f"promptmend {VERSION}"),
@@ -164,6 +167,7 @@ def fixed_state(
         stats=_stats(),
         stats_error=None,
         previous=previous or previous_install.Detection(),
+        update=UPDATE,
     )
 
 
@@ -186,6 +190,7 @@ def fixed_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     """The paths a pane reads itself (the history file, the profile folder) are fixed too,
     and so is the version in the header."""
     monkeypatch.setattr(app_module, "__version__", VERSION)
+    monkeypatch.setattr(home, "__version__", VERSION)
     # About's runtime line (#112) differs by CI runner.
     monkeypatch.setattr(brand, "runtime", lambda: {"python": "3.14.0", "textual": "8.2.8"})
     monkeypatch.delenv("PROMPTMEND_ENV")

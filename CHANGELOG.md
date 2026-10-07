@@ -15,6 +15,15 @@ All notable changes to this project are documented here. The format follows
   with `<value withheld>`; the history (memory only) keeps only lines that ran. It needs a
   terminal (exit 3 otherwise). New dependency: prompt_toolkit, loaded only by `shell`. See
   docs/commands.md, "shell".
+- An update check (#197): `promptmend doctor` and a new first Home row, `Version`, say
+  whether a newer release exists (`0.21.0 · 0.22.0 available`), with the update command for
+  your install channel (for example `brew upgrade promptmend`); the About screen shows it too.
+  It is information only: doctor never warns about it, and Home stays "Ready". It asks
+  pypi.org at most once a day (cached in `update-check.json` in the data folder), never from
+  a trigger; pypi.org sees your IP address and a User-Agent naming PromptMend. New setting
+  `PROMPT_UPDATE_CHECK` (default `true`); `false` makes no request. `doctor --json` adds
+  `latest`, `update_available` and `checked_at` to the `version` check. See docs/privacy.md,
+  "Update check".
 
 ### Changed
 - The interface's command line also refuses `config set|get|unset` with a key's name and a
