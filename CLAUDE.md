@@ -29,7 +29,11 @@ never run it here), which reads no checkout `.env`; docs/install.md "Update"/"Un
 document `--force` and detach-before-uninstall.
 
 Docs map: README.md is the landing page and the PyPI long description (absolute links and
-images only; no mermaid, `<details>` or `> [!` alerts; its hero text block is `brand.LOGO`).
+images only; HTML only `<details>`/`<summary>` and `<picture>`/`<source>`/`<img>`; no mermaid
+block or `> [!` alerts). Its flow diagram is `docs/flow.mmd`, which `scripts/render_diagram.py`
+renders (npx mermaid-cli) into `docs/flow-light.svg`/`flow-dark.svg`, shown by a `<picture>`
+with raw URLs; rerun it after editing the `.mmd` (`tests/test_docs.py` checks the SVGs carry
+its hash).
 The depth lives in `docs/` (index `docs/README.md`): `install`, `usage`, `commands` (the only
 home of the exit codes), `configuration` (the only home of the settings tables, which
 `tests/test_docs.py` matches against `env_names()`), `profiles`, `privacy`, `interface`,
@@ -409,7 +413,7 @@ Rules for agents:
   which the drift test parses; the persona's value as `<value withheld>`). The provider
   overview (`show_routes()`: `PROMPT_LOCAL_ONLY`/`PROMPT_PROVIDER` sentence and routes table)
   is on Diagnostics. `tui/intro.py`'s `IntroScreen` (#112; text from
-  `tui/brand.py`: `brand.NAME` is the one display name the header, intro and About read, so a rename (#169) changes one line; `brand.MARK` is the ASCII logo (a `[+]` speech bubble beside figlet-small "PromptMend"), `brand.LOGO` the mark plus `TAGLINE`, which README's hero repeats exactly (`tests/test_docs.py`); the mark is dropped at `brand.NARROW` columns or less, frame is a Textual
+  `tui/brand.py`: `brand.NAME` is the one display name the header, intro and About read, so a rename (#169) changes one line; `brand.MARK` is the ASCII logo (a `[+]` speech bubble beside figlet-small "PromptMend"), `brand.LOGO` the mark plus `TAGLINE`; the mark is dropped at `brand.NARROW` columns or less, frame is a Textual
   border) is pushed over `MainScreen` on every launch for `ManageApp(intro=True)`; it has no
   timer (#173): any key (Enter, Escape, …) or click closes it and is consumed. Its muted
   `INTRO_HINT` names `teach.INTRO_OFF` (`config set PROMPT_UI_INTRO false`, parsed by the

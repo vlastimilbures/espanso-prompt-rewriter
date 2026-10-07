@@ -1,15 +1,5 @@
 # PromptMend
 
-```text
- .-------.    ___                    _   __  __             _
- |  [+]  |   | _ \_ _ ___ _ __  _ __| |_|  \/  |___ _ _  __| |
- '--. .--'   |  _/ '_/ _ \ '  \| '_ \  _| |\/| / -_) ' \/ _` |
-    |/       |_| |_| \___/_|_|_| .__/\__|_|  |_\___|_||_\__,_|
-                               |_|
-
-A rough draft in, a precise prompt out: type -i- in any text field.
-```
-
 **Type a trigger, get a well-structured LLM prompt.** Copy a rough draft, type `-i-` anywhere,
 and [Espanso](https://espanso.org/) replaces it with a precise, sectioned prompt rewritten by a
 local or cloud model.
@@ -22,60 +12,52 @@ local or cloud model.
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/vlastimilbures/promptmend/blob/main/LICENSE)
 
 One small Python CLI, `promptmend`, sits behind every trigger. Espanso runs it when you type
-the trigger; it reads your clipboard, checks the draft for sensitive content before anything
-leaves your machine, and sends it with the rewrite instructions to the model. Espanso then
-pastes the result in place of the trigger, or a readable `[promptmend: …]` message if
-something went wrong, never a blank.
+the trigger. It reads your clipboard, checks the draft for sensitive content before anything
+leaves your machine, and sends it to the model with the rewrite instructions. Espanso pastes
+the result in place of the trigger. If something went wrong, you get a readable
+`[promptmend: …]` message, never a blank.
 
-It works the same way on macOS and Windows, with [OpenRouter](https://openrouter.ai),
+It works the same on macOS and Windows, with [OpenRouter](https://openrouter.ai),
 [Anthropic](https://www.anthropic.com), [Ollama](https://ollama.com) or
 [LM Studio](https://lmstudio.ai). A full-screen terminal interface and plain commands set it up
 and manage it.
 
-```text
-copy a draft --> type -i- --> data-protection gate --> model (cloud or local) --> rewrite pasted
-                                       |
-                                       +--> sensitive content: a [promptmend: ...] marker instead
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/vlastimilbures/promptmend/main/docs/flow-dark.svg">
+  <img alt="Copy a draft, type -i-, Espanso runs promptmend, the data-protection gate checks it, a cloud or local model rewrites it, and the rewrite is pasted; a flagged draft gets a [promptmend: …] marker instead" src="https://raw.githubusercontent.com/vlastimilbures/promptmend/main/docs/flow-light.svg">
+</picture>
 
 ## Highlights
 
-- **Golden-template rewrite.** The `default` profile turns any draft into
-  `CONTEXT / GOAL / INSTRUCTIONS / CONSTRAINTS / INPUTS / OUTPUTS`, and picks the planning and
-  review steps from the task's complexity and audience.
-- **Two tiers.** `-i-` answers in a few seconds; `-ip-` hands hard, multi-part drafts to a
-  reasoning model for a more rigorous rewrite.
-- **Four providers, fully local if you like.** OpenRouter (default), Anthropic, Ollama and LM
-  Studio. Each trigger names its provider; `PROMPT_LOCAL_ONLY=true` refuses every cloud call.
-- **Data-protection gate.** Before a draft can leave your machine it is scanned for payment
-  cards, Vietnamese national IDs, emails, API keys, tokens, passwords, private keys, confidentiality
-  labels and your own patterns, and blocked unless you explicitly override.
-- **Your persona, once.** Set `PROMPT_PERSONA` and every rewrite (and the `-p-` snippet) opens
-  with your role.
-- **Never a blank paste.** Errors arrive inline as `[promptmend: …]`, because Espanso cannot
-  show stderr or exit codes.
-- **Clean output.** A leading reasoning block, control characters and invisible Unicode never
-  reach the app you are typing in.
-- **Interface and commands.** A full-screen interface with a Try tab, and headless commands
-  for scripts, with `promptmend doctor` to check everything.
-- **Benchmarked defaults.** The default models and prompt were chosen by a bundled benchmark
-  that scores template fidelity, injection, language edge cases, latency and cost.
+- **Golden-template rewrite.** Any draft becomes
+  `CONTEXT / GOAL / INSTRUCTIONS / CONSTRAINTS / INPUTS / OUTPUTS`.
+- **Two tiers.** `-i-` answers in seconds; `-ip-` uses a reasoning model for hard drafts.
+- **Four providers.** OpenRouter, Anthropic, Ollama and LM Studio; fully local if you like.
+- **Data-protection gate.** Keys, cards, IDs, emails and your own patterns never leave unless
+  you override.
+- **Your persona, once.** `PROMPT_PERSONA` opens every rewrite with your role.
+- **Never a blank paste.** Errors arrive inline as `[promptmend: …]`.
+- **Clean output.** No reasoning block, control characters or invisible Unicode.
+- **Interface and commands.** A full-screen interface, headless commands and
+  `promptmend doctor`.
+- **Benchmarked defaults.** Models and prompt chosen by a bundled benchmark.
 
-## Screenshots
+## Screenshot
 
 ![The Home tab of the PromptMend interface](https://raw.githubusercontent.com/vlastimilbures/promptmend/main/docs/interface.svg)
 
-Home: whether you are ready, what each trigger runs, the match files, the history and the
+Home shows whether you are ready, what each trigger runs, the match files, the history and the
 `doctor` checks, with a command line below.
 
-![The Try tab of the PromptMend interface](https://raw.githubusercontent.com/vlastimilbures/promptmend/main/docs/try.svg)
-
-Try: type a draft and rewrite it the way `-i-` would, against a local stub or, once you
-confirm, a real provider; the clipboard is never touched.
-
-More: [docs/interface.md](https://github.com/vlastimilbures/promptmend/blob/main/docs/interface.md) (every tab, the command line, the keys).
+More: [docs/interface.md](https://github.com/vlastimilbures/promptmend/blob/main/docs/interface.md)
+(every tab, the Try tab, the command line, the keys).
 
 ## Example
+
+A one-line draft becomes a full golden-template prompt.
+
+<details>
+<summary>A draft and its rewrite</summary>
 
 Draft on the clipboard:
 
@@ -84,8 +66,8 @@ write a short board update on why customer churn went up last quarter, use the a
 ```
 
 Pasted in its place (real output of the v0.19.0 prompt on its default model,
-`google/gemini-3.5-flash-lite` on `google-ai-studio/flex`, effort `minimal`, no persona
-configured, generated 2026-10-06):
+`google/gemini-3.5-flash-lite` on `google-ai-studio/flex`, effort `minimal`, no persona,
+generated 2026-10-06):
 
 ```text
 <CONTEXT>
@@ -121,19 +103,21 @@ structured .md, well formatted with clear headings/subheadings
 </OUTPUTS>
 ```
 
-The two choices are made independently. Here the model read "short" as a single small task, so
-step 1 is "execute now" (analysing an export first could also justify "plan first"); the board
+The prompt makes two choices independently. Here the model read "short" as one small task, so
+step 1 is "execute now"; analysing an export first could also justify "plan first". The board
 audience selected the independent-review step. A quick note to yourself would get a
 self-review checklist instead.
 
-More: [docs/profiles.md](https://github.com/vlastimilbures/promptmend/blob/main/docs/profiles.md) (what the `default` profile does, and
-how to write your own).
+</details>
+
+More: [docs/profiles.md](https://github.com/vlastimilbures/promptmend/blob/main/docs/profiles.md)
+(what the `default` profile does, and how to write your own).
 
 ## Requirements
 
 - [Espanso](https://espanso.org/install/), installed and running.
-- macOS or Windows. Linux works too, with a clipboard tool (`xclip`, `xsel` or `wl-clipboard`).
-- An [OpenRouter API key](https://openrouter.ai/keys) for the default `-i-` trigger, or
+- macOS or Windows. Linux works too, with `xclip`, `xsel` or `wl-clipboard`.
+- An [OpenRouter API key](https://openrouter.ai/keys) for `-i-`, or
   [Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai) for fully local use.
 - Python 3.12 or later, which Homebrew or uv installs for you.
 
@@ -141,15 +125,7 @@ More: [docs/install.md](https://github.com/vlastimilbures/promptmend/blob/main/d
 
 ## Install
 
-| Channel | macOS | Windows | Linux |
-|---------|-------|---------|-------|
-| Homebrew tap | Recommended | — | Yes |
-| One-command install | — | Recommended | — |
-| uv (from PyPI) | Yes | Yes | Recommended |
-
-### macOS
-
-With [Homebrew](https://brew.sh) (recommended):
+**macOS**, with [Homebrew](https://brew.sh):
 
 ```bash
 brew tap vlastimilbures/tap
@@ -157,56 +133,26 @@ brew trust --formula vlastimilbures/tap/promptmend
 brew install vlastimilbures/tap/promptmend
 ```
 
-The formula lives in the project's own tap,
-[vlastimilbures/homebrew-tap](https://github.com/vlastimilbures/homebrew-tap), not in
-homebrew/core; recent Homebrew asks you to trust its formula first (`brew trust`). Or with [uv](https://docs.astral.sh/uv/getting-started/installation/):
+Or with [uv](https://docs.astral.sh/uv/getting-started/installation/):
+`uv tool install promptmend -c https://github.com/vlastimilbures/promptmend/releases/latest/download/constraints.txt`
 
-```bash
-uv tool install promptmend -c https://github.com/vlastimilbures/promptmend/releases/latest/download/constraints.txt
-```
-
-### Windows
-
-Paste this into PowerShell or a Command Prompt; it needs no Python or uv first:
+**Windows**, in PowerShell or a Command Prompt:
 
 ```powershell
 powershell -ExecutionPolicy ByPass -c "irm https://github.com/vlastimilbures/promptmend/releases/latest/download/install.ps1 | iex"
 ```
 
-It installs uv if it is missing, then the attested wheel from the latest GitHub Release, and
-runs `promptmend doctor`. It never deploys the triggers: that is the next step. Or with uv:
+It needs no Python first: it installs uv if needed, then the latest release, and runs
+`promptmend doctor`. Or with uv: see
+[docs/install.md](https://github.com/vlastimilbures/promptmend/blob/main/docs/install.md#windows).
 
-```powershell
-winget install --id astral-sh.uv -e
-uv tool install promptmend -c https://github.com/vlastimilbures/promptmend/releases/latest/download/constraints.txt
-```
+**Linux**: use the uv line above, plus `xclip`, `xsel` or `wl-clipboard` for the clipboard.
 
-### Linux
-
-Use the uv line above, plus `xclip` or `xsel` (X11) or `wl-clipboard` (Wayland) for the
-clipboard. Homebrew works too.
-
-The `-c` file holds the exact dependency versions the release was tested with; without it, uv
-would resolve them afresh.
-
-### Update and uninstall
-
-Update through the channel you installed with, then run `promptmend doctor`; if it reports a
-match file as `stale`, run `promptmend espanso deploy`. On Windows, a deploy is needed after
-upgrading from 0.20.0 or earlier: those match files ran the CLI through PowerShell, which
-fails on every trigger (#18).
-
-| Channel | Update | Uninstall |
-|---------|--------|-----------|
-| Homebrew | `brew update`, then `brew upgrade promptmend` | `brew uninstall promptmend` |
-| One-command install | Run the same command again | `uv tool uninstall promptmend` |
-| uv | The `uv tool install` line above with `--force` | `uv tool uninstall promptmend` |
-
-Before you uninstall, run `promptmend espanso detach`: once the CLI is gone, every trigger
-that calls it fails with Espanso's rendering error.
+To update, use the channel you installed with, then run `promptmend doctor`. Before you
+uninstall, run `promptmend espanso detach`, or every trigger fails once the CLI is gone.
 
 More: [docs/install.md](https://github.com/vlastimilbures/promptmend/blob/main/docs/install.md)
-(verify a download, update, uninstall, upgrade from 0.18 or a checkout install).
+(every channel, verifying a download, update, uninstall, upgrading from older versions).
 
 ## Quick start
 
@@ -217,28 +163,27 @@ More: [docs/install.md](https://github.com/vlastimilbures/promptmend/blob/main/d
    promptmend                 # or the full-screen interface
    ```
 
-   `setup` asks for the provider and default profile, then the API key (hidden input, saved
-   in `secrets.toml`). It shows the Espanso match files it would deploy and writes them only
-   if you agree, and ends with a test call against a stub on `127.0.0.1`: never a paid call,
-   never your real key. An existing `.env` or an earlier checkout install is offered for
-   migration, and nothing changes unless you say yes.
+   `setup` asks for the provider, the profile and the API key, then previews the Espanso
+   match files and deploys them only if you agree. It ends with a test call against a local
+   stub, never a paid call.
 2. Copy a rough draft.
-3. Type `-i-` in any text field and wait a few seconds without typing or switching windows:
-   Espanso pastes the rewrite wherever the focus is when the answer arrives.
+3. Type `-i-` in any text field. Wait a few seconds without typing or switching windows:
+   Espanso pastes wherever the focus is when the answer arrives.
 4. If anything is off, ask the doctor:
 
    ```bash
    promptmend doctor
    ```
 
-More: [docs/install.md](https://github.com/vlastimilbures/promptmend/blob/main/docs/install.md#set-up) (`setup` options, non-interactive
-setup) and [docs/troubleshooting.md](https://github.com/vlastimilbures/promptmend/blob/main/docs/troubleshooting.md).
+More: [docs/install.md](https://github.com/vlastimilbures/promptmend/blob/main/docs/install.md#set-up)
+(`setup` options, migrating a `.env`) and
+[docs/troubleshooting.md](https://github.com/vlastimilbures/promptmend/blob/main/docs/troubleshooting.md).
 
 ### Fully local
 
-No API key is needed for the local triggers. Pull a model in [Ollama](https://ollama.com), or
-load one in [LM Studio](https://lmstudio.ai) and enable its local server, then use `-il-`
-(Ollama) or `-ilm-` (LM Studio):
+The local triggers need no API key. Pull a model in [Ollama](https://ollama.com), or load one
+in [LM Studio](https://lmstudio.ai) and enable its local server. Then use `-il-` (Ollama) or
+`-ilm-` (LM Studio):
 
 ```bash
 ollama pull qwen3:8b                            # the default OLLAMA_MODEL
@@ -258,11 +203,10 @@ promptmend config set PROMPT_LOCAL_ONLY true    # optional: refuse every cloud c
 | `-p-` | An empty golden template to fill in, opening with your persona | — |
 | `-risk-` | An enterprise-risk analysis prompt scaffold | — |
 
-- A trigger fires only at the start of a word: after a space, punctuation or a bracket, never
-  inside `a[n-i-1]`.
+- A trigger fires only at the start of a word, never inside `a[n-i-1]`.
 - It sends whatever is on the clipboard, so copy the draft first.
-- Do not type or switch windows while it runs, or set `PROMPT_OUTPUT=clipboard` to get the
-  rewrite on the clipboard instead of pasted.
+- Do not type or switch windows while it runs. Or set `PROMPT_OUTPUT=clipboard` to get the
+  rewrite on the clipboard instead.
 
 More: [docs/usage.md](https://github.com/vlastimilbures/promptmend/blob/main/docs/usage.md)
 (profiles per trigger, clipboard output, the `-if-` form, your own triggers).
@@ -301,9 +245,8 @@ files.
 | Linux | `~/.config/promptmend/` (`$XDG_CONFIG_HOME`) | `~/.local/share/promptmend/` (`$XDG_DATA_HOME`) |
 
 Change them with `promptmend config set`, or in the interface's
-[Settings tab](https://github.com/vlastimilbures/promptmend/blob/main/docs/interface.md#settings-tab):
-a list where Space switches a setting, Enter picks or edits it and `r` resets it. The common
-changes:
+[Settings tab](https://github.com/vlastimilbures/promptmend/blob/main/docs/interface.md#settings-tab).
+The common changes:
 
 ```bash
 promptmend config set OPENROUTER_MODEL google/gemini-3.5-flash-lite      # the -i- model
@@ -325,7 +268,7 @@ More: [docs/configuration.md](https://github.com/vlastimilbures/promptmend/blob/
 ## Privacy
 
 Cloud triggers send your clipboard to OpenRouter (and the endpoint that serves the model) or
-Anthropic; so does Ollama or LM Studio at another address, or an Ollama `cloud` model. Each
+to Anthropic. So does Ollama or LM Studio at another address, or an Ollama `cloud` model. Each
 such call carries:
 
 - the draft, after the data-protection gate and the removal of invisible characters;
@@ -333,9 +276,9 @@ such call carries:
 - the model name and request settings;
 - the API key, only as the authentication header of its own provider.
 
-Before that, the gate blocks keys, tokens, passwords, payment cards, Vietnamese national IDs,
-emails, IBANs, confidentiality labels and your own patterns; `-iok-` sends one flagged draft on
-purpose when every finding is a label, ID, email or IBAN.
+The gate blocks keys, tokens, passwords, payment cards, Vietnamese national IDs, emails, IBANs,
+confidentiality labels and your own patterns. `-iok-` sends one flagged draft on purpose when
+every finding is a label, ID, email or IBAN.
 
 `PROMPT_LOCAL_ONLY=true` refuses every cloud call, and the local triggers keep everything on
 your machine. On macOS and Windows, clipboard items a password manager marks as concealed are
@@ -349,9 +292,9 @@ More: [docs/privacy.md](https://github.com/vlastimilbures/promptmend/blob/main/d
 
 ## Model benchmark
 
-The defaults were chosen with a bundled benchmark that scores every rewrite mechanically for
-template fidelity, prompt injection and language edge cases, latency and real cost. `-i-`
-runs `google/gemini-3.5-flash-lite` on `google-ai-studio/flex` (effort `minimal`); `-ip-` runs
+A bundled benchmark chose the defaults. It scores every rewrite mechanically for template
+fidelity, prompt injection, language edge cases, latency and real cost. `-i-` runs
+`google/gemini-3.5-flash-lite` on `google-ai-studio/flex` (effort `minimal`). `-ip-` runs
 `openai/gpt-6-luna` on `openai` (effort `low`).
 
 More: [docs/benchmark.md](https://github.com/vlastimilbures/promptmend/blob/main/docs/benchmark.md)
@@ -375,7 +318,7 @@ More: [docs/benchmark.md](https://github.com/vlastimilbures/promptmend/blob/main
 
 Contributions are welcome. Read
 [CONTRIBUTING.md](https://github.com/vlastimilbures/promptmend/blob/main/CONTRIBUTING.md)
-first: it covers setting up a checkout, the checks CI runs, and how to add a profile, trigger,
+first. It covers setting up a checkout, the checks CI runs, and how to add a profile, trigger,
 setting or provider. Release notes are in
 [CHANGELOG.md](https://github.com/vlastimilbures/promptmend/blob/main/CHANGELOG.md).
 

@@ -58,6 +58,11 @@ All notable changes to this project are documented here. The format follows
   interface's Diagnostics tab shows it.
 
 ### Documentation
+- README is simpler (#200): no ASCII logo, a flow diagram (`docs/flow.mmd`, rendered into a
+  light and a dark SVG by `scripts/render_diagram.py`) instead of the text one, one-sentence
+  highlights, only the Home screenshot, the example collapsed, and one install command per OS.
+  The channel and update/uninstall tables are in docs/install.md, whose "Update" section now
+  also has the Windows redeploy note for upgrades from 0.20.0 or earlier (#18).
 - The benchmark figures behind CONTRIBUTING's "Known gaps in the default prompt" moved to
   docs/benchmark.md ("Per-draft findings of the 2026-10 round"), its only home; the gaps link
   there. Gap 10 now says the v0.19.0 prompt copies a short pasted email on flash-lite.

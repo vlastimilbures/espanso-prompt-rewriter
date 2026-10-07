@@ -20,8 +20,7 @@ NARROW = 70
 
 
 # The logo: a mended speech bubble beside `uvx pyfiglet -f small PromptMend`, ASCII and
-# narrower than NARROW. README's hero is LOGO exactly (tests/test_docs.py); the intro and
-# About show MARK above the tagline.
+# narrower than NARROW. The intro and About show MARK above the tagline.
 MARK = (
     " .-------.    ___                    _   __  __             _",
     r" |  [+]  |   | _ \_ _ ___ _ __  _ __| |_|  \/  |___ _ _  __| |",
