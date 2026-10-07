@@ -6,6 +6,7 @@ import subprocess
 import sys
 import time
 import unicodedata
+import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
 
@@ -15,6 +16,7 @@ from typer.testing import CliRunner
 
 import promptmend.cli as cli
 from promptmend.cli import _read_input, app
+from promptmend.config import Settings
 from promptmend.prompt_builder import system_prompt
 from promptmend.providers.base import ProviderError
 from promptmend.redaction import DEFAULT_IGNORABLE
@@ -1196,3 +1198,65 @@ def test_usage_names_promptmend() -> None:
     # CI forces Rich's styles (bold) even with NO_COLOR, so compare the plain text.
     plain = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout)
     assert "Usage: promptmend [OPTIONS] COMMAND" in plain
+
+
+# Espanso's script vars fail on any stderr output (#18), so the console script silences
+# warnings for a trigger call (improve, persona) before it imports the CLI; every other
+# command keeps the default filters.
+@pytest.mark.parametrize(
+    ("argv", "quiet"),
+    [(["improve", "--trigger-id", "i"], True), (["persona"], True), (["config", "show"], False)],
+    ids=["improve", "persona", "config"],
+)
+def test_entry_quiets_only_trigger_calls(argv: list[str], quiet: bool) -> None:
+    from promptmend import entry
+
+    with warnings.catch_warnings():
+        before = list(warnings.filters)
+        assert entry.quiet_trigger(argv) is quiet
+        assert (warnings.filters[0][0] == "ignore" and warnings.filters != before) is quiet
+
+
+@pytest.mark.parametrize("command", ["improve", "persona"])
+def test_entry_keeps_stderr_empty_on_a_warning(
+    monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], command: str
+) -> None:
+    from promptmend import entry
+
+    real = Settings.load
+
+    def load(*args: Any, **kwargs: Any) -> Any:
+        warnings.warn("a dependency's warning", UserWarning, stacklevel=1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(Settings, "load", load)
+    argv = ["promptmend", command]
+    if command == "improve":
+        argv += ["--provider", "nope", "--source", "argument", "--text", "draft"]
+    monkeypatch.setattr(sys, "argv", argv)
+    with warnings.catch_warnings():
+        # As outside pytest (which records warnings): every warning printed on stderr.
+        warnings.simplefilter("always")
+        warnings.showwarning = _print_warning
+        warnings.warn("shown", UserWarning, stacklevel=1)
+        assert "shown" in capfd.readouterr().err
+        with pytest.raises(SystemExit) as exited:
+            entry.main()
+    assert exited.value.code == 0
+    out, err = capfd.readouterr()
+    assert err == ""
+    if command == "improve":
+        assert out.startswith("[promptmend: Unknown provider")
+    else:
+        assert out == cli.PERSONA_PLACEHOLDER
+
+
+def _print_warning(
+    message: Warning | str,
+    category: type[Warning],
+    filename: str,
+    lineno: int,
+    file: Any = None,
+    line: str | None = None,
+) -> None:
+    sys.stderr.write(warnings.formatwarning(message, category, filename, lineno, line))

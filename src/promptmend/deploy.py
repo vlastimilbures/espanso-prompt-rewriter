@@ -53,12 +53,16 @@ MISSING, IN_SYNC, STALE, MODIFIED, FOREIGN = "missing", "in sync", "stale", "mod
 KEEP, OURS, SIDE = "keep", "ours", "side"
 CHOICES = (KEEP, OURS, SIDE)
 
-# The launcher goes inside a double-quoted YAML string that a shell runs: refuse characters
-# the shell or YAML would interpret there rather than try to escape them (the same guards the
-# install scripts had). On Windows the path is checked after its backslashes become slashes.
-_UNSAFE_POSIX = re.compile(r'["$`\\]')
-_UNSAFE_WINDOWS = re.compile(r'["%^&|<>]')
-# The quoted launcher in a cmd line as every release wrote it: `cmd: "\"<path>\" improve`.
+# The launcher is the first item of a script var's args (#18), a double-quoted YAML string
+# that Espanso hands to the OS as the program, with no shell. Refuse what YAML would read as
+# an escape or the string's end (a quote, a backslash), any control character, and Espanso's
+# own %HOME%, %CONFIG% and %PACKAGES%, which it replaces in every arg, rather than try to
+# escape them. On Windows the path is checked after its backslashes become slashes.
+_UNSAFE = re.compile(r'["\\\x00-\x1f\x7f-\x9f]|%(?:HOME|CONFIG|PACKAGES)%')
+# The launcher as the match files hold it: the first script arg, `args: ["<path>", ...`
+# (since #18), or the quoted path in a shell cmd line as every earlier release wrote it,
+# `cmd: "\"<path>\" improve`.
+_SCRIPT_LAUNCHER = re.compile(r'args: \["([^"\\]+)"')
 _QUOTED_LAUNCHER = re.compile(r'\\"([^"\\]+)\\"')
 # A path component that names a release (0.15.0, 0.15.0_1): gone after the next upgrade.
 _VERSIONED = re.compile(r"\d+(\.\d+)+([._-].*)?")
@@ -205,12 +209,11 @@ def launcher_text(path: Path | str, *, windows: bool = os.name == "nt") -> str:
     if windows:
         # Espanso YAML uses forward slashes; normalised for safety inside quotes.
         text = text.replace("\\", "/")
-        if _UNSAFE_WINDOWS.search(text):
-            raise DeployError(
-                f"The CLI path contains a character cmd.exe or YAML would interpret: {path}"
-            )
-    elif _UNSAFE_POSIX.search(text):
-        raise DeployError(f"The CLI path contains a quote, $, backtick or backslash: {path}")
+    if _UNSAFE.search(text):
+        raise DeployError(
+            "The CLI path contains a quote, a backslash, a control character or one of "
+            f"Espanso's %HOME%, %CONFIG% or %PACKAGES%: {path}"
+        )
     return text
 
 
@@ -502,9 +505,10 @@ class Plan:
 
 
 def launchers_in(text: str) -> set[str]:
-    """The launcher paths a match file's cmd lines quote. Every release quoted the launcher
-    the same way; Windows paths have forward slashes."""
-    return set(_QUOTED_LAUNCHER.findall(text))
+    """The launcher paths a match file calls: each script var's first arg, or the quoted
+    path of a shell cmd line (every release before #18 quoted it the same way). Windows
+    paths have forward slashes."""
+    return {*_SCRIPT_LAUNCHER.findall(text), *_QUOTED_LAUNCHER.findall(text)}
 
 
 def is_legacy_launcher(launcher: str) -> bool:

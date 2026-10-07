@@ -731,4 +731,9 @@ def espanso_detach(
 
 
 if __name__ == "__main__":
+    # `python -m promptmend.cli` (the smoke test, the interface's command line): the console
+    # script's entry.main() silences a trigger's warnings before this module's imports.
+    from .entry import quiet_trigger
+
+    quiet_trigger(sys.argv[1:])
     app()

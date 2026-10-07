@@ -39,10 +39,10 @@ def read_match(name: str) -> str:
     return (match_dir() / name).read_text(encoding="utf-8")
 
 
-# A match's trigger line, commented out or not, and the CLI call in its shell var.
+# A match's trigger line, commented out or not, and the CLI call in its script var's args.
 _TRIGGER = re.compile(r'^\s*(#\s*)?- trigger: "([^"]+)"')
-_CMD = re.compile(r'^\s*(?:#\s*)?cmd: "\\"__PROMPT_WORKFLOW__\\" (\w+)([^"]*)"')
-_OPTION = re.compile(r"--(provider|profile|tier) (\S+)")
+_CMD = re.compile(r'^\s*(?:#\s*)?args: \["__PROMPT_WORKFLOW__", "(\w+)"(.*)\]')
+_OPTION = re.compile(r'"--(provider|profile|tier)", "([^"]+)"')
 
 
 @dataclass(frozen=True)

@@ -10,9 +10,9 @@ matches:
     left_word: true
     vars:
       - name: persona
-        type: script
+        type: shell
         params:
-          args: ["__PROMPT_WORKFLOW__", "persona", "--trigger-id", "p"]
+          cmd: "\"__PROMPT_WORKFLOW__\" persona --trigger-id p"
     force_mode: clipboard
     replace: |
       <CONTEXT>

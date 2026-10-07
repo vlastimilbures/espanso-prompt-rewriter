@@ -192,7 +192,9 @@ would resolve them afresh.
 ### Update and uninstall
 
 Update through the channel you installed with, then run `promptmend doctor`; if it reports a
-match file as `stale`, run `promptmend espanso deploy`.
+match file as `stale`, run `promptmend espanso deploy`. On Windows, a deploy is needed after
+upgrading from 0.20.0 or earlier: those match files ran the CLI through PowerShell, which
+fails on every trigger (#18).
 
 | Channel | Update | Uninstall |
 |---------|--------|-----------|
