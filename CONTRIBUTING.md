@@ -245,6 +245,7 @@ promptmend/
 ├── src/promptmend/               the promptmend CLI
 │   ├── cli.py                    improve and persona commands, the single output sink;
 │   │                             mounts the management commands lazily
+│   ├── entry.py                  console-script entry: empty stderr for a trigger
 │   ├── commands/                 setup, config, secrets, profiles, stats, history, doctor, ui:
 │   │                             thin Typer wrappers over the services (common.py: exit codes)
 │   ├── tui/                      the full-screen Textual interface; only `ui` (commands/ui.py,
@@ -324,22 +325,29 @@ To ship a new built-in profile:
 
 ### Add a trigger
 
-Add a match to `espanso/match/prompts-llm.yml`. Shell commands start with the quoted
-`__PROMPT_WORKFLOW__` placeholder, which `promptmend espanso deploy` replaces with the absolute CLI path.
-Quote nothing else: `cmd.exe` mangles a command line holding more than one quoted part.
+Add a match to `espanso/match/prompts-llm.yml`. The CLI call is a `type: script` var (#18):
+its `args` list starts with the `__PROMPT_WORKFLOW__` placeholder, which
+`promptmend espanso deploy` replaces with the absolute CLI path, and holds every other
+argument as its own double-quoted item. Espanso starts `args[0]` directly, with no shell, so
+no shell quoting applies; a `type: shell` var would run through PowerShell on Windows, which
+cannot run a quoted path followed by arguments. A form value goes in as a whole item
+(`"{{form1.model}}"`). A script var fails on any stderr output, so the CLI must keep stderr
+empty on the trigger path (`entry.py` silences warnings and points fd 2 at the null device
+for `improve` and `persona`; never `ignore_error: true`, which would hide a crash).
 Set `force_mode: clipboard` on every match that runs the CLI, so Espanso pastes the output
 instead of typing short replies key by key.
 
 ```yaml
 - trigger: "-ireg-"
+  label: "PromptMend: rewrite for regulation (Ollama)"
   left_word: true  # fire only at the start of a word, never inside one such as n-i-1
   replace: "{{output}}"
   force_mode: clipboard
   vars:
     - name: output
-      type: shell
+      type: script
       params:
-        cmd: "\"__PROMPT_WORKFLOW__\" improve --provider ollama --profile regulation --source clipboard"
+        args: ["__PROMPT_WORKFLOW__", "improve", "--provider", "ollama", "--profile", "regulation", "--source", "clipboard"]
 ```
 
 A match of your own runs without `--trigger-id`: the managed matches' ids are a fixed
@@ -356,9 +364,11 @@ runs an untagged commit), so `espanso deploy`
 later recognises a file this version wrote as its own (stale) rather than foreign, and
 `tests/test_deploy.py` fails until it is run.
 
-`tests/test_yaml.py` checks the placeholder, quoting and `force_mode`, and that the profile and
-provider exist. Add the trigger's expected provider, profile and tier to `EXPECTED` in
-`tests/test_triggers.py`, which replays every trigger's command line through the CLI. Pass
+`tests/test_yaml.py` checks the script var (`args[0]` is the placeholder, one string per
+argument), `force_mode`, and that the profile and provider exist. Add the trigger's expected
+provider, profile and tier to `EXPECTED` in `tests/test_triggers.py`, which replays every
+trigger's args through the CLI and also runs each as a real process against a local stub,
+expecting exit 0 and an empty stderr (on Windows CI too). Pass
 `--profile` only when the trigger needs a fixed profile: it overrides `PROMPT_PROFILE` and the
 pro tier's profile.
 

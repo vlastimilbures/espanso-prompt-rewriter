@@ -38,6 +38,9 @@ VERSION = __version__
 REAL_RUN_COMMAND = deploy.run_command
 EXE = "promptmend.exe" if os.name == "nt" else "promptmend"
 STATIC = "prompts-core.yml"  # the only match file that never calls the CLI
+# The CLI match files as v0.20.0 shipped them, the last release that ran the CLI from shell
+# vars (#18). Kept as files, since CI's checkout has no tags.
+SHELL_0_20 = Path(__file__).parent / "golden" / "match-0.20.0"
 
 
 # --- Today's install-script rendering, kept verbatim to prove deploy writes the same bytes ---
@@ -80,16 +83,84 @@ def test_assets_are_the_repo_match_files() -> None:
     assert assets.match_names() == NAMES
 
 
-@pytest.mark.parametrize("bad", ['"', "$", "`", "\\"])
+# The launcher is a double-quoted YAML string that Espanso runs with no shell (#18): refused
+# are what YAML would read as an escape or the string's end, characters YAML cannot hold,
+# `{{` (Espanso fills {{name}} from its variables in every script param), and the %HOME%,
+# %CONFIG% and %PACKAGES% Espanso replaces in every script arg.
+_REFUSED = [
+    *['"', "\\", "\n", "\t", "\x7f", "\x85", "\udc80", "\uffff", "{{x}}"],
+    *["%HOME%", "%CONFIG%", "%PACKAGES%"],
+]
+_REFUSED_IDS = [
+    *["quote", "bslash", "lf", "tab", "del", "nel", "surr", "ffff", "var"],
+    *["home", "config", "packages"],
+]
+
+
+@pytest.mark.parametrize("bad", _REFUSED, ids=_REFUSED_IDS)
 def test_launcher_guard_posix(bad: str) -> None:
-    with pytest.raises(deploy.DeployError, match="quote, \\$, backtick or backslash"):
+    with pytest.raises(deploy.DeployError, match="quote, a backslash, a control character"):
         deploy.launcher_text(f"/opt/a{bad}b/promptmend", windows=False)
 
 
-@pytest.mark.parametrize("bad", ['"', "%", "^", "&", "|", "<", ">"])
+# On Windows a backslash becomes a slash first, so only the rest is refused.
+@pytest.mark.parametrize(
+    "bad", [b for b in _REFUSED if b != "\\"], ids=_REFUSED_IDS[:1] + _REFUSED_IDS[2:]
+)
 def test_launcher_guard_windows(bad: str) -> None:
-    with pytest.raises(deploy.DeployError, match=r"cmd\.exe or YAML"):
+    with pytest.raises(deploy.DeployError, match="quote, a backslash, a control character"):
         deploy.launcher_text(rf"C:\a{bad}b\promptmend.exe", windows=True)
+
+
+# No shell runs the launcher any more, so what only sh or cmd.exe would interpret is allowed.
+_SHELL_ONLY = ["$", "`", "%", "^", "&", "|", "<", ">", "'", " ", "#", ",", "]", "%HOM", "{x}"]
+_ALLOWED = ["dollar", "tick", "pct", "caret", "amp", "pipe", "lt", "gt", "apos", "sp", "hash"]
+_ALLOWED += ["comma", "bracket", "partial", "brace"]
+
+
+@pytest.mark.parametrize("char", _SHELL_ONLY, ids=_ALLOWED)
+@pytest.mark.parametrize("windows", [False, True], ids=["posix", "win"])
+def test_launcher_shell_characters_are_allowed(char: str, windows: bool) -> None:
+    path = rf"C:\a{char}b\promptmend.exe" if windows else f"/opt/a{char}b/promptmend"
+    text = deploy.launcher_text(path, windows=windows)
+    assert text == (path.replace("\\", "/") if windows else path)
+
+
+# The rendered file is valid YAML whose every script var starts with the launcher exactly as
+# given: spaces, non-ASCII letters, YAML flow characters and Windows forward slashes included.
+@pytest.mark.parametrize(
+    ("path", "windows"),
+    [
+        ("/Users/Jan Novák/a|b&c $x/promptmend", False),
+        ("/opt/a, b]#c'd/promptmend", False),
+        (r"C:\Users\Jan Novák\100% ^x\.local\bin\promptmend.exe", True),
+    ],
+    ids=["posix", "flow", "windows"],
+)
+def test_rendered_args_start_with_the_launcher(path: str, windows: bool) -> None:
+    launcher = deploy.launcher_text(path, windows=windows)
+    for name in NAMES:
+        rendered = deploy.render(assets.read_match(name), launcher, "1.2.3")
+        args = [
+            var["params"]["args"]
+            for match in yaml.safe_load(rendered)["matches"]
+            for var in match.get("vars", [])
+            if var.get("type") == "script"
+        ]
+        assert all(a[0] == launcher for a in args), name
+        assert bool(args) is (name != STATIC), name
+        assert deploy.launchers_in(rendered) == (set() if name == STATIC else {launcher})
+
+
+# The launcher is found in the script args (#18) and in the shell cmd lines every earlier
+# release wrote, so doctor, the previous-install finder and adoption see both.
+def test_launchers_in_reads_both_shapes() -> None:
+    script = 'args: ["/opt/new/promptmend", "improve", "--trigger-id", "i"]'
+    shell = 'cmd: "\\"C:/old dir/promptmend.exe\\" improve --trigger-id i"'
+    assert deploy.launchers_in(f"{script}\n{shell}\n") == {
+        "/opt/new/promptmend",
+        "C:/old dir/promptmend.exe",
+    }
 
 
 def test_launcher_windows_slashes() -> None:
@@ -652,7 +723,7 @@ def test_upgrade_keeps_the_uv_launcher(tmp_path: Path, espanso: Path) -> None:
     _exe(venv / "bin" / "promptmend-real", "echo N+1")
 
     deployed = (espanso / "match" / "prompts-llm.yml").read_text("utf-8")
-    assert f'\\"{launcher}\\" improve' in deployed
+    assert f'args: ["{launcher}", "improve"' in deployed
     out = subprocess.run([str(launcher)], capture_output=True, text=True, timeout=10, check=True)
     assert out.stdout.strip() == "N+1"
 
@@ -1258,7 +1329,7 @@ def _as_0_18(source: str) -> str:
 def test_a_file_0_18_deployed_is_stale(
     monkeypatch: pytest.MonkeyPatch, espanso: Path, name: str, manifest: bool
 ) -> None:
-    source = _as_0_18((MATCH / name).read_text("utf-8"))
+    source = _as_0_18((SHELL_0_20 / name).read_text("utf-8"))
     assert hashlib.sha256(source.encode()).hexdigest() in KNOWN_SOURCES[name]
     old_launcher = "/Users/me/.local/bin/prompt-workflow"
     rendered = "# prompt-workflow 0.18.0 (managed; edit at your own risk)\n" + source.replace(
@@ -1285,6 +1356,47 @@ def test_a_file_0_18_deployed_is_stale(
     assert old_launcher not in text
     assert LAUNCHER in text
     assert not list(target.parent.glob(f"{name}.bak-*"))
+
+
+# #18: a file 0.20.0 deployed (shell vars, the launcher quoted inside the cmd line) is ours
+# and stale, with or without its manifest entry, on either OS, and the next deploy replaces
+# it with script vars that start with the launcher, without a conflict or a backup.
+@pytest.mark.parametrize("name", ["prompts-llm.yml", "prompts-template.yml"])
+@pytest.mark.parametrize("manifest", [True, False], ids=["manifest", "bare"])
+@pytest.mark.parametrize("windows", [False, True], ids=["posix", "win"])
+def test_a_file_0_20_deployed_is_replaced_by_script_vars(
+    espanso: Path, name: str, manifest: bool, windows: bool
+) -> None:
+    source = (SHELL_0_20 / name).read_text("utf-8")
+    assert hashlib.sha256(source.encode()).hexdigest() in KNOWN_SOURCES[name]
+    assert "type: shell" in source
+    raw = r"C:\Users\Jan Novák\.local\bin\promptmend.exe" if windows else LAUNCHER
+    launcher = deploy.launcher_text(raw, windows=windows)
+    rendered = "# promptmend 0.20.0 (managed; edit at your own risk)\n" + source.replace(
+        deploy.PLACEHOLDER, launcher
+    )
+    target = espanso / "match" / name
+    target.write_text(rendered, encoding="utf-8")
+    assert deploy.launchers_in(rendered) == {launcher}
+    if manifest:
+        manifest_file = deploy.Manifest.load()
+        manifest_file.entries[str(target)] = deploy.Entry(
+            target=str(target),
+            asset_version="0.20.0",
+            digest=hashlib.sha256(rendered.encode()).hexdigest(),
+            launcher=launcher,
+            calls_cli=True,
+        )
+        manifest_file.save()
+    assert _states(espanso, launcher)[name] == deploy.STALE
+    outcome = deploy.apply(_plan(espanso, launcher))
+    assert not outcome.kept
+    text = target.read_text("utf-8")
+    assert text == _plan(espanso, launcher).steps[NAMES.index(name)].rendered
+    assert "    type: shell" not in text
+    assert f'args: ["{launcher}", ' in text
+    assert not list(target.parent.glob(f"{name}.bak-*"))
+    assert _plan(espanso, launcher).is_noop
 
 
 @pytest.mark.parametrize("manifest", [True, False])

@@ -65,30 +65,58 @@ def test_triggers_are_unique_across_files() -> None:
             seen[trigger] = path.name
 
 
-def _shell_commands(path: Path) -> Iterator[tuple[str, str]]:
-    for match in _load(path)["matches"]:
-        for var in match.get("vars", []):
-            if var.get("type") == "shell":
-                yield match["trigger"], var["params"]["cmd"]
+def _all_matches() -> list[dict[str, Any]]:
+    """Every match, the commented-out ones (-ic-) included."""
+    matches = [m for path in MATCH_FILES for m in _load(path)["matches"]]
+    return matches + [m for path in MATCH_FILES for m in _commented_matches(path)]
 
 
-# Every shell command starts with the quoted CLI placeholder (a path with spaces must
-# work) and holds no other quotes: cmd.exe strips the outer pair of a command line that
-# starts with a quote and contains more than two, breaking the call.
-def test_shell_commands_start_with_quoted_cli() -> None:
-    for trigger, cmd in (cmd for path in MATCH_FILES for cmd in _shell_commands(path)):
-        assert cmd.startswith('"__PROMPT_WORKFLOW__" '), f"{trigger} must start with the CLI"
-        assert cmd.count('"') == 2, f"{trigger} must quote only the CLI path"
-        assert "__REPO_DIR__" not in cmd, f"{trigger} still uses __REPO_DIR__"
+def _cli_vars(match: dict[str, Any]) -> list[dict[str, Any]]:
+    """The vars of a match that name the CLI anywhere in their params."""
+    return [v for v in match.get("vars", []) if "__PROMPT_WORKFLOW__" in str(v.get("params"))]
+
+
+def _cli_args(match: dict[str, Any]) -> list[list[str]]:
+    return [var["params"]["args"] for var in _cli_vars(match)]
 
 
 def _calls_cli(match: dict[str, Any]) -> bool:
-    """Whether a match runs the CLI, through a shell cmd or script args."""
-    for var in match.get("vars", []):
-        params = var.get("params", {})
-        if "__PROMPT_WORKFLOW__" in f"{params.get('cmd', '')} {params.get('args', '')}":
-            return True
-    return False
+    """Whether a match runs the CLI."""
+    return bool(_cli_vars(match))
+
+
+def _script_args() -> Iterator[tuple[str, list[str]]]:
+    for match in _all_matches():
+        for args in _cli_args(match):
+            yield match["trigger"], args
+
+
+def _option(args: list[str], name: str) -> str | None:
+    """The value after ``name`` in an argv list, or None."""
+    return args[args.index(name) + 1] if name in args else None
+
+
+# Every CLI call is a `type: script` var whose args start with the CLI placeholder, one argv
+# item per string (#18). Espanso starts args[0] with no shell: a `type: shell` var runs
+# through PowerShell on Windows, which cannot run a quoted path followed by arguments. Every
+# item is a string (Espanso drops any other) and one token, and the placeholder appears only
+# as args[0].
+def test_cli_vars_are_scripts_starting_with_the_cli() -> None:
+    for match in _all_matches():
+        trigger = match["trigger"]
+        for var in match.get("vars", []):
+            assert var.get("type") != "shell", f"{trigger}: no shell vars (#18)"
+        for var in _cli_vars(match):
+            assert var.get("type") == "script", f"{trigger} must be a script var"
+            assert set(var["params"]) == {"args"}, f"{trigger}: args only"
+            args = var["params"]["args"]
+            assert isinstance(args, list), trigger
+            assert args[0] == "__PROMPT_WORKFLOW__", f"{trigger} must start with the CLI"
+            assert args[1] in ("improve", "persona"), trigger
+            assert "__PROMPT_WORKFLOW__" not in str(args[1:]), trigger
+            for arg in args:
+                assert isinstance(arg, str), f"{trigger}: {arg!r} is not a string"
+                assert re.fullmatch(r"[^\s\"'`$%]+", arg), f"{trigger}: {arg!r} is not one token"
 
 
 # Every match that runs the CLI, including the commented-out ones, pastes its output via
@@ -103,20 +131,12 @@ def test_cli_matches_paste_via_clipboard() -> None:
     # Backstop: every CLI call in the raw text belongs to one of those matches, so none can
     # hide in global_vars or in a commented block the parser above does not recognise.
     calls = sum(
-        len(re.findall(r'__PROMPT_WORKFLOW__\\?"', p.read_text("utf-8"))) for p in MATCH_FILES
+        len(re.findall(r'\["__PROMPT_WORKFLOW__"', p.read_text("utf-8"))) for p in MATCH_FILES
     )
     assert calls == len(cli_matches)
     assert not [p.name for p in MATCH_FILES if "global_vars" in _load(p)]
     for match in cli_matches:
         assert match.get("force_mode") == "clipboard", f"{match['trigger']} must set force_mode"
-
-
-def _cli_commands(match: dict[str, Any]) -> list[str]:
-    return [
-        str(var["params"]["cmd"])
-        for var in match.get("vars", [])
-        if "__PROMPT_WORKFLOW__" in str(var.get("params", {}).get("cmd", ""))
-    ]
 
 
 # Every match that runs the CLI, the commented-out -ic- included, names itself for the usage
@@ -129,8 +149,10 @@ def test_cli_matches_pass_their_own_trigger_id() -> None:
     seen = set()
     for match in (m for m in matches if _calls_cli(m)):
         trigger = match["trigger"]
-        (cmd,) = _cli_commands(match)
-        ids = re.findall(r"--trigger-id(?:\s+|=)(\S+)", cmd)
+        (args,) = _cli_args(match)
+        assert args[2] == "--trigger-id", f"{trigger}: --trigger-id right after the subcommand"
+        assert not [a for a in args if a.startswith("--trigger-id=")], trigger
+        ids = [args[i + 1] for i, arg in enumerate(args) if arg == "--trigger-id"]
         assert ids == [trigger.strip("-")], f"{trigger} must pass --trigger-id {trigger.strip('-')}"
         assert ids[0] in TRIGGER_IDS, f"{trigger}: {ids[0]!r} is not on the allowlist"
         seen.add(ids[0])
@@ -139,29 +161,24 @@ def test_cli_matches_pass_their_own_trigger_id() -> None:
 
 # Every --profile passed to the CLI is a profile prompt_builder.PROFILES actually defines,
 # so deleting or renaming a profile cannot leave a trigger pointing at nothing.
-def test_shell_commands_use_known_profiles() -> None:
-    for trigger, cmd in (cmd for path in MATCH_FILES for cmd in _shell_commands(path)):
-        match = re.search(r"--profile\s+(\S+)", cmd)
-        if match:
-            assert match.group(1) in PROFILES, f"{trigger} uses unknown profile {match.group(1)!r}"
+def test_cli_args_use_known_profiles() -> None:
+    for trigger, args in _script_args():
+        profile = _option(args, "--profile")
+        assert profile is None or profile in PROFILES, f"{trigger}: unknown profile {profile!r}"
 
 
 # Every --provider passed to the CLI is a name make_provider() accepts.
-def test_shell_commands_use_known_providers() -> None:
-    for trigger, cmd in (cmd for path in MATCH_FILES for cmd in _shell_commands(path)):
-        match = re.search(r"--provider\s+(\S+)", cmd)
-        if match:
-            assert match.group(1) in KNOWN_PROVIDERS, (
-                f"{trigger} uses unknown provider {match.group(1)!r}"
-            )
+def test_cli_args_use_known_providers() -> None:
+    for trigger, args in _script_args():
+        provider = _option(args, "--provider")
+        assert provider is None or provider in KNOWN_PROVIDERS, f"{trigger}: {provider!r}"
 
 
 # Every --tier passed to the CLI is one Settings.for_tier() accepts.
-def test_shell_commands_use_known_tiers() -> None:
-    for trigger, cmd in (cmd for path in MATCH_FILES for cmd in _shell_commands(path)):
-        match = re.search(r"--tier\s+(\S+)", cmd)
-        if match:
-            assert match.group(1) in TIERS, f"{trigger} uses unknown tier {match.group(1)!r}"
+def test_cli_args_use_known_tiers() -> None:
+    for trigger, args in _script_args():
+        tier = _option(args, "--tier")
+        assert tier is None or tier in TIERS, f"{trigger} uses unknown tier {tier!r}"
 
 
 # form: blocks must interpolate at least one {{var}} — otherwise Espanso pops an
@@ -217,22 +234,29 @@ def _form_vars(path: Path) -> Iterator[tuple[dict[str, Any], dict[str, Any]]]:
             yield match, forms
 
 
-# Every {{formN.field}} a shell command uses is a field that form declares, so a renamed
-# field cannot leave an unexpanded placeholder in the command.
-def test_form_fields_used_in_shell_commands_exist() -> None:
+FORM_ARG = re.compile(r"\{\{(\w+)\.(\w+)\}\}")
+
+
+# Every {{formN.field}} a CLI call uses is a field that form declares, so a renamed field
+# cannot leave an unexpanded placeholder in the call, and it is a whole argv item: Espanso
+# fills it in and passes it as one argument, never part of another.
+def test_form_fields_used_in_cli_args_exist() -> None:
     for path in MATCH_FILES:
         for match, forms in _form_vars(path):
-            for var in match["vars"]:
-                if var.get("type") != "shell":
-                    continue
-                for form, name in re.findall(r"\{\{(\w+)\.(\w+)\}\}", var["params"]["cmd"]):
+            for args in _cli_args(match):
+                for arg in args:
+                    if "{{" not in arg:
+                        continue
+                    found = FORM_ARG.fullmatch(arg)
+                    assert found, f"{match['trigger']}: {arg!r} is not one whole form field"
+                    form, name = found.groups()
                     assert name in forms[form]["fields"], f"{match['trigger']}: {form}.{name}"
                     assert f"[[{name}]]" in forms[form]["layout"], f"{match['trigger']}: {name}"
 
 
-# Choice fields interpolated into a command must be fixed lists whose default is one of
-# the values, and each value must be one the CLI accepts, so the popup cannot produce an
-# error marker (or inject shell text: no free-text field ever reaches a command).
+# Choice fields filled into a CLI call must be fixed lists whose default is one of the
+# values, and each value must be one the CLI accepts, so the popup cannot produce an error
+# marker (no free-text field ever reaches the CLI).
 def test_form_choices_are_valid_cli_values() -> None:
     checks: dict[str, Callable[[str], object]] = {
         "--model": lambda v: (
@@ -244,8 +268,12 @@ def test_form_choices_are_valid_cli_values() -> None:
     }
     for path in MATCH_FILES:
         for match, forms in _form_vars(path):
-            cmd = next(v for v in match["vars"] if v.get("type") == "shell")["params"]["cmd"]
-            for option, form, name in re.findall(r"(--[\w-]+) \"?\{\{(\w+)\.(\w+)\}\}", cmd):
+            (args,) = _cli_args(match)
+            pairs = [(args[i - 1], FORM_ARG.fullmatch(a)) for i, a in enumerate(args) if "{{" in a]
+            assert pairs, match["trigger"]
+            for option, found in pairs:
+                assert found, f"{match['trigger']}: {option}"
+                form, name = found.groups()
                 field = forms[form]["fields"][name]
                 assert field.get("type") == "choice", f"{match['trigger']}: {name} not a choice"
                 values = [str(v) for v in field["values"]]

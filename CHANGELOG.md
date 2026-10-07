@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Fixed
+- Windows: every trigger that runs the CLI (`-i-`, `-iok-`, `-ip-`, `-if-`, `-il-`, `-ilm-`,
+  `-ic-` and `-p-`) failed under Espanso and pasted `[Espanso]: An error occurred during
+  rendering` (#18). Espanso runs a `type: shell` var through PowerShell on Windows, which
+  cannot run a quoted path followed by arguments. The match files now call the CLI from
+  `type: script` vars: Espanso starts the CLI directly with an argument list, no shell, on
+  every system. After upgrading, run `promptmend espanso deploy` to replace the deployed
+  match files (it recognises the old ones as its own). A trigger of your own copied from an
+  older deployed file keeps the shell shape: rewrite it as shown in docs/usage.md, "Your own
+  triggers".
+- `improve` and `persona` print nothing on stderr, not even a Python warning or a library's
+  message (they discard it), since a script var treats any stderr output as a failed
+  expansion. A crash still exits nonzero, so Espanso still reports it. The `promptmend` and `prompt-workflow`
+  commands now start through `promptmend.entry:main`.
+- `promptmend espanso deploy` no longer refuses a CLI path holding `$`, a backtick or (on
+  Windows) `% ^ & | < >`, which no shell reads any more. It still refuses a quote, a
+  backslash, a control character, and what Espanso itself would replace in the path: `{{`
+  (its variables) and `%HOME%`, `%CONFIG%` and `%PACKAGES%`.
+
 ### Documentation
 - The Homebrew install adds `brew tap` and `brew trust --formula`: recent Homebrew refuses
   to load a formula from an untrusted third-party tap.

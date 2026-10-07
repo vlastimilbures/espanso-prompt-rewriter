@@ -159,6 +159,22 @@ another profile) in a file of your own in Espanso's `match/` folder, such as `my
 2. Give it a trigger no other match uses.
 3. Keep its `--trigger-id` only if its runs should count as that trigger in the
    [usage history](privacy.md#usage-history); without one, a run is recorded as `direct`.
+4. Keep the CLI call a `type: script` var whose `args` list holds the CLI path first and then
+   each argument as its own quoted item, as the deployed file has it:
+
+   ```yaml
+   vars:
+     - name: output
+       type: script
+       params:
+         args: ["/absolute/path/to/promptmend", "improve", "--provider", "ollama", "--source", "clipboard"]
+   ```
+
+   Espanso starts a script var directly, with no shell. Do not turn it into a `type: shell`
+   `cmd:` line: on Windows Espanso runs those through PowerShell, which cannot run a quoted
+   path followed by arguments, so the trigger pastes `[Espanso]: An error occurred during
+   rendering`. A trigger you copied from a file deployed by 0.20.0 or earlier (#18) has that shell
+   shape; rewrite it this way.
 
 `promptmend espanso deploy` and `detach` handle only the files they deployed
 (`prompts-core.yml`, `prompts-llm.yml`, `prompts-template.yml`), so they never change yours;

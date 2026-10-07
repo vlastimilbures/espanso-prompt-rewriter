@@ -1,11 +1,15 @@
-"""Replays every Espanso trigger's real command line through the CLI and checks what it
-would send: provider, profile (via the system prompt) and tier settings. Testing each option
-on its own missed that a trigger's explicit --profile overrode the tier's profile."""
+"""Replays every Espanso trigger's real argv (its script var's args) through the CLI and
+checks what it would send: provider, profile (via the system prompt) and tier settings.
+Testing each option on its own missed that a trigger's explicit --profile overrode the tier's
+profile. Then runs each trigger's args as a real process, as Espanso does (#18)."""
 
 from __future__ import annotations
 
+import itertools
+import os
 import re
-import shlex
+import subprocess
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -13,8 +17,10 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
-from promptmend.cli import app
+from promptmend import smoke
+from promptmend.cli import PERSONA_PLACEHOLDER, app
 from promptmend.config import Settings
+from promptmend.deploy import launcher_text
 from promptmend.prompt_builder import PROFILES, system_prompt
 
 if TYPE_CHECKING:
@@ -24,17 +30,17 @@ MATCH_DIR = Path(__file__).parents[1] / "espanso" / "match"
 runner = CliRunner()
 
 
-def _improve_commands() -> dict[str, tuple[str, dict[str, Any]]]:
-    """trigger -> (shell cmd, form fields by form name) for every match that runs improve."""
-    commands: dict[str, tuple[str, dict[str, Any]]] = {}
+def _improve_commands() -> dict[str, tuple[list[str], dict[str, Any]]]:
+    """trigger -> (script args, form fields by form name) for every match that runs improve."""
+    commands: dict[str, tuple[list[str], dict[str, Any]]] = {}
     for path in sorted(MATCH_DIR.glob("*.yml")):
         for match in yaml.safe_load(path.read_text(encoding="utf-8"))["matches"]:
             vars_ = match.get("vars", [])
             forms = {v["name"]: v["params"]["fields"] for v in vars_ if v.get("type") == "form"}
             for var in vars_:
-                cmd = var.get("params", {}).get("cmd", "")
-                if var.get("type") == "shell" and " improve " in cmd:
-                    commands[match["trigger"]] = (cmd, forms)
+                args = var.get("params", {}).get("args", [])
+                if var.get("type") == "script" and args[1:2] == ["improve"]:
+                    commands[match["trigger"]] = (args, forms)
     return commands
 
 
@@ -53,14 +59,15 @@ EXPECTED = {
 
 def _argv(trigger: str, **picks: str) -> list[str]:
     """The trigger's arguments after the CLI path, as Espanso runs them: each form field
-    set to ``picks`` or its default, and the draft passed as an argument, not the clipboard."""
-    cmd, forms = COMMANDS[trigger]
+    filled into its args item (set to ``picks`` or its default), and the draft passed as an
+    argument, not the clipboard."""
+    args, forms = COMMANDS[trigger]
 
     def fill(field: re.Match[str]) -> str:
         form, name = field.groups()
         return picks.get(name, str(forms[form][name]["default"]))
 
-    argv = shlex.split(re.sub(r"\{\{(\w+)\.(\w+)\}\}", fill, cmd))
+    argv = [re.sub(r"\{\{(\w+)\.(\w+)\}\}", fill, arg) for arg in args]
     assert argv[0] == "__PROMPT_WORKFLOW__"
     source = argv.index("--source")
     assert argv[source + 1] == "clipboard"
@@ -222,9 +229,9 @@ def test_profile_settings_reach_triggers(
 
 # An explicit --profile beats the tier's profile, so no pro-tier trigger may pass one.
 def test_pro_triggers_pass_no_profile() -> None:
-    for trigger, (cmd, _) in COMMANDS.items():
-        if re.search(r"--tier[ =]pro\b", cmd):
-            assert "--profile" not in cmd, trigger
+    for trigger, (args, _) in COMMANDS.items():
+        if "pro" in [b for a, b in itertools.pairwise(args) if a == "--tier"]:
+            assert "--profile" not in args, trigger
 
 
 # Only -iok- sends a flagged draft per call; every other trigger keeps the gate's block.
@@ -258,10 +265,9 @@ def _persona_argv() -> list[str]:
         for m in yaml.safe_load((MATCH_DIR / "prompts-template.yml").read_text("utf-8"))["matches"]
         if m["trigger"] == "-p-"
     )
-    (cmd,) = [v["params"]["cmd"] for v in match["vars"] if v.get("type") == "shell"]
-    argv = shlex.split(cmd)
+    (argv,) = [v["params"]["args"] for v in match["vars"] if v.get("type") == "script"]
     assert argv[0] == "__PROMPT_WORKFLOW__"
-    return argv[1:]
+    return [str(arg) for arg in argv[1:]]
 
 
 # -p- is counted once, through persona: its one CLI call, recorded as -p-.
@@ -276,3 +282,74 @@ def test_persona_trigger_is_recorded_once(history_rows: HistoryRows) -> None:
         "ok",
     )
     assert history_rows("attempts") == []
+
+
+# --- Each trigger's args as a real process (#18) ----------------------------------------------
+
+
+def _script_vars() -> dict[str, list[str]]:
+    """trigger -> the args of its script var that runs the CLI, for every match that has one,
+    the commented-out -ic- included (each `# - trigger:` block, uncommented)."""
+    found: dict[str, list[str]] = {}
+    for path in sorted(MATCH_DIR.glob("*.yml")):
+        text = path.read_text(encoding="utf-8")
+        matches = yaml.safe_load(text)["matches"]
+        for block in re.findall(r"^ *# - trigger:.*\n(?: *#.*\n?)*", text, flags=re.MULTILINE):
+            matches += yaml.safe_load(re.sub(r"^( *)# ", r"\1", block, flags=re.MULTILINE))
+        for match in matches:
+            for var in match.get("vars", []):
+                args = var.get("params", {}).get("args", [])
+                if var.get("type") == "script" and args[:1] == ["__PROMPT_WORKFLOW__"]:
+                    found[match["trigger"]] = args
+    return found
+
+
+SCRIPT_VARS = _script_vars()
+
+
+def _launcher() -> list[str]:
+    """What deploy puts in args[0]: the console script next to this interpreter (an editable
+    or CI install has one; on Windows a .exe launcher, given with forward slashes as deploy
+    writes it), else the same entry point through the interpreter."""
+    name = "promptmend.exe" if os.name == "nt" else "promptmend"
+    script = Path(sys.executable).parent / name
+    if script.is_file():
+        return [launcher_text(script)]
+    return [sys.executable, "-m", "promptmend.entry"]
+
+
+def test_every_cli_trigger_has_a_script_var() -> None:
+    assert set(SCRIPT_VARS) == {*EXPECTED, "-ic-", "-p-"}
+
+
+# Espanso starts args[0] with the other items as its arguments, no shell, and treats a nonzero
+# exit or any stderr output as a failed expansion (espanso-render's script.rs). So each
+# trigger's args, run as a process exactly as listed (form fields at their defaults, the draft
+# as an argument instead of the clipboard, every provider pointed at the local stub, the usage
+# history on), exit 0, print the stub's reply on stdout and nothing on stderr. On
+# windows-latest this exercises the real CreateProcess path.
+# Every warning shown, as a user's PYTHONWARNINGS or a dev build might: none may reach stderr.
+_LOUD = {"PYTHONWARNINGS": "always", "PYTHONDEVMODE": "1"}
+
+
+@pytest.mark.parametrize("trigger", sorted(SCRIPT_VARS))
+def test_trigger_args_run_as_a_process(trigger: str) -> None:
+    args = list(SCRIPT_VARS[trigger])
+    improve = args[1] == "improve"
+    if trigger in COMMANDS:
+        args = ["__PROMPT_WORKFLOW__", *_argv(trigger)]
+    elif improve:  # -ic-, commented out: no form, the same draft swap
+        source = args.index("--source")
+        args[source : source + 2] = ["--source", "argument", "--text", "draft"]
+    with smoke.stub_server() as stub:
+        env = {**smoke.stub_env(stub.port, os.environ), "PROMPT_HISTORY": "true", **_LOUD}
+        proc = subprocess.run(
+            [*_launcher(), *args[1:]], env=env, capture_output=True, timeout=60, check=False
+        )
+    assert (proc.returncode, proc.stderr) == (0, b"")
+    if improve:
+        assert proc.stdout.decode("utf-8") == smoke.REPLY
+        assert len(stub.paths) == 1
+    else:
+        assert proc.stdout.decode("utf-8") == PERSONA_PLACEHOLDER
+        assert stub.paths == []
