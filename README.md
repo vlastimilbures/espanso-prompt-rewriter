@@ -152,12 +152,14 @@ More: [docs/install.md](https://github.com/vlastimilbures/promptmend/blob/main/d
 With [Homebrew](https://brew.sh) (recommended):
 
 ```bash
+brew tap vlastimilbures/tap
+brew trust --formula vlastimilbures/tap/promptmend
 brew install vlastimilbures/tap/promptmend
 ```
 
 The formula lives in the project's own tap,
 [vlastimilbures/homebrew-tap](https://github.com/vlastimilbures/homebrew-tap), not in
-homebrew/core. Or with [uv](https://docs.astral.sh/uv/getting-started/installation/):
+homebrew/core; recent Homebrew asks you to trust its formula first (`brew trust`). Or with [uv](https://docs.astral.sh/uv/getting-started/installation/):
 
 ```bash
 uv tool install promptmend -c https://github.com/vlastimilbures/promptmend/releases/latest/download/constraints.txt
