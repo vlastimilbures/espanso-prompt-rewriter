@@ -1068,6 +1068,7 @@ def test_diagnostics_provenance_and_import_check(
         store = str(diagnostics.query_one("#store").render())
         assert "Lost history writes: 0" in store
         assert "SQLite" in store
+        assert ", journal none yet;" in store
         await press(app, pilot, "#import-check")
         assert diagnostics.last_message == "40 ms, 200 module(s)"
 

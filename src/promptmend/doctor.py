@@ -76,7 +76,7 @@ DATA_KEYS = {
         "writable",
         "error",
     ),
-    "sqlite": ("version", "wal_reset_bug"),
+    "sqlite": ("version", "wal_reset_bug", "journal_mode"),
     "clipboard": ("read", "length", "concealed", "error"),
     "profiles": ("profile", "pro_profile", "user"),
     "previous_install": ("gated", "roots", "signals", "env_file", "retire_pending", "shadow"),
@@ -84,8 +84,6 @@ DATA_KEYS = {
 }
 # The keys each check needs, by provider; -i-, -ip-, -if- and -iok- always use OpenRouter.
 _PROVIDER_KEYS = {"openrouter": "OPENROUTER_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
-# WAL could rarely reset a database before SQLite 3.51.3 (history.Health).
-_SQLITE_FIXED = (3, 51, 3)
 
 
 @dataclass(frozen=True)
@@ -385,11 +383,12 @@ def _launcher_check(current: str | None, manifest: deploy.Manifest | None) -> Ch
 
 
 def _history_checks(settings: config.Settings) -> tuple[Check, Check]:
-    from .history import HistoryStore
+    from .history import HistoryStore, wal_is_safe
 
     health = HistoryStore.from_settings(settings).health()
     data = {"enabled": settings.history, **vars(health)}
     data.pop("sqlite_version")
+    journal = data.pop("journal_mode")
     if not settings.history:
         history = Check("history", INFO, "off (PROMPT_HISTORY=false)", data)
     elif health.error or health.tracking_incomplete:
@@ -402,22 +401,27 @@ def _history_checks(settings: config.Settings) -> tuple[Check, Check]:
         history = Check("history", OK, f"{count} call(s) recorded in {health.path}", data)
     version = health.sqlite_version
     try:
-        parts = tuple(int(p) for p in version.split("."))
+        tuple(int(p) for p in version.split("."))
+        known = True
     except ValueError:
-        parts = ()
-    old = bool(parts) and parts < _SQLITE_FIXED
-    sqlite_data = {"version": version, "wal_reset_bug": old}
-    if not parts:
-        sqlite = Check("sqlite", WARN, f"SQLite version {version}", sqlite_data)
-    elif old:
+        known = False
+    # wal_reset_bug: the library is older than history.WAL_FIXED (3.51.3).
+    old = known and not wal_is_safe(version)
+    sqlite_data = {"version": version, "wal_reset_bug": old, "journal_mode": journal}
+    if not known:
+        sqlite = Check("sqlite", INFO, f"SQLite version {version}", sqlite_data)
+    elif not old:
+        sqlite = Check("sqlite", OK, f"SQLite {version}", sqlite_data)
+    elif journal == "wal":
         sqlite = Check(
             "sqlite",
             WARN,
-            f"SQLite {version}: before 3.51.3, WAL can rarely reset a database",
+            f"SQLite {version}: history still in WAL, which can rarely reset a database "
+            "before 3.51.3; the next recorded run switches it back",
             sqlite_data,
         )
     else:
-        sqlite = Check("sqlite", OK, f"SQLite {version}", sqlite_data)
+        sqlite = Check("sqlite", OK, f"SQLite {version}, rollback journal", sqlite_data)
     return history, sqlite
 
 

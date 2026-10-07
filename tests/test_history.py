@@ -210,9 +210,69 @@ def test_schema_matches_allowlist(store: HistoryStore) -> None:
             found = [row[1] for row in conn.execute(f"PRAGMA table_info({table})")]
             assert found == columns, table
         assert conn.execute("PRAGMA user_version").fetchone()[0] == history.SCHEMA_VERSION
-        assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+        mode = "wal" if history.wal_is_safe(sqlite3.sqlite_version) else "delete"
+        assert conn.execute("PRAGMA journal_mode").fetchone()[0] == mode
     assert list(history.OPERATION_COLUMNS) == ALLOWED["operations"]
     assert list(history.ATTEMPT_COLUMNS) == ALLOWED["attempts"]
+
+
+@pytest.mark.parametrize(
+    ("version", "safe"),
+    [
+        ("unknown", False),
+        ("", False),
+        ("3.50.4", False),
+        ("3.51.2", False),
+        ("3.51.3", True),
+        ("3.52.0", True),
+        ("4.0", True),
+    ],
+)
+def test_wal_is_safe(version: str, safe: bool) -> None:
+    assert history.wal_is_safe(version) is safe
+
+
+def _journal(store: HistoryStore) -> str:
+    with contextlib.closing(sqlite3.connect(store.path)) as conn:
+        return str(conn.execute("PRAGMA journal_mode").fetchone()[0])
+
+
+@pytest.mark.parametrize(("version", "mode"), [("3.50.4", "delete"), ("3.51.3", "wal")])
+def test_journal_mode_follows_the_library(
+    store: HistoryStore, monkeypatch: pytest.MonkeyPatch, version: str, mode: str
+) -> None:
+    monkeypatch.setattr(sqlite3, "sqlite_version", version)
+    assert store.record(_op())
+    assert _journal(store) == mode
+    assert store.health().journal_mode == mode
+
+
+def test_old_library_switches_a_wal_database_back(
+    store: HistoryStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(sqlite3, "sqlite_version", "3.51.3")
+    assert store.record(_op())
+    assert _journal(store) == "wal"
+    monkeypatch.setattr(sqlite3, "sqlite_version", "3.50.4")
+    assert store.record(_op())
+    assert _journal(store) == "delete"
+    assert not Path(f"{store.path}-wal").exists()
+    assert len(_rows(store, "operations")) == 2
+
+
+def test_blocked_switch_still_records(store: HistoryStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sqlite3, "sqlite_version", "3.51.3")
+    assert store.record(_op())
+    monkeypatch.setattr(sqlite3, "sqlite_version", "3.50.4")
+    # Another connection holds the WAL database open, so leaving WAL fails.
+    with contextlib.closing(sqlite3.connect(store.path)) as other:
+        other.execute("SELECT COUNT(*) FROM operations").fetchone()
+        assert store.record(_op())
+        assert store.health().journal_mode == "wal"
+    assert store.health().lost_writes == 0
+    assert len(_rows(store, "operations")) == 2
+    assert store.record(_op())
+    assert _journal(store) == "delete"
 
 
 def test_money_round_trips_exactly_with_its_unit(store: HistoryStore) -> None:
@@ -510,6 +570,7 @@ def test_health_reports_without_creating_the_database(store: HistoryStore) -> No
     health = store.health()
     assert health.sqlite_version == sqlite3.sqlite_version
     assert (health.exists, health.schema_version, health.operations) == (False, None, None)
+    assert health.journal_mode is None
     assert not store.path.parent.exists()
     assert store.record(_op(), [_attempt(), _attempt(attempt=2)])
     health = store.health()

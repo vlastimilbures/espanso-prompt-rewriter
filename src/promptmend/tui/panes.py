@@ -1261,7 +1261,8 @@ class DiagnosticsPane(Pane):
         lost = stored.get("lost_writes") or 0
         last = stored.get("last_lost_utc")
         self.query_one("#store", Static).update(
-            f"SQLite {sqlite.get('version') or 'unknown'}; WAL reset bug (before 3.51.3): "
+            f"SQLite {sqlite.get('version') or 'unknown'}, journal "
+            f"{sqlite.get('journal_mode') or 'none yet'}; WAL reset bug (before 3.51.3): "
             f"{'yes' if sqlite.get('wal_reset_bug') else 'no'}\n"
             f"Lost history writes: {lost}{f' (last {last})' if last else ''}; tracking "
             f"{'incomplete' if stored.get('tracking_incomplete') else 'complete'}"

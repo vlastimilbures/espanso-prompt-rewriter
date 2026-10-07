@@ -54,14 +54,14 @@ PRICES_NAME = "prices.toml"
 # only things outside it.
 _BUDGET = 0.25
 # The database's share of _BUDGET (its busy timeout), the rest is for the sidecar marker.
-# SQLite's own WAL lock retries overshoot the busy timeout by up to ~0.06 s (measured on a
-# write blocked by an exclusive lock), so the share leaves room for that: a write blocked on
-# both the database and the sidecar lock returned after 0.23-0.24 s.
+# SQLite's own lock retries overshoot the busy timeout by up to ~0.06 s (measured in WAL mode
+# on a write blocked by an exclusive lock), so the share leaves room for that: a write blocked
+# on both the database and the sidecar lock returned after 0.23-0.24 s.
 _WRITE_BUDGET = 0.15
 # Kept back from _BUDGET for writing the sidecar once its lock is taken.
 _MARGIN = 0.02
 # Added to both budgets for a write that has to create the database (once per device, and
-# after a reset): creating the file, switching it to WAL and running the migrations costs
+# after a reset): creating the file, setting its journal mode and running the migrations costs
 # several syncs, which took longer than the whole budget on a slow CI disk.
 _CREATE_EXTRA = 0.75
 # Most old operations an automatic prune (record(prune=True)) deletes in one write, so a
@@ -73,6 +73,9 @@ _PROGRESS_STEPS = 1000
 _STALE_LOCK = 10.0
 # Busy timeout for management commands (stats, export, prune, reset), which nobody pastes.
 _SERVICE_TIMEOUT = 5.0
+# WAL could rarely reset a database before SQLite 3.51.3, so older libraries keep the
+# rollback journal (journal_mode DELETE), and a database left in WAL is switched back.
+WAL_FIXED = (3, 51, 3)
 
 ORIGINS = ("espanso_managed", "direct")
 KINDS = ("improve", "persona", "static")
@@ -222,6 +225,16 @@ class UnusableHistory(HistoryError):
 
 class InvalidRecord(ValueError):
     """A record value is not on the allowlist; the whole record is dropped."""
+
+
+def wal_is_safe(version: str) -> bool:
+    """Whether SQLite ``version`` (``sqlite3.sqlite_version``) is WAL_FIXED or later. An
+    unparsable version is not."""
+    try:
+        parts = tuple(int(part) for part in version.split("."))
+    except ValueError:
+        return False
+    return parts >= WAL_FIXED
 
 
 def history_path(environ: Mapping[str, str] = os.environ) -> Path:
@@ -484,6 +497,8 @@ class Health:
     writable: bool
     sqlite_version: str
     error: str | None = None
+    # The database's journal mode ("wal", "delete", ...), None while there is no database.
+    journal_mode: str | None = None
 
 
 @dataclass(frozen=True)
@@ -602,6 +617,8 @@ class HistoryStore:
         deadline: float,
         prune_before: str | None = None,
     ) -> None:
+        import sqlite3
+
         def remaining_ms() -> int:
             left = deadline - time.monotonic()
             if left <= 0:
@@ -613,8 +630,14 @@ class HistoryStore:
             # Abort a statement that runs past the budget (checked every _PROGRESS_STEPS VM steps).
             conn.set_progress_handler(lambda: int(time.monotonic() > deadline), _PROGRESS_STEPS)
             conn.execute(f"PRAGMA busy_timeout = {remaining_ms()}")
-            if conn.execute("PRAGMA journal_mode").fetchone()[0].lower() != "wal":
-                conn.execute("PRAGMA journal_mode = WAL")
+            target = "wal" if wal_is_safe(sqlite3.sqlite_version) else "delete"
+            if conn.execute("PRAGMA journal_mode").fetchone()[0].lower() != target:
+                # Leaving WAL needs every other connection closed: if one is open (or the
+                # file is locked), write in the current mode and let the next write retry.
+                # No wait for it, so a busy database does not spend the budget here.
+                conn.execute("PRAGMA busy_timeout = 0")
+                with contextlib.suppress(sqlite3.OperationalError):
+                    conn.execute(f"PRAGMA journal_mode = {target}")
             conn.execute(f"PRAGMA busy_timeout = {remaining_ms()}")
             conn.execute("BEGIN IMMEDIATE")
             try:
@@ -741,7 +764,8 @@ class HistoryStore:
 
     def health(self) -> Health:
         """Path, schema version, row counts, the lost-write marker, whether a write could
-        succeed and the SQLite library version (WAL had a rare reset bug before 3.51.3).
+        succeed, the SQLite library version and the database's journal mode (WAL had a rare
+        reset bug before 3.51.3, so older libraries use the rollback journal).
         ``tracking_incomplete`` is set when writes were lost, the marker cannot be read or the
         files cannot be written, so a store whose database and sidecar both fail still shows.
         Never raises; never creates the database."""
@@ -779,6 +803,9 @@ class HistoryStore:
         try:
             with self._connect(timeout=_SERVICE_TIMEOUT, readonly=True) as conn:
                 info["schema_version"] = conn.execute("PRAGMA user_version").fetchone()[0]
+                info["journal_mode"] = str(
+                    conn.execute("PRAGMA journal_mode").fetchone()[0]
+                ).lower()
                 if info["schema_version"] >= 1:
                     for table in ("operations", "attempts"):
                         sql = f"SELECT COUNT(*) FROM {table}"  # noqa: S608
