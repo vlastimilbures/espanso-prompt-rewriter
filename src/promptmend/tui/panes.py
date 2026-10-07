@@ -402,6 +402,10 @@ class HomePane(Pane):
 # column the longest file name (secrets.toml).
 NAME_WIDTH = 31
 SOURCE_WIDTH = 12
+WITHHELD_CURRENT = (
+    "The current value looks like a key, so it is not shown here. Saving an empty field "
+    "keeps it; type a new value to replace it."
+)
 
 
 def setting_line(row: settings_model.Row, *, cursor: bool) -> Table:
@@ -479,6 +483,8 @@ class SettingsPane(Pane):
     rows: dict[str, settings_model.Row]
     # The row the ▶ is on.
     cursor: str | None = None
+    # A change was saved and the State that shows it is still loading (see waiting()).
+    pending = False
 
     def compose(self) -> ComposeResult:
         self.rows = {}
@@ -491,6 +497,7 @@ class SettingsPane(Pane):
         yield self.result()
 
     def show(self, state: State) -> None:
+        self.pending = False
         self.fill()
 
     def fill(self) -> None:
@@ -562,9 +569,19 @@ class SettingsPane(Pane):
     def current(self) -> settings_model.Row | None:
         return self.rows.get(self.cursor or "")
 
+    def waiting(self) -> bool:
+        """Whether a change is saved but not yet read back. The rows show the state before
+        it, so an action now would act on a stale value (a second Space saving the same
+        value again): it is refused, visibly, until show() has the fresh state."""
+        if self.pending:
+            self.app.notify("Still reading back the last change; try again.", markup=False)
+        return self.pending
+
     def toggle(self) -> None:
         """Space: switch a bool and save it at once."""
         row = self.current()
+        if self.waiting():
+            return
         if row is not None and row.meta.kind == settings_model.BOOL:
             self.save(row.name, "false" if row.on else "true")
 
@@ -576,7 +593,7 @@ class SettingsPane(Pane):
         """Enter: a key's Set key dialog, a switch toggled, a choice picked from its list, or
         a value typed in a field prefilled with the current one."""
         row, state = self.current(), self.state
-        if row is None or state is None:
+        if row is None or state is None or self.waiting():
             return
         meta, entry = row.meta, state.layers.entries[row.name]
         if meta.kind == settings_model.KEY:
@@ -606,8 +623,10 @@ class SettingsPane(Pane):
     def _type(self, meta: settings_model.Meta, current: str) -> None:
         name = meta.name
         own = name != common.EXTRA_PATTERNS
-        # A value that looks like a key is never shown, not even here.
-        value = "" if common.looks_like_a_key(current, user_patterns=own) else current
+        # A value that looks like a key is never shown, not even here: the field opens empty,
+        # the dialog says why, and an empty submit then keeps the value (it is a cancel).
+        withheld = bool(current) and common.looks_like_a_key(current, user_patterns=own)
+        value = "" if withheld else current
 
         def check(typed: str) -> str | None:
             if common.looks_like_a_key(typed, user_patterns=own):
@@ -620,10 +639,13 @@ class SettingsPane(Pane):
 
         default = settings_model.default(name) or settings_model.EMPTY
         preview = f"{meta.help}\nDefault: {default}"
+        if withheld:
+            preview += f"\n{WITHHELD_CURRENT}"
 
         def typed(new: str | None) -> None:
-            if new is not None:
-                self.save(name, new)
+            if new is None or (withheld and new == ""):
+                return
+            self.save(name, new)
 
         self.app.push_screen(EditModal(name, value, check, preview), typed)
 
@@ -634,6 +656,7 @@ class SettingsPane(Pane):
 
         def save() -> str:
             saved = settings_cmd.save_setting(name, value)
+            self.pending = True  # until show() reads it back
             notes = settings_cmd.after_save(name)
             return "; ".join([f"{name} saved in {saved.path}", *notes])
 
@@ -642,7 +665,7 @@ class SettingsPane(Pane):
     def reset(self) -> None:
         """r: a key's Remove key dialog, or a setting back to its default (`config unset`)."""
         row = self.current()
-        if row is None:
+        if row is None or self.waiting():
             return
         name = row.name
         if row.meta.kind == settings_model.KEY:
@@ -651,6 +674,7 @@ class SettingsPane(Pane):
 
         def unset() -> str:
             removed, path = settings_cmd.unset_setting(name)
+            self.pending = removed  # until show() reads it back
             if not removed:
                 elsewhere = f" It comes from {row.where}." if row.source != "default" else ""
                 return f"{name} is not saved in {path}; nothing to do.{elsewhere}"
@@ -1424,7 +1448,7 @@ class DiagnosticsPane(Pane):
         yield Static("", markup=False, id="policy")
         yield DataTable(id="routes", cursor_type="none", zebra_stripes=True)
         yield Static("", markup=False, id="layers")
-        yield DataTable(id="settings", cursor_type="none", zebra_stripes=True)
+        yield DataTable(id="diag-settings", cursor_type="none", zebra_stripes=True)
         yield Static("", markup=False, id="findings")
         yield Static("", markup=False, id="all-checks")
         yield Static("", markup=False, id="store")
@@ -1432,7 +1456,7 @@ class DiagnosticsPane(Pane):
         yield self.result()
 
     def setup(self) -> None:
-        self.query_one("#settings", DataTable).add_columns("Setting", "Value", "From", "Note")
+        self.query_one("#diag-settings", DataTable).add_columns("Setting", "Value", "From", "Note")
         self.query_one("#routes", DataTable).add_columns(
             "Provider", "Model", "Base URL", "The draft", "Key"
         )
@@ -1443,7 +1467,7 @@ class DiagnosticsPane(Pane):
         self.query_one("#layers", Static).update(
             "\n".join(settings_cmd._layers_lines(layers, raw=False))
         )
-        table = self.query_one("#settings", DataTable)
+        table = self.query_one("#diag-settings", DataTable)
         table.clear()
         for name in env_names():
             entry = layers.entries[name]

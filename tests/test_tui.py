@@ -590,6 +590,80 @@ def test_settings_enter_picks_the_output_and_r_resets_it(saved: Path, espanso: F
     assert "PROMPT_OUTPUT" not in (saved / "config.toml").read_text("utf-8")
 
 
+def test_settings_ignore_a_second_change_until_the_first_is_read_back(
+    saved: Path, espanso: FakeRunner
+) -> None:
+    """Review of #199: the rows show the state before a save until the reload ends, so a
+    quick second Space would save the same value again; it is refused, with a notice."""
+    import threading
+
+    release = threading.Event()
+    blocking = threading.Event()
+
+    def loader(group_by: str) -> State:
+        if blocking.is_set():
+            release.wait(10)
+        return gather(group_by)
+
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        await on_row(app, pilot, "PROMPT_HISTORY")
+        blocking.set()
+        notices: list[str] = []
+        real_notify = app.notify
+
+        def notify(message: str, **kwargs: Any) -> None:
+            notices.append(message)
+            real_notify(message, **kwargs)
+
+        app.notify = notify  # type: ignore[method-assign]
+        await pilot.press("space", "space", "enter", "r")
+        await pilot.pause()
+        assert [e.command for e in app.session] == ["promptmend config set PROMPT_HISTORY false"]
+        assert notices.count("Still reading back the last change; try again.") == 3
+        assert not isinstance(app.screen, PickModal | EditModal)
+        blocking.clear()
+        release.set()
+        await settle(pilot)
+        assert not settings_pane(app).pending
+        assert settings_rows(app)["PROMPT_HISTORY"].value == "off"
+        await pilot.press("space")
+        await settle(pilot)
+        assert app.session[-1].command == "promptmend config set PROMPT_HISTORY true"
+        assert _state(app).settings.history
+
+    drive(scenario, loader=loader)
+
+
+def test_settings_a_withheld_value_is_kept_by_an_empty_save(
+    saved: Path, espanso: FakeRunner
+) -> None:
+    """Review of #199: a value that looks like a key opens as an empty field, says so, and
+    saving the field empty keeps it (never a silent wipe)."""
+    saved.mkdir(parents=True, exist_ok=True)
+    toml = saved / "config.toml"
+    toml.write_text(f'OLLAMA_MODEL = "{KEY}"\n', encoding="utf-8")
+
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        assert KEY not in settings_rows(app)["OLLAMA_MODEL"].value
+        await on_row(app, pilot, "OLLAMA_MODEL", "enter")
+        screen = app.screen
+        assert isinstance(screen, EditModal)
+        assert screen.query_one("#edit-value", Input).value == ""
+        assert panes.WITHHELD_CURRENT in screen.preview
+        assert KEY not in screen.preview
+        await press(app, pilot, "#submit")
+        assert not isinstance(app.screen, EditModal)
+        assert app.session == []
+        # A value that does not look like a key opens prefilled, and may be saved empty.
+        await edit_to(app, pilot, "PROMPT_TEMPERATURE", "")
+        assert _state(app).settings.temperature is None
+        await on_row(app, pilot, "OLLAMA_NUM_CTX", "enter")
+        assert panes.WITHHELD_CURRENT not in app.screen.preview  # type: ignore[attr-defined]
+
+    drive(scenario)
+    assert f'OLLAMA_MODEL = "{KEY}"' in toml.read_text("utf-8")  # kept, not wiped
+
+
 def test_settings_reset_says_where_a_value_comes_from(
     saved: Path, espanso: FakeRunner, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1346,7 +1420,7 @@ def test_diagnostics_provenance_and_import_check(
     async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
         await pilot.press("6")
         diagnostics = pane(app, "diagnostics")
-        rows = table_rows(app, "diagnostics", "#settings")
+        rows = table_rows(app, "diagnostics", "#diag-settings")
         assert rows["OPENROUTER_API_KEY"][1:3] == [f"<set, {len(KEY)} chars>", "environment"]
         assert KEY not in app.export_screenshot()
         store = str(diagnostics.query_one("#store").render())
@@ -1367,7 +1441,7 @@ def test_diagnostics_on_a_broken_config(espanso: FakeRunner, tmp_path: Path) -> 
 
         await pilot.press("6")
         diagnostics = pane(app, "diagnostics")
-        table = diagnostics.query_one("#settings", DataTable)
+        table = diagnostics.query_one("#diag-settings", DataTable)
         row = [c.plain for c in table.get_row_at(table.get_row_index("PROMPT_LOCAL_ONLY"))]
         assert row[1:3] == ["false", "default"]
         assert row[3].startswith("invalid value in ")
@@ -1413,7 +1487,7 @@ def test_files_under_home_show_as_tilde(
         app.reload()
         await settle(pilot)
         await pilot.press("6")
-        rows = table_rows(app, "diagnostics", "#settings")
+        rows = table_rows(app, "diagnostics", "#diag-settings")
         assert rows["OPENROUTER_API_KEY"][3] == "overrides ~/.config/promptmend/secrets.toml"
         assert rows["PROMPT_PROFILE"][2:4] == [
             "environment",
