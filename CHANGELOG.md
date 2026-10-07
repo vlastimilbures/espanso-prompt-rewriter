@@ -23,6 +23,9 @@ All notable changes to this project are documented here. The format follows
 - In the frozen build, the interface's command line, `promptmend shell` and the setup check run
   the exe itself instead of `python -m promptmend.cli`, and the interface's import check says
   it does not apply.
+- WinGet manifests for the coming package `vlastimilbures.PromptMend` (#185) are prepared:
+  CI validates them and installs the Windows zip through `winget` on every pull request. The
+  package is not on WinGet yet.
 
 ## 0.21.0 - 2026-10-07
 

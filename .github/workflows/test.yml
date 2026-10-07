@@ -187,7 +187,7 @@ jobs:
   # trigger latency in the job summary. The zip is kept as an artifact for a few days.
   frozen-windows:
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     env:
       # No request to pypi.org from doctor (#197).
       PROMPT_UPDATE_CHECK: "false"
@@ -267,6 +267,56 @@ jobs:
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
           uv run python scripts/build_windows.py time $env:FROZEN_EXE
+      # The manifests a release would submit to microsoft/winget-pkgs (by hand, #185),
+      # rendered for this zip and checked by the runner's own winget.
+      - name: Validate the WinGet manifests
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { throw "this runner has no winget" }
+          winget --version
+          $zip = Get-ChildItem "$env:GITHUB_WORKSPACE\dist\promptmend-*-windows-x64.zip" | Select-Object -First 1
+          $version = $zip.Name.Split('-')[1]
+          uv run python scripts/winget_manifest.py --version $version --zip $zip.FullName -o "$env:RUNNER_TEMP\winget"
+          winget validate --manifest "$env:RUNNER_TEMP\winget\manifests\v\vlastimilbures\PromptMend\$version" --disable-interactivity
+      # The same manifests, the installer URL pointing at this zip on a loopback server.
+      - name: Install, run and uninstall it with winget
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $zip = Get-ChildItem "$env:GITHUB_WORKSPACE\dist\promptmend-*-windows-x64.zip" | Select-Object -First 1
+          $version = $zip.Name.Split('-')[1]
+          $port = 8765
+          $server = $null
+          try {
+            $server = Start-Process -PassThru -NoNewWindow -FilePath "$env:GITHUB_WORKSPACE\.venv\Scripts\python.exe" -ArgumentList "-m", "http.server", "$port", "--bind", "127.0.0.1", "--directory", "$env:GITHUB_WORKSPACE\dist"
+            $deadline = (Get-Date).AddSeconds(30)
+            while (-not (Test-NetConnection 127.0.0.1 -Port $port -InformationLevel Quiet -WarningAction SilentlyContinue)) {
+              if ((Get-Date) -gt $deadline) { throw "the local server did not start" }
+              Start-Sleep -Milliseconds 500
+            }
+            $out = "$env:RUNNER_TEMP\winget-local-install"
+            uv run python scripts/winget_manifest.py --version $version --zip $zip.FullName -o $out --url "http://127.0.0.1:$port/$($zip.Name)"
+            $manifest = "$out\manifests\v\vlastimilbures\PromptMend\$version"
+            winget settings --enable LocalManifestFiles
+            winget settings --enable LocalArchiveMalwareScanOverride
+            winget install --manifest $manifest --accept-package-agreements --accept-source-agreements --disable-interactivity --ignore-local-archive-malware-scan
+          } finally {
+            if ($server) { Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue }
+          }
+          $link = "$env:LOCALAPPDATA\Microsoft\WinGet\Links\promptmend.exe"
+          if (-not (Test-Path $link)) { throw "winget made no Links alias" }
+          $installed = (& $link --version).Trim()
+          if ($installed -ne $version) { throw "the alias says $installed, the zip is $version" }
+          $PSNativeCommandUseErrorActionPreference = $false
+          $report = (& $link doctor --no-clipboard --json) | Out-String | ConvertFrom-Json
+          if ($LASTEXITCODE -notin 0, 4) { throw "doctor exited $LASTEXITCODE" }
+          $report.checks.install | ConvertTo-Json -Depth 5
+          if ($report.checks.install.data.channel -ne "winget") { throw "doctor does not see the winget channel" }
+          if ($report.checks.install.data.launcher -ne $link) { throw "the launcher is not the Links alias" }
+          $PSNativeCommandUseErrorActionPreference = $true
+          winget uninstall --manifest $manifest --accept-source-agreements --disable-interactivity
+          if (Test-Path $link) { throw "the Links alias is still there" }
+          $left = Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages" -Filter "vlastimilbures.PromptMend_*" -ErrorAction SilentlyContinue
+          if ($left) { throw "winget left $($left.FullName)" }
       - name: Keep the zip
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
