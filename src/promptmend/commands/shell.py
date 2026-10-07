@@ -177,10 +177,12 @@ def run_here(argv: Sequence[str]) -> int:
     import subprocess
     import sys
 
+    from ..entry import self_command
+
     if not runs_here(argv):
         raise ValueError("refused to run a line the shell does not run")
     child = subprocess.Popen(  # noqa: S603 - our own interpreter and module, an argv list
-        [sys.executable, "-P", "-m", "promptmend.cli", *argv]
+        [*self_command(), *argv]
     )
     interrupted = False
     while True:

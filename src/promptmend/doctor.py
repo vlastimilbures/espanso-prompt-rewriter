@@ -48,7 +48,7 @@ CHECK_IDS = (
 # as None, so a consumer never meets a missing key.
 DATA_KEYS = {
     "version": ("version", "python", "platform", "latest", "update_available", "checked_at"),
-    "cli": ("path", "executable"),
+    "cli": ("path", "executable", "frozen"),
     "install": ("channel", "launcher", "editable"),
     "config": ("mode", "files", "valid", "findings"),
     "keys": ("keys", "provider"),
@@ -147,8 +147,15 @@ def _version_check(update: update_check.UpdateStatus, install: Check | None) -> 
 
 def _cli_check() -> Check:
     script = Path(sys.argv[0]) if sys.argv and sys.argv[0] else None
-    data = {"path": str(script) if script else None, "executable": sys.executable}
-    return Check("cli", INFO, f"running {script or sys.executable}", data)
+    frozen = bool(getattr(sys, "frozen", False))
+    data = {
+        "path": str(script) if script else None,
+        "executable": sys.executable,
+        # The Windows zip's own exe (#185): no interpreter, no import check.
+        "frozen": frozen,
+    }
+    note = " (frozen build)" if frozen else ""
+    return Check("cli", INFO, f"running {script or sys.executable}{note}", data)
 
 
 def _install_check(launcher: deploy.Launcher | None, error: str | None) -> Check:
@@ -683,6 +690,7 @@ HEAVY_MODULES = (
     "promptmend.console",
 )
 IMPORT_TIMEOUT = 30
+FROZEN_IMPORT = "not applicable: a frozen build has no interpreter to import the CLI in"
 _IMPORT_PROBE = """
 import json, sys, time
 started = set(sys.modules)
@@ -706,7 +714,10 @@ class ImportCheck:
 def import_check(timeout: float = IMPORT_TIMEOUT) -> ImportCheck:
     """Import the CLI module the way a trigger starts, in a fresh interpreter, and report how
     long it took, how many modules it loaded and any of HEAVY_MODULES among them. Runs no
-    command and reads no setting."""
+    command and reads no setting. A frozen build (the Windows zip, #185) has no interpreter
+    to start, and its modules are bundled: not applicable, nothing runs."""
+    if getattr(sys, "frozen", False):
+        return ImportCheck(True, FROZEN_IMPORT)
     top = [m for m in HEAVY_MODULES if "." not in m]
     prefixes = tuple(m for m in HEAVY_MODULES if "." in m)
     probe = f"HEAVY = {top!r}\nPREFIXES = {prefixes!r}\n{_IMPORT_PROBE}"

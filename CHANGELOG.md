@@ -6,6 +6,22 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Added
+- A portable Windows build (#185): each GitHub Release now carries
+  `promptmend-<version>-windows-x64.zip`, the CLI frozen with PyInstaller (a folder with
+  `promptmend.exe` and its `_internal` folder, its own Python included), attested like the
+  other release files. It is the base of the coming WinGet package `vlastimilbures.PromptMend`;
+  until that is published it is a preview (unsigned). See docs/install.md, "Portable zip".
+- `doctor` knows the `winget` install channel (the WinGet `Links` alias, else the package
+  folder, neither holding the version, so the match files survive `winget upgrade`) and names
+  `winget upgrade vlastimilbures.PromptMend` when a newer release exists. Its `cli` check data
+  gains `frozen`.
+
+### Changed
+- In the frozen build, the interface's command line, `promptmend shell` and the setup check run
+  the exe itself instead of `python -m promptmend.cli`, and the interface's import check says
+  it does not apply.
+
 ## 0.21.0 - 2026-10-07
 
 ### Added

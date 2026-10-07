@@ -295,7 +295,10 @@ Rules for agents:
   matches, and only entries naming one of `assets.match_names()` in the current (resolved)
   Espanso match folder; `--espanso-dir` is resolved to an absolute path first. `resolve_launcher()` picks the channel's stable entry point (uv tool bin, Homebrew
   `<prefix>/bin` or `opt`, Scoop shim, else a running console script outside any versioned,
-  `Cellar` or `.venv` dir); `launcher_text()` guards the path, which sits in a
+  `Cellar` or `.venv` dir; a frozen build (`sys.frozen`, #185) skips those lookups: on Windows
+  WinGet's `%LOCALAPPDATA%\Microsoft\WinGet\Links\promptmend.exe` when it is the running exe
+  (`os.path.samefile`), else the exe inside `WinGet\Packages\vlastimilbures.PromptMend_*\`,
+  channel `winget`, else the stable exe itself, `script`); `launcher_text()` guards the path, which sits in a
   double-quoted YAML string that Espanso runs with no shell (Windows converts `\` to `/`
   first): it refuses a quote, a backslash, a character YAML cannot hold, `{{` (Espanso fills
   its variables into every script param) and Espanso's `%HOME%`, `%CONFIG%`, `%PACKAGES%`
@@ -317,8 +320,7 @@ Rules for agents:
   counts only as the parser read it. `Editor` wraps the default buffer's accept handler (so every
   accept key: Enter, Meta-Enter, Ctrl-O, a search's Enter) to replace a `secret_line()` with
   `<value withheld>` before the prompt exits (`read()` returns the original to plan). `run_here()`
-  re-checks `runs_here(argv)`, then starts `[sys.executable, "-P", "-m", "promptmend.cli",
-  *argv]` with the terminal's stdio (no capture, no timeout, waits through Ctrl-C); `doctor`
+  re-checks `runs_here(argv)`, then starts `[*entry.self_command(), *argv]` with the terminal's stdio (no capture, no timeout, waits through Ctrl-C); `doctor`
   is not forced to `--no-clipboard`. The in-memory history keeps only lines `kept()` allows: those that plan to RUN.
   `load_settings()` (repair mode, never fatal) runs at start and after each run, so
   `holds_a_key()` sees `PROMPT_EXTRA_PATTERNS`: `common.looks_like_a_key()` scans with
@@ -452,7 +454,7 @@ Rules for agents:
   setting or write an export, asking nothing; `doctor` gets `--no-clipboard` unless a
   clipboard flag is given) and a `--dry-run` of a `dry_run` rule without a `TERMINAL_ONLY`
   option go to `run()`, which first re-checks `runnable(argv)` (a fresh parse must decide RUN
-  for that exact argv; `HomePane.run_line()` checks it too), then starts `[sys.executable, "-P", "-m", "promptmend.cli", *argv]`
+  for that exact argv; `HomePane.run_line()` checks it too), then starts `[*entry.self_command(), *argv]`
   (no shell, stdin DEVNULL, stderr into stdout, `NO_COLOR=1`, `TIMEOUT` 120 s, output capped
   at `OUTPUT_CAP`) in `HomePane.background()`, one at a time (`HomePane.running`); its
   `transcript()` (each line through `redact_words()`, then `exit N` or the timeout) goes in
@@ -496,6 +498,23 @@ Rules for agents:
   `cli.marker()` with the sent-despite note, through `cli._clean()`) goes in a read-only
   `TextArea` (`#try-result`, never markup); `usage_line()` (`#try-usage`) sums tokens and
   shows the cost as reported, `unknown` or `not applicable` (the stub, local models), never 0.
+- `entry.self_command()` — the argv prefix of every child that runs the CLI again (the
+  interface's command line, `promptmend shell`, `smoke.run()`): `[sys.executable, "-P", "-m",
+  "promptmend.cli"]`, or `[sys.executable]` in a frozen build. Stays import-light (trigger
+  contract).
+- `packaging/windows/` — the frozen Windows build (#185): `promptmend.spec` (PyInstaller 6
+  onedir, console `promptmend.exe` + `_internal\`, entry `promptmend_main.py` calling
+  `entry.main()`, so the trigger's fd-2 silencing is unchanged; `collect_submodules` for
+  promptmend/textual/prompt_toolkit, the profiles, the repo's `espanso/match` at
+  `promptmend/espanso/match` (where `assets.match_dir()` looks), promptmend's metadata for
+  `__version__`, and `-X utf8`). PyInstaller is pinned in the `build` dependency group only
+  (`uv sync --group build`), never in constraints.txt or the brew formula.
+  `scripts/build_windows.py build` zips it as `dist/promptmend-<version>-windows-x64.zip`
+  (`promptmend/promptmend.exe`, `promptmend/_internal/…`, sorted, fixed dates); `time <exe>`
+  times the `-i-` trigger against `smoke`'s stub (job summary). test.yml's `frozen-windows`
+  job builds, unzips and checks it (`--version`, `doctor --json` sees `frozen`, `persona`, a
+  fake WinGet `Links` symlink reported as channel `winget`, `tests/test_triggers.py -k process`
+  with `PROMPTMEND_EXE` set, which makes the replay start that exe, and the latency).
 - `relocate.py` — `migrate_folders(environ)` (#169), never on the trigger path
   (`tests/test_trigger_contract.py`, `doctor.HEAVY_MODULES`): `cli._LazyGroup.invoke()` runs it
   before every subcommand except `improve`/`persona`, a `--help`/`-h` anywhere, an unknown
@@ -526,7 +545,9 @@ Rules for agents:
   the interface's Home and Diagnostics tabs; never on the trigger path.
   `import_check()` (the interface's Diagnostics) imports `promptmend.cli` in a fresh
   interpreter (`-P`, so a module planted in the working directory never runs; the smoke test's
-  child uses `-P` too) and reports its time, module count and any `HEAVY_MODULES` it loaded.
+  child uses `-P` too) and reports its time, module count and any `HEAVY_MODULES` it loaded;
+  in a frozen build it starts nothing and returns `FROZEN_IMPORT` (not applicable). The `cli`
+  check's data has `frozen`.
   The `folders` check (#169) WARNs while a legacy folder is still in use, naming why (a
   symlink, the named `.env` inside it, a file holding the new name, else a failed move; doctor
   runs after the move) or holds conflicts left behind; data `config_dir`, `data_dir`,
@@ -544,8 +565,8 @@ Rules for agents:
   PyPI is `latest`), cached with `write_atomic()`, success or failure. `check_configured()`
   (doctor and `gather()`) resolves only `PROMPT_UPDATE_CHECK` strictly and fails closed
   (`unknown`, no request) on its rejected value or an unreadable settings file.
-  `upgrade_command(channel)` gives docs/install.md's command per channel (`script`, a plain
-  console script, has none); `doctor.upgrade_hint()` prefers `editable` (git pull, then the
+  `upgrade_command(channel)` gives docs/install.md's command per channel (`winget`: `winget
+  upgrade vlastimilbures.PromptMend`; `script`, a plain console script, has none); `doctor.upgrade_hint()` prefers `editable` (git pull, then the
   platform's install script). doctor's
   `version` check (built after `install`, report order unchanged) stays INFO and adds
   `latest`, `update_available`, `checked_at`. `tests/conftest.py` stubs `_fetch` in every
@@ -672,6 +693,8 @@ runtime pin in uv.lock, markers evaluated for macOS/Linux; `tests/test_brew_form
 `scripts/release_notes.py` gives the workflow the
 version and its notes and refuses a CHANGELOG whose newest `## X.Y.Z - YYYY-MM-DD` heading is not
 the `pyproject.toml` version (`## Unreleased` may come first); `tests/test_release.py` runs the
-same check. Each Release carries `constraints.txt` (uv.lock's runtime pins) and `install.ps1`
+same check. Each Release carries `constraints.txt` (uv.lock's runtime pins), the Windows zip
+(the `build-windows` job, windows-latest, `contents: read`, artifact `windows`, attested and
+attached by the `release` job; #185) and `install.ps1`
 (`scripts/render_installer.py` fills its one `__PROMPTMEND_VERSION__` in the build job;
 `tests/test_install_scripts.py`), and the artifact test installs the wheel with it and runs `scripts/check_wheel.py --constraints`.

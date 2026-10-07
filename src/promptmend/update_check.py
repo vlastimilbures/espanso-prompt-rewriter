@@ -43,6 +43,8 @@ _UV = (
 UPGRADE_COMMANDS = {
     "uv": _UV,
     "homebrew": "brew update && brew upgrade promptmend",
+    # The frozen Windows build (#185), installed as a portable WinGet package.
+    "winget": "winget upgrade vlastimilbures.PromptMend",
 }
 # A checkout (CONTRIBUTING.md, "Set up"): its install script syncs the tool with uv.lock.
 _CHECKOUT = {

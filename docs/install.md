@@ -44,7 +44,8 @@ only; [Set up](#set-up) then writes the Espanso match files.
 | uv from a GitHub Release wheel | Yes | Yes | Yes | `uv tool install --force …` |
 
 PyPI and the Homebrew tap carry releases from 0.19.0 on, the GitHub Release wheels from 0.16
-on, and `install.ps1` from the release after 0.19.0 on. There is no Scoop or WinGet package.
+on, and `install.ps1` from the release after 0.19.0 on. There is no Scoop or WinGet package
+yet: a WinGet package is being prepared, see [Portable zip](#portable-zip-preview).
 To run the code from a git checkout instead, see
 [Install from a checkout](#install-from-a-checkout).
 
@@ -142,6 +143,24 @@ uv tool update-shell
 
 Open a new terminal afterwards, so it finds `promptmend`.
 
+### Portable zip (preview)
+
+From the release after 0.21.0 on, each GitHub Release also carries
+`promptmend-<version>-windows-x64.zip`, attested like the other release files: the CLI built
+with PyInstaller as a folder that brings its own Python, so it needs neither Python nor uv.
+It is what the coming WinGet package (`vlastimilbures.PromptMend`) will install; until that
+package is published, the zip is for trying out. It is not signed, so SmartScreen or
+Defender may warn the first time it runs.
+
+1. Unzip it to a folder that stays where it is, such as `%LOCALAPPDATA%\Programs`. The exe
+   needs the `_internal` folder next to it.
+2. Run its `setup` from that folder (`.\promptmend.exe setup` in PowerShell), so the match
+   files call that exe.
+
+To update, unzip the new release over the same folder: the path stays the same, so the match
+files keep working. Once the WinGet package is published,
+`winget upgrade vlastimilbures.PromptMend` updates it instead, and `doctor` names that command.
+
 ## Linux
 
 ### uv (recommended)
@@ -160,8 +179,10 @@ trigger pastes a `[promptmend: Clipboard unavailable: …]` marker instead of a 
 ## Verify a download
 
 Each [GitHub Release](https://github.com/vlastimilbures/promptmend/releases) carries the
-sdist, the wheel and `constraints.txt` (the wheel and constraints from 0.16 on), and
-`install.ps1` from the release after 0.19.0, each with a build provenance attestation. To check the files before installing them:
+sdist, the wheel and `constraints.txt` (the wheel and constraints from 0.16 on),
+`install.ps1` from the release after 0.19.0 and the
+[portable Windows zip](#portable-zip-preview) from the release after 0.21.0, each with a build
+provenance attestation. To check the files before installing them:
 
 1. Download them: `gh release download v<version> -R vlastimilbures/promptmend`.
 2. Verify each one: `gh attestation verify <file> -R vlastimilbures/promptmend`.
@@ -213,6 +234,8 @@ command below for your channel when a newer release exists.
 | One-command install | The same `irm … \| iex` command again, with `PROMPTMEND_VERSION` unset |
 | uv from PyPI | `uv tool install --force promptmend -c <latest constraints URL>` (below) |
 | uv from a Release wheel | The install command with the new version and `--force` |
+| WinGet (once published) | `winget upgrade vlastimilbures.PromptMend` |
+| Portable zip | Unzip the new release over the same folder |
 | A checkout ([below](#install-from-a-checkout)) | `git pull`, then rerun `./scripts/install_macos.sh` (`.\scripts\install_windows.ps1` on Windows) |
 
 With uv, install the new release over the old one with its own `constraints.txt`; `--force`

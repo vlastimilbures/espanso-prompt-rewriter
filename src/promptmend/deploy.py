@@ -204,7 +204,7 @@ def _digest(text: str) -> str:
 @dataclass(frozen=True)
 class Launcher:
     path: Path
-    channel: str  # uv, homebrew, scoop, script or explicit
+    channel: str  # uv, homebrew, scoop, winget, script or explicit
 
 
 def launcher_text(path: Path | str, *, windows: bool = os.name == "nt") -> str:
@@ -230,16 +230,60 @@ def _inside(path: Path, parent: Path) -> bool:
     return path.resolve().is_relative_to(parent.resolve())
 
 
+# WinGet's package id (#185) and where it puts a portable package: the zip unpacked under
+# `Packages\<id>_<source>\`, the command alias in `Links\`. Neither path holds the version,
+# so the match files survive `winget upgrade`.
+WINGET_ID = "vlastimilbures.PromptMend"
+
+
+def _winget_launcher(executable: Path, environ: Mapping[str, str]) -> Launcher | None:
+    """The WinGet install of the running frozen exe: its `Links` alias when that resolves to
+    this exe, else the exe itself inside WinGet's package folder for our id."""
+    local = environ.get("LOCALAPPDATA")
+    if not local:
+        return None
+    winget = Path(local) / "Microsoft" / "WinGet"
+    link = winget / "Links" / "promptmend.exe"
+    with contextlib.suppress(OSError):
+        if os.path.samefile(link, executable):
+            return Launcher(link, "winget")
+    packages = winget / "Packages"
+    try:
+        inside = executable.resolve().relative_to(packages.resolve())
+    except (OSError, ValueError):
+        return None
+    folder = inside.parts[0] if inside.parts else ""
+    if folder.lower().startswith(f"{WINGET_ID.lower()}_") and _is_stable(inside):
+        return Launcher(executable, "winget")
+    return None
+
+
 def resolve_launcher(
     *,
     runner: Runner | None = None,
     prefix: Path | None = None,
     script: Path | None = None,
     windows: bool = os.name == "nt",
+    frozen: bool | None = None,
+    executable: Path | None = None,
+    environ: Mapping[str, str] | None = None,
 ) -> Launcher:
     """The stable entry point of the install that is running now: the channel's own bin
-    (uv tool's bin dir, Homebrew's `<prefix>/bin`, Scoop's shim), never a versioned path
-    such as a Homebrew Cellar, else the running console script when that path is stable."""
+    (uv tool's bin dir, Homebrew's `<prefix>/bin`, Scoop's shim, WinGet's alias), never a
+    versioned path such as a Homebrew Cellar, else the running console script when that path
+    is stable. A frozen build (the Windows zip, #185) is its own exe: WinGet's, else itself."""
+    if getattr(sys, "frozen", False) if frozen is None else frozen:
+        exe_path = Path(sys.executable) if executable is None else executable
+        if windows:
+            found = _winget_launcher(exe_path, os.environ if environ is None else environ)
+            if found is not None:
+                return found
+        if exe_path.is_absolute() and exe_path.is_file() and _is_stable(exe_path):
+            return Launcher(exe_path, "script")
+        raise DeployError(
+            "Could not find a stable promptmend launcher (install it with winget, or pass "
+            "--launcher)"
+        )
     runner = runner or run_command
     prefix = Path(sys.prefix) if prefix is None else prefix
     script = Path(sys.argv[0]) if script is None else script

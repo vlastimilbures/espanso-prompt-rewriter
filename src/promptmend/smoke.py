@@ -16,13 +16,14 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 import threading
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import TYPE_CHECKING, Any
+
+from .entry import self_command
 
 if TYPE_CHECKING:
     from .config import Settings
@@ -161,11 +162,9 @@ def run(provider: str, *, runner: Runner | None = None) -> SmokeResult:
     """Run improve with ``provider`` against the stub; ok when it printed the stub's reply."""
     with stub_server() as stub:
         argv = [
-            sys.executable,
-            # The working directory stays off sys.path: a planted module never runs.
-            "-P",
-            "-m",
-            "promptmend.cli",
+            # -P (or the frozen build's own exe): a module planted in the working directory
+            # never runs.
+            *self_command(),
             "improve",
             "--provider",
             provider,

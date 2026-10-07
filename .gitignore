@@ -17,3 +17,6 @@ bench-*.log
 .tokensave/
 .claude/
 .codegraph/
+# uv build and the frozen Windows build (scripts/build_windows.py).
+/dist/
+/build/
