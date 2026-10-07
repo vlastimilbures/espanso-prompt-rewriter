@@ -29,11 +29,7 @@ from ..commands import profiles as profiles_cmd
 from ..commands import settings as settings_cmd
 from ..config import env_names, secret_names
 from ..config_files import SecretStoreError
-from ..factory import PROVIDER_NAMES, routes
-from ..prompt_builder import ADDED, ALIASES, PROFILES, user_profiles_dir
-from . import teach
-from .console import (
-    CommandLine,
+from ..console import (
     Decision,
     Ran,
     Runner,
@@ -43,6 +39,10 @@ from .console import (
     shown_arg,
     transcript,
 )
+from ..factory import PROVIDER_NAMES, routes
+from ..prompt_builder import ADDED, ALIASES, PROFILES, user_profiles_dir
+from . import teach
+from .console import CommandLine
 from .home import TAB_LABELS, HomeRow, headline, home_rows
 from .modals import ConfirmModal, Field, FormModal, PickModal, TextModal
 from .state import State, current_plan

@@ -122,7 +122,7 @@ def save_setting(name: str, value: str) -> config_store.SavedSettings:
     value that looks like a key, legacy mode and an unmigrated .env (CommandError), then save
     ``value`` in config.toml after checking it as the CLI would read it."""
     _not_a_secret(name, "set")
-    if common.looks_like_a_key(value):
+    if common.looks_like_a_key(value, user_patterns=name != common.EXTRA_PATTERNS):
         raise common.CommandError(
             "that value looks like a key or password, which never goes in config.toml; use "
             "`promptmend secrets set NAME` for an API key",
@@ -189,7 +189,7 @@ def config_get(name: str = _NAME) -> None:
     layers, _ = common.load_layers()
     common.show_findings(layers)
     value = layers.entries[name].value
-    if common.looks_like_a_key(value):
+    if common.looks_like_a_key(value, user_patterns=name != common.EXTRA_PATTERNS):
         common.fail(
             f"{name} holds what looks like a key ({len(value)} chars), so it is not printed; "
             "move the key to `promptmend secrets set`"

@@ -25,12 +25,13 @@ from textual.widgets import Button
 
 from promptmend import assets, deploy, doctor, previous_install
 from promptmend.config import ConfigLayers
+from promptmend.console import Ran
 from promptmend.history import StatsRow
 from promptmend.prompt_builder import UserProfile
 from promptmend.tui import app as app_module
 from promptmend.tui import brand
 from promptmend.tui.app import HIGH_CONTRAST, ManageApp
-from promptmend.tui.console import CommandLine, Ran
+from promptmend.tui.console import CommandLine
 from promptmend.tui.state import State
 
 pytestmark = pytest.mark.skipif(

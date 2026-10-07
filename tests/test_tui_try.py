@@ -19,10 +19,10 @@ from test_tui_snapshots import fixed_state
 from textual.pilot import Pilot
 from textual.widgets import Button, Select, Static, TabbedContent, TextArea
 
-from promptmend import cli, clipboard_guard, prompt_builder, smoke
+from promptmend import cli, clipboard_guard, console, prompt_builder, smoke
 from promptmend.cli import MAX_DRAFT_CHARS
 from promptmend.providers.usage import AttemptUsage
-from promptmend.tui import console, teach, try_pane
+from promptmend.tui import teach, try_pane
 from promptmend.tui.app import ManageApp
 from promptmend.tui.modals import ConfirmModal
 from promptmend.tui.try_pane import CONFIGURED, REAL, TryPane, usage_line

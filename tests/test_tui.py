@@ -1254,10 +1254,12 @@ def test_bare_command_without_a_terminal_prints_the_help_as_before(
     assert (bare.exit_code, helped.exit_code) == (2, 0)
     assert bare.stdout_bytes + EOL == helped.stdout_bytes
     assert bare.stderr_bytes == helped.stderr_bytes == b""
-    # The same help as before #93 (tests/golden, captured from it), plus the `ui` row.
+    # The same help as before #93 (tests/golden, captured from it), plus the `ui` row and
+    # the `shell` row (#183).
     ui_row = "ui Open the full-screen interface to set up and manage (a terminal)."
+    shell_row = "shell A command line with completion and live help (a terminal)."
     before = _words(GOLDEN.read_text("utf-8"))
-    assert _words(bare.stdout) == f"{before} {ui_row}"
+    assert _words(bare.stdout) == f"{before} {ui_row} {shell_row}"
 
 
 @pytest.mark.parametrize(("stdin", "stdout"), [(True, False), (False, True)])
@@ -2078,10 +2080,12 @@ def test_session_log_keeps_the_latest(espanso: FakeRunner) -> None:
 
 # A line that would start a real child fails the test (conftest refuses console.run).
 def test_conftest_refuses_the_real_runner_here() -> None:
-    from promptmend.tui import console
+    from promptmend import console
+    from promptmend.tui import console as tui_console
 
-    with pytest.raises(AssertionError, match="a test started a real promptmend"):
-        console.run(["--version"])
+    for runner in (console.run, tui_console.run):
+        with pytest.raises(AssertionError, match="a test started a real promptmend"):
+            runner(["--version"])
 
 
 async def enter(app: ManageApp, pilot: Pilot[int], line: str) -> None:

@@ -302,7 +302,24 @@ Rules for agents:
 - `commands/` — the management commands (#92): `setup`, `config show|get|set|unset|validate|
   migrate|rollback`, `secrets set|status|remove`, `profiles list|migrate`, `stats`,
   `history export|prune|reset`, `doctor` (plus `espanso` in `cli.py`, which gained
-  `deploy --dry-run`). Started as the `prompt-workflow` alias (`cli._run_as_alias()`:
+  `deploy --dry-run`). `commands/shell.py` (#183) is `promptmend shell`: a prompt_toolkit
+  REPL (imported only once it opens; `prompt_toolkit` and `promptmend.console` are in
+  `doctor.HEAVY_MODULES` and the trigger contract's FORBIDDEN) over `promptmend/console.py`'s
+  completion (`words_for()`, `suggest()`) and `describe()` as the bottom bar; without a TTY
+  exit 3. `plan(line)` runs everything the parser reads as a command except `improve`,
+  `persona` and `shell` (`REFUSED`; their `--help` only when the strict parse succeeds), a
+  key-like line (`holds_a_key()`) and `refused_secret()` (also on a whitespace split when
+  shlex fails; it covers `config set|get|unset <key name> VALUE` too); a leaf's `--help`
+  counts only as the parser read it. `Editor` wraps the default buffer's accept handler (so every
+  accept key: Enter, Meta-Enter, Ctrl-O, a search's Enter) to replace a `secret_line()` with
+  `<value withheld>` before the prompt exits (`read()` returns the original to plan). `run_here()`
+  re-checks `runs_here(argv)`, then starts `[sys.executable, "-P", "-m", "promptmend.cli",
+  *argv]` with the terminal's stdio (no capture, no timeout, waits through Ctrl-C); `doctor`
+  is not forced to `--no-clipboard`. The in-memory history keeps only lines `kept()` allows: those that plan to RUN.
+  `load_settings()` (repair mode, never fatal) runs at start and after each run, so
+  `holds_a_key()` sees `PROMPT_EXTRA_PATTERNS`: `common.looks_like_a_key()` scans with
+  `redaction._user_patterns` (`user_patterns=False` for `common.EXTRA_PATTERNS` itself).
+  `repl(read, runner=, echo=)` is the loop tests drive; conftest refuses `run_here`. Started as the `prompt-workflow` alias (`cli._run_as_alias()`:
   `Path(sys.argv[0]).stem`), a management command or `ui` first prints
   `cli.DEPRECATED_ALIAS` on stderr, once; the triggers, `--version` and `--help` never do, and
   `_LazyGroup.main()` makes every usage line say `promptmend`. `cli.py`'s `_LazyGroup` imports a command's module only when it runs or
@@ -389,7 +406,10 @@ Rules for agents:
   log shows it (withheld values and placeholders included) through `App.copy_to_clipboard()`
   (OSC 52, write only, the terminal may drop it; never pyperclip). A value that looks like a key is shown as
   `<value withheld>` (`console.shown_arg()`). `tui/console.py` (#111 stage 2) is Home's command line
-  (`CommandLine`, `#home-command`; `c` on `MainScreen` switches to Home and focuses it, and
+  (its Textual widgets only: `CommandSuggester`, `CommandLine`, `Host`; everything without
+  Textual, `resolve()` to `describe()`, `POLICY`, `run()`, lives in `promptmend/console.py`,
+  #183, which `promptmend shell` shares and which must not import textual; conftest refuses
+  `run` in both modules) (`CommandLine`, `#home-command`; `c` on `MainScreen` switches to Home and focuses it, and
   nothing is focused at launch): `resolve()` walks the Click tree (no callback runs; the
   drift test in `tests/test_tui_teach.py` uses it too), `words_for()` gives the candidates
   (key names only after `secrets set|remove`, never elsewhere), `CommandSuggester` completes

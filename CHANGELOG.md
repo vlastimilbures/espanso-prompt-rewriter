@@ -6,6 +6,24 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Added
+- `promptmend shell` (#183): a plain command line for the terminal with the completion and
+  live help of the interface's command line (Tab completes, the bar below explains the line).
+  Enter runs the command in the same terminal, so `espanso deploy`, `config migrate` and
+  `secrets set NAME` ask there as usual. `improve`, `persona` and `shell` are refused. A
+  line that holds a key or gives a key's value is never run, and Enter replaces it on screen
+  with `<value withheld>`; the history (memory only) keeps only lines that ran. It needs a
+  terminal (exit 3 otherwise). New dependency: prompt_toolkit, loaded only by `shell`. See
+  docs/commands.md, "shell".
+
+### Changed
+- The interface's command line also refuses `config set|get|unset` with a key's name and a
+  value, or `config set` with a key-like value, before the value reaches a child's argv.
+- A value your `PROMPT_EXTRA_PATTERNS` match now counts as a key wherever a command checks
+  for one: `config set` refuses it, `config get` and `config show` do not print it, and the
+  command lines of the interface and `promptmend shell` withhold it. The pattern setting
+  itself is never hidden by its own patterns.
+
 ### Documentation
 - The benchmark figures behind CONTRIBUTING's "Known gaps in the default prompt" moved to
   docs/benchmark.md ("Per-draft findings of the 2026-10 round"), its only home; the gaps link

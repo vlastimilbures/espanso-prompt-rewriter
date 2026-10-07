@@ -641,6 +641,7 @@ def run(
 # Modules the trigger path must never load (tests/test_trigger_contract.py freezes the same).
 HEAVY_MODULES = (
     "textual",
+    "prompt_toolkit",
     "tomli_w",
     "tomlkit",
     "keyring",
@@ -650,6 +651,7 @@ HEAVY_MODULES = (
     "promptmend.config_store",
     "promptmend.previous_install",
     "promptmend.relocate",
+    "promptmend.console",
 )
 IMPORT_TIMEOUT = 30
 _IMPORT_PROBE = """

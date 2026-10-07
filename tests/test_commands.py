@@ -559,6 +559,8 @@ def _commands(espanso: Path) -> dict[tuple[str, ...], list[list[str]]]:
         ("persona",): [["persona"]],
         # Without a terminal (as here) the interface exits 3 before reading anything.
         ("ui",): [["ui"]],
+        # ...and so does the shell (#183).
+        ("shell",): [["shell"]],
     }
 
 

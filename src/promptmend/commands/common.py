@@ -29,6 +29,9 @@ PROBLEMS = 4  # doctor or config validate ran and found problems
 
 # Settings shown only as set or not set: personal text that has no place in a pasted report.
 PRIVATE = frozenset({"PROMPT_PERSONA"})
+# The user's own credential patterns: its value may match itself, so it is never hidden or
+# refused by them.
+EXTRA_PATTERNS = "PROMPT_EXTRA_PATTERNS"
 
 
 class CommandError(Exception):
@@ -215,22 +218,31 @@ def shown_value(name: str, entry: Entry) -> str:
     """A setting's value as a command may print it: never a secret, never the persona. An
     empty value set on purpose (PROMPT_TEMPERATURE= sends no temperature) reads "(empty)"
     rather than a blank; one left at an empty default stays blank."""
-    if name in secret_names() or name in PRIVATE or looks_like_a_key(entry.value):
+    own = name != EXTRA_PATTERNS
+    if (
+        name in secret_names()
+        or name in PRIVATE
+        or looks_like_a_key(entry.value, user_patterns=own)
+    ):
         return f"<set, {len(entry.value)} chars>" if entry.value else "<not set>"
     if not entry.value and entry.source != DEFAULT_SOURCE:
         return "(empty)"
     if entry.value.isprintable() and "\n" not in entry.value:
         return entry.value
     # The user's patterns would hide the pattern setting itself when it matches its own text.
-    return safe_repr(entry.value, user_patterns=name != "PROMPT_EXTRA_PATTERNS")
+    return safe_repr(entry.value, user_patterns=own)
 
 
-def looks_like_a_key(value: str) -> bool:
-    """A value the gate would block as a credential (an API key, a token, a password): it
-    belongs in the secret store, so it is never saved in config.toml or printed."""
-    from ..redaction import SOFT_FINDINGS, scan
+def looks_like_a_key(value: str, *, user_patterns: bool = True) -> bool:
+    """A value the gate would block as a credential (an API key, a token, a password), or
+    one the user's PROMPT_EXTRA_PATTERNS match (from the settings loaded last, see
+    redaction.set_user_patterns; ``user_patterns`` false skips them, for the value of
+    PROMPT_EXTRA_PATTERNS itself, which may match its own text): it belongs in the secret
+    store, so it is never saved in config.toml or printed."""
+    from .. import redaction
 
-    return bool(set(scan(value)) - SOFT_FINDINGS)
+    extra = redaction._user_patterns if user_patterns else ()
+    return bool(set(redaction.scan(value, extra)) - redaction.SOFT_FINDINGS)
 
 
 def no_key(value: str | None, option: str) -> None:

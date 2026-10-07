@@ -231,11 +231,13 @@ Path(sys.argv[1]).write_text(json.dumps(result), encoding="utf-8")
 """
 
 # Never on the trigger path: the Textual interface (#93), config writers (#84), the keyring
-# and the Espanso deploy service (#86), the management commands and their services (#92).
+# and the Espanso deploy service (#86), the management commands and their services (#92),
+# the shell's line editor and the command line's logic (#183).
 # rich is installed with Typer but not loaded today: Typer imports it only for help and usage
 # errors.
 FORBIDDEN = (
     "textual",
+    "prompt_toolkit",
     "rich.console",
     "tomli_w",
     "tomlkit",
@@ -247,6 +249,8 @@ FORBIDDEN = (
     "promptmend.config_store",
     "promptmend.previous_install",
     "promptmend.relocate",
+    "promptmend.console",
+    "promptmend.commands.shell",
 )
 # The usage history (#89) writes each run after its output, so sqlite3 loads on the trigger
 # path when tracking is on (PROMPT_HISTORY, the default), and never when it is off.
@@ -366,6 +370,7 @@ scenarios = [
     ["profiles", "list"],
     ["stats"],
     ["espanso", "status"],
+    ["shell"],
     ["ui"],
 ]
 codes = []
@@ -399,10 +404,12 @@ def test_management_commands_do_not_import_the_interface(tmp_path: Path) -> None
     )
     assert proc.returncode == 0, proc.stderr.decode("utf-8", "replace")
     data = json.loads(out.read_text(encoding="utf-8"))
-    # Bare without a terminal: help, exit 2. `ui` without a terminal: exit 3 (#92's code).
+    # Bare without a terminal: help, exit 2. `shell` and `ui` without a terminal: exit 3
+    # (#92's code), before prompt_toolkit or Textual loads.
     assert data["codes"][0] == 2
-    assert data["codes"][-1] == 3
+    assert data["codes"][-2:] == [3, 3]  # `shell` too (#183)
     loaded = data["loaded"]
     assert "promptmend.commands.ui" in loaded  # --help listed it, so the guard is real
-    for module in ("textual", "promptmend.tui"):
+    assert "promptmend.commands.shell" in loaded
+    for module in ("textual", "promptmend.tui", "prompt_toolkit", "promptmend.console"):
         assert not [m for m in loaded if m == module or m.startswith(module + ".")], module

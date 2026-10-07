@@ -67,13 +67,17 @@ def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # kept at import (test_tui_console.REAL_RUN) on purpose.
     import sys
 
-    console = sys.modules.get("promptmend.tui.console")
-    if console is not None:
+    def no_child(argv: Sequence[str]) -> Any:
+        raise AssertionError(f"a test started a real promptmend {list(argv)}")
 
-        def no_child(argv: Sequence[str]) -> Any:
-            raise AssertionError(f"a test started a real promptmend {list(argv)}")
-
-        monkeypatch.setattr(console, "run", no_child)
+    # promptmend.console defines it; tui.console imports it by name (Home's command line
+    # looks it up there), so both are patched. `promptmend shell` runs in the terminal
+    # through its own runner (#183), refused the same way.
+    for name in ("promptmend.console", "promptmend.tui.console"):
+        if (module := sys.modules.get(name)) is not None:
+            monkeypatch.setattr(module, "run", no_child)
+    if (shell := sys.modules.get("promptmend.commands.shell")) is not None:
+        monkeypatch.setattr(shell, "run_here", no_child)
     # The user patterns safe_repr() hides are set by every settings load: start each test
     # without the previous test's.
     from promptmend import redaction

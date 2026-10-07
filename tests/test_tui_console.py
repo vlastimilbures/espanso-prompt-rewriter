@@ -18,8 +18,9 @@ from typer._click.exceptions import UsageError
 from typer._types import TyperChoice
 from typer.core import TyperArgument, TyperGroup, TyperOption
 
-from promptmend import config, prompt_builder, smoke
-from promptmend.tui import console, panes, teach
+from promptmend import config, console, prompt_builder, smoke
+from promptmend.tui import console as tui_console
+from promptmend.tui import panes, teach
 from promptmend.tui.app import ManageApp
 from promptmend.tui.modals import FormModal, PickModal
 
@@ -109,7 +110,7 @@ def test_suggest_completes_only_the_word_being_typed() -> None:
 
 
 def test_the_suggester_is_uncached_and_case_sensitive() -> None:
-    suggester = console.CommandSuggester()
+    suggester = tui_console.CommandSuggester()
     assert suggester.cache is None
     assert suggester.case_sensitive
     assert asyncio.run(suggester.get_suggestion("espanso de")) == "espanso deploy"
@@ -283,8 +284,8 @@ def drive(scenario: Callable[[ManageApp, Pilot[int]], Awaitable[None]]) -> Manag
     return app
 
 
-def _line(app: ManageApp) -> console.CommandLine:
-    return app.main.query_one("#home-command", console.CommandLine)
+def _line(app: ManageApp) -> tui_console.CommandLine:
+    return app.main.query_one("#home-command", tui_console.CommandLine)
 
 
 def _help(app: ManageApp) -> str:
@@ -427,11 +428,11 @@ def test_the_history_is_capped() -> None:
     async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
         line = _line(app)
         await pilot.press("c")
-        for n in range(console.HISTORY_SIZE + 5):
+        for n in range(tui_console.HISTORY_SIZE + 5):
             line.value = f"stats --by {n}"
             await line.action_submit()
-        assert len(line.history) == console.HISTORY_SIZE
-        assert line.history[-1] == f"stats --by {console.HISTORY_SIZE + 4}"
+        assert len(line.history) == tui_console.HISTORY_SIZE
+        assert line.history[-1] == f"stats --by {tui_console.HISTORY_SIZE + 4}"
 
     drive(scenario)
 
@@ -460,9 +461,9 @@ def _decide(line: str) -> console.Decision:
     try:
         found = console.resolve(words)
     except UsageError:
-        loose = console._loose(words)
-        assert loose is not None, line
-        found = loose
+        lenient = console.loose(words)
+        assert lenient is not None, line
+        found = lenient
     return console.decide(found, words)
 
 
@@ -572,8 +573,8 @@ def test_dialog_decisions_carry_values_and_ignored_options() -> None:
     group = console.decide(console.resolve(["config"], partial=True), ["config"])
     assert group.kind == console.REFUSE
     assert group.message == "config needs a command."
-    assert console._loose(["doctor", "extra"]) is None
-    assert console._loose(["config", "set", "X"]) is None  # no --help, no dialog
+    assert console.loose(["doctor", "extra"]) is None
+    assert console.loose(["config", "set", "X"]) is None  # no --help, no dialog
 
 
 def test_secrets_set_takes_only_a_key_name() -> None:
@@ -590,6 +591,21 @@ def test_secrets_set_takes_only_a_key_name() -> None:
         ["--help", "Hunter2xyz"],
     ):
         assert console.refused_secret(["secrets", "set", *rest]), rest
+
+
+def test_config_never_takes_a_key_value() -> None:
+    # A key's name with a value after it under config, or a key-like value: the value would
+    # reach a child's argv before the command refuses it.
+    for words in (
+        ["config", "set", "OPENROUTER_API_KEY", "hunter2"],
+        ["config", "get", "ANTHROPIC_API_KEY", "hunter2"],
+        ["config", "unset", "OPENROUTER_API_KEY", "x"],
+        ["config", "set", "PROMPT_PROFILE", KEY],
+    ):
+        assert console.refused_secret(words), words
+    assert not console.refused_secret(["config", "get", "OPENROUTER_API_KEY"])
+    assert not console.refused_secret(["config", "set", "PROMPT_PROFILE", "general"])
+    assert not console.refused_secret(["config", "show"])
 
 
 def test_shown_withholds_keys_and_the_persona() -> None:
@@ -740,7 +756,7 @@ def test_enter_during_a_run_starts_nothing() -> None:
         await pilot.press("c", *"stats", "enter")
         await settle(pilot)
         assert fake.calls == []
-        assert _help(app) == console.RUNNING
+        assert _help(app) == tui_console.RUNNING
         assert line.value == "stats"
         assert app.session == []
 
