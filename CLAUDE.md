@@ -546,8 +546,10 @@ overrides any `--provider` a trigger passes; `PROMPT_PROVIDER` only sets the bar
   Windows, which cannot run a quoted path followed by arguments (#18). `{{form1.*}}` is filled
   into each item before the call. A nonzero exit **or any stderr output** fails the
   expansion, so `improve`/`persona` must keep stderr empty: the console scripts point at
-  `entry.main()`, which silences warnings for those two before importing the CLI
-  (`quiet_trigger()`, also on `python -m promptmend.cli`). `promptmend espanso deploy`
+  `entry.main()`, which for those two silences warnings and `dup2`s the null device onto fd 2
+  before importing the CLI (`quiet_trigger()`, also on `python -m promptmend.cli`; in-process
+  tests patch `discard_stderr`, never pytest's own fd 2). Never `ignore_error: true`: the exit
+  code is left alone, so a crash still fails the expansion visibly. `promptmend espanso deploy`
   (which the install scripts call) substitutes `__PROMPT_WORKFLOW__` with the stable
   absolute path to the installed CLI; there is no `cd`. `tests/test_triggers.py` runs every
   match's args as a real process against `smoke`'s stub (exit 0, empty stderr; on

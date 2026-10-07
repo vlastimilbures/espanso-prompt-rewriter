@@ -245,7 +245,7 @@ promptmend/
 ├── src/promptmend/               the promptmend CLI
 │   ├── cli.py                    improve and persona commands, the single output sink;
 │   │                             mounts the management commands lazily
-│   ├── entry.py                  console-script entry: no warnings on stderr for a trigger
+│   ├── entry.py                  console-script entry: empty stderr for a trigger
 │   ├── commands/                 setup, config, secrets, profiles, stats, history, doctor, ui:
 │   │                             thin Typer wrappers over the services (common.py: exit codes)
 │   ├── tui/                      the full-screen Textual interface; only `ui` (commands/ui.py,
@@ -332,7 +332,8 @@ argument as its own double-quoted item. Espanso starts `args[0]` directly, with 
 no shell quoting applies; a `type: shell` var would run through PowerShell on Windows, which
 cannot run a quoted path followed by arguments. A form value goes in as a whole item
 (`"{{form1.model}}"`). A script var fails on any stderr output, so the CLI must keep stderr
-empty on the trigger path (`entry.py` silences warnings for `improve` and `persona`).
+empty on the trigger path (`entry.py` silences warnings and points fd 2 at the null device
+for `improve` and `persona`; never `ignore_error: true`, which would hide a crash).
 Set `force_mode: clipboard` on every match that runs the CLI, so Espanso pastes the output
 instead of typing short replies key by key.
 

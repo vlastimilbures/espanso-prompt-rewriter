@@ -16,8 +16,9 @@ All notable changes to this project are documented here. The format follows
   match files (it recognises the old ones as its own). A trigger of your own copied from an
   older deployed file keeps the shell shape: rewrite it as shown in docs/usage.md, "Your own
   triggers".
-- `improve` and `persona` print nothing on stderr, not even a Python warning, since a script
-  var treats any stderr output as a failed expansion. The `promptmend` and `prompt-workflow`
+- `improve` and `persona` print nothing on stderr, not even a Python warning or a library's
+  message (they discard it), since a script var treats any stderr output as a failed
+  expansion. A crash still exits nonzero, so Espanso still reports it. The `promptmend` and `prompt-workflow`
   commands now start through `promptmend.entry:main`.
 - `promptmend espanso deploy` no longer refuses a CLI path holding `$`, a backtick or (on
   Windows) `% ^ & | < >`, which no shell reads any more. It still refuses a quote, a

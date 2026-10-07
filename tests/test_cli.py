@@ -1208,13 +1208,19 @@ def test_usage_names_promptmend() -> None:
     [(["improve", "--trigger-id", "i"], True), (["persona"], True), (["config", "show"], False)],
     ids=["improve", "persona", "config"],
 )
-def test_entry_quiets_only_trigger_calls(argv: list[str], quiet: bool) -> None:
+def test_entry_quiets_only_trigger_calls(
+    monkeypatch: pytest.MonkeyPatch, argv: list[str], quiet: bool
+) -> None:
     from promptmend import entry
 
+    discarded: list[bool] = []
+    # Never on pytest's own fd 2: test_entry_discards_fd2 checks the real one in a child.
+    monkeypatch.setattr(entry, "discard_stderr", lambda: discarded.append(True))
     with warnings.catch_warnings():
         before = list(warnings.filters)
         assert entry.quiet_trigger(argv) is quiet
         assert (warnings.filters[0][0] == "ignore" and warnings.filters != before) is quiet
+    assert bool(discarded) is quiet
 
 
 @pytest.mark.parametrize("command", ["improve", "persona"])
@@ -1223,6 +1229,7 @@ def test_entry_keeps_stderr_empty_on_a_warning(
 ) -> None:
     from promptmend import entry
 
+    monkeypatch.setattr(entry, "discard_stderr", lambda: None)  # the warning filter alone
     real = Settings.load
 
     def load(*args: Any, **kwargs: Any) -> Any:
@@ -1249,6 +1256,35 @@ def test_entry_keeps_stderr_empty_on_a_warning(
         assert out.startswith("[promptmend: Unknown provider")
     else:
         assert out == cli.PERSONA_PLACEHOLDER
+
+
+# What no warning filter catches (a direct write, logging's last resort, C code writing to
+# fd 2) is discarded too, in a real child process; another command keeps its stderr.
+_WRITES = (
+    "import logging, os, sys\n"
+    "from promptmend.entry import quiet_trigger\n"
+    "quiet_trigger(sys.argv[1:])\n"
+    "print('py', file=sys.stderr)\n"
+    "logging.warning('log')\n"
+    "os.write(2, b'fd')\n"
+    "print('out')\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("command", "err"), [("improve", ""), ("doctor", "py\nWARNING:root:log\nfd")]
+)
+def test_entry_discards_fd2(command: str, err: str) -> None:
+    result = subprocess.run(
+        [sys.executable, "-c", _WRITES, command],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0
+    assert result.stdout.strip() == "out"
+    assert result.stderr.replace("\r\n", "\n") == err
 
 
 def _print_warning(
