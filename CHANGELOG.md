@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## 0.22.0 - 2026-10-07
+
 ### Added
 - A portable Windows build (#185): each GitHub Release now carries
   `promptmend-<version>-windows-x64.zip`, the CLI frozen with PyInstaller (a folder with
