@@ -1421,7 +1421,7 @@ def test_diagnostics_provenance_and_import_check(
         await pilot.press("6")
         diagnostics = pane(app, "diagnostics")
         rows = table_rows(app, "diagnostics", "#diag-settings")
-        assert rows["OPENROUTER_API_KEY"][1:3] == [f"<set, {len(KEY)} chars>", "environment"]
+        assert rows["OPENROUTER_API_KEY"][1:3] == ["<set>", "environment"]
         assert KEY not in app.export_screenshot()
         store = str(diagnostics.query_one("#store").render())
         assert "Lost history writes: 0" in store

@@ -224,7 +224,7 @@ def shown_value(name: str, entry: Entry) -> str:
         or name in PRIVATE
         or looks_like_a_key(entry.value, user_patterns=own)
     ):
-        return f"<set, {len(entry.value)} chars>" if entry.value else "<not set>"
+        return "<set>" if entry.value else "<not set>"
     if not entry.value and entry.source != DEFAULT_SOURCE:
         return "(empty)"
     if entry.value.isprintable() and "\n" not in entry.value:

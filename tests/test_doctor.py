@@ -3,6 +3,7 @@ history store are faked; the CLI-level tests are in tests/test_commands.py."""
 
 from __future__ import annotations
 
+import os
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -253,6 +254,28 @@ def test_launcher_check_warns_about_another_launcher(tmp_path: Path, espanso: Pa
     check = doctor._launcher_check(str(tmp_path / "promptmend"), deploy.Manifest.load())
     assert (check.status, check.data["drift"]) == ("warn", True)
     assert "redeploy" not in check.message
+
+
+# #212: the match files hold a Windows launcher with `/`; the same path is no drift.
+def test_same_launcher_ignores_slashes_and_case_on_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import ntpath
+    import types
+
+    monkeypatch.setattr(doctor, "os", types.SimpleNamespace(path=ntpath))
+    deployed = "C:/Users/me/.local/bin/promptmend.exe"
+    assert doctor._same_launcher(deployed, r"C:\Users\me\.local\bin\promptmend.exe")
+    assert doctor._same_launcher(deployed, r"c:\users\me\.local\bin\PROMPTMEND.EXE")
+    assert not doctor._same_launcher(deployed, r"C:\Users\me\other\promptmend.exe")
+    assert not doctor._same_launcher(deployed, None)
+
+
+def test_same_launcher_keeps_case_on_posix() -> None:
+    assert doctor._same_launcher(LAUNCHER, LAUNCHER)
+    assert doctor._same_launcher("/Users/me/.local/bin/../bin/promptmend", LAUNCHER)
+    if os.name != "nt":
+        assert not doctor._same_launcher(LAUNCHER.upper(), LAUNCHER)
 
 
 def test_launcher_check_skips_entries_whose_file_is_gone(tmp_path: Path, espanso: Path) -> None:
