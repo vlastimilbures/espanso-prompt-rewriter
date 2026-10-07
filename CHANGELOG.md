@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Documentation
+- The benchmark figures behind CONTRIBUTING's "Known gaps in the default prompt" moved to
+  docs/benchmark.md ("Per-draft findings of the 2026-10 round"), its only home; the gaps link
+  there. Gap 10 now says the v0.19.0 prompt copies a short pasted email on flash-lite.
+
 ## 0.20.1 - 2026-10-07
 
 ### Fixed
