@@ -296,18 +296,34 @@ def test_history_check(
 
 
 @pytest.mark.parametrize(
-    ("version", "status", "bug"), [("3.45.1", "warn", True), ("unknown", "warn", False)]
+    ("version", "journal", "status", "bug", "words"),
+    [
+        ("3.45.1", "wal", "warn", True, "still in WAL"),
+        ("3.45.1", "delete", "ok", True, "rollback journal"),
+        ("3.45.1", None, "ok", True, "rollback journal"),
+        ("3.51.3", "wal", "ok", False, "SQLite 3.51.3"),
+        ("unknown", None, "info", False, "version unknown"),
+    ],
 )
 def test_sqlite_check(
-    monkeypatch: pytest.MonkeyPatch, version: str, status: str, bug: bool
+    monkeypatch: pytest.MonkeyPatch,
+    version: str,
+    journal: str | None,
+    status: str,
+    bug: bool,
+    words: str,
 ) -> None:
     from promptmend import history
 
     monkeypatch.setattr(
-        history.HistoryStore, "health", lambda self: _health(sqlite_version=version)
+        history.HistoryStore,
+        "health",
+        lambda self: _health(sqlite_version=version, journal_mode=journal),
     )
     sqlite = doctor._history_checks(Settings())[1]
     assert (sqlite.status, sqlite.data["wal_reset_bug"]) == (status, bug)
+    assert sqlite.data["journal_mode"] == journal
+    assert words in sqlite.message
 
 
 # --- clipboard and profiles ---------------------------------------------------------------

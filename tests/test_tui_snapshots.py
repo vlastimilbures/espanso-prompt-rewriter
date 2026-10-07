@@ -69,7 +69,7 @@ _DATA: dict[str, dict[str, Any]] = {
     "install": {"channel": "uv", "launcher": LAUNCHER, "editable": False},
     "espanso": {"found": True, "running": True, "query_failed": False},
     "history": {"lost_writes": 0, "last_lost_utc": None, "tracking_incomplete": False},
-    "sqlite": {"version": "3.51.3", "wal_reset_bug": False},
+    "sqlite": {"version": "3.51.3", "wal_reset_bug": False, "journal_mode": "wal"},
 }
 _STATES = {
     "prompts-core.yml": deploy.IN_SYNC,

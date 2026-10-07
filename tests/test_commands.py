@@ -641,7 +641,7 @@ def test_doctor_json_schema_is_stable(
         "orphans",
     }
     assert set(checks["clipboard"]["data"]) == {"read", "length", "concealed", "error"}
-    assert set(checks["sqlite"]["data"]) == {"version", "wal_reset_bug"}
+    assert set(checks["sqlite"]["data"]) == {"version", "wal_reset_bug", "journal_mode"}
     assert checks["espanso"]["data"]["running"] is True
     # The key is missing, so the report fails, with the documented exit code.
     assert data["status"] == "fail"

@@ -24,6 +24,16 @@ All notable changes to this project are documented here. The format follows
   command lines of the interface and `promptmend shell` withhold it. The pattern setting
   itself is never hidden by its own patterns.
 
+### Fixed
+- The usage history uses SQLite's WAL journal only on SQLite 3.51.3 or later (#196). Before
+  3.51.3, WAL could rarely reset a database, and the SQLite bundled with uv's and Homebrew's
+  Pythons is older, so the history now keeps the rollback journal there and switches an
+  existing WAL database back on its next recorded run. `promptmend doctor`'s `sqlite` check
+  is OK on such a SQLite ("SQLite 3.50.4, rollback journal") instead of warning on every
+  install, so Home says "Ready"; it warns only while a database is still in WAL on an old
+  SQLite, and an unreadable version is INFO. The check's data gains `journal_mode`, and the
+  interface's Diagnostics tab shows it.
+
 ### Documentation
 - The benchmark figures behind CONTRIBUTING's "Known gaps in the default prompt" moved to
   docs/benchmark.md ("Per-draft findings of the 2026-10 round"), its only home; the gaps link
