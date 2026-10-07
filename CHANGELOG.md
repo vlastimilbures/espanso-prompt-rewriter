@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## 0.20.1 - 2026-10-07
+
 ### Fixed
 - Windows: every trigger that runs the CLI (`-i-`, `-iok-`, `-ip-`, `-if-`, `-il-`, `-ilm-`,
   `-ic-` and `-p-`) failed under Espanso and pasted `[Espanso]: An error occurred during
