@@ -233,6 +233,7 @@ jobs:
           if ($report.checks.version.data.version -ne $version) { throw "doctor reports another version" }
           if ($report.checks.install.data.channel -ne "script") { throw "an unzipped exe is not the script channel" }
           "FROZEN_EXE=$exe" >> $env:GITHUB_ENV
+          exit 0  # not doctor's 4
       - name: Run it through a WinGet Links alias
         working-directory: ${{ runner.temp }}
         run: |
@@ -252,6 +253,7 @@ jobs:
           $report.checks.install | ConvertTo-Json -Depth 5
           if ($report.checks.install.data.channel -ne "winget") { throw "doctor does not see the winget channel" }
           if ($report.checks.install.data.launcher -ne $link) { throw "the launcher is not the Links alias" }
+          exit 0  # not doctor's 4
       - name: Replay every trigger through the exe
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
