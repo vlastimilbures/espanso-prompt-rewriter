@@ -9,7 +9,10 @@ the release date and the Release's notes URL. The result goes where winget-pkgs 
 `<out>/manifests/v/vlastimilbures/PromptMend/X.Y.Z/`, ready for `winget validate --manifest`
 and, with the owner's go, a pull request to microsoft/winget-pkgs (never made by this script).
 
-`--url` replaces the installer URL; CI uses it to install the zip from a local server.
+The release date is the version's `## X.Y.Z - YYYY-MM-DD` heading in CHANGELOG.md unless
+`--release-date` gives one. `--url` replaces the installer URL (plain http only to a loopback
+host, and its file name must be the release zip's); CI uses it to install the zip from a
+local server, and then the date defaults to today (UTC).
 
 Standard library only, and offline: it reads files and never downloads anything.
 """
@@ -19,9 +22,13 @@ from __future__ import annotations
 import argparse
 import datetime
 import hashlib
+import importlib.util
 import re
+import sys
+import urllib.parse
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from types import ModuleType
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATES = ROOT / "packaging" / "winget"
@@ -35,7 +42,9 @@ FILES = (
 PLACEHOLDER = re.compile(r"__[A-Z0-9_]+__")
 _VERSION = re.compile(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)")
 _SHA256 = re.compile(r"[0-9a-fA-F]{64}")
-_URL = re.compile(r"https?://[^\s'\"#]+\.zip")
+_URL_CHARS = re.compile(r"[^\s'\"#?\\]+")
+LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1"})
+CHANGELOG = ROOT / "CHANGELOG.md"
 
 
 class ManifestError(Exception):
@@ -68,13 +77,52 @@ def sha256_of(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _release_notes() -> ModuleType:
+    """scripts/release_notes.py, whose CHANGELOG parsing the release workflow already uses."""
+    spec = importlib.util.spec_from_file_location(
+        "release_notes", Path(__file__).with_name("release_notes.py")
+    )
+    if spec is None or spec.loader is None:
+        raise ManifestError("cannot load scripts/release_notes.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules.setdefault("release_notes", module)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _today() -> str:
+    return datetime.datetime.now(datetime.UTC).date().isoformat()
+
+
+def changelog_date(version: str, changelog: Path = CHANGELOG) -> str:
+    """The date of ``## <version> - YYYY-MM-DD`` in the CHANGELOG."""
+    try:
+        released = _release_notes().releases(changelog.read_text("utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ManifestError(f"cannot read the release dates in {changelog.name}: {exc}") from None
+    for release in released:
+        if release.version == version:
+            return str(release.date.isoformat())
+    raise ManifestError(f"{changelog.name} has no dated {version} heading; give --release-date")
+
+
+def check_url(url: str, version: str) -> None:
+    """https, or plain http to a loopback host, naming the release zip."""
+    parts = urllib.parse.urlsplit(url)
+    host = (parts.hostname or "").lower()
+    plain_ok = parts.scheme == "http" and host in LOOPBACK
+    if not _URL_CHARS.fullmatch(url) or not host or not (parts.scheme == "https" or plain_ok):
+        raise ManifestError(f"not an https URL (http only to a loopback host): {url!r}")
+    if parts.path.rsplit("/", 1)[-1] != zip_name(version):
+        raise ManifestError(f"the URL does not name {zip_name(version)}: {url!r}")
+
+
 def check(version: str, sha256: str, url: str, release_date: str) -> None:
     if not _VERSION.fullmatch(version):
         raise ManifestError(f"not a release version X.Y.Z: {version!r}")
     if not _SHA256.fullmatch(sha256):
         raise ManifestError(f"not a SHA-256 (64 hex digits): {sha256!r}")
-    if not _URL.fullmatch(url):
-        raise ManifestError(f"not an http(s) URL of a .zip: {url!r}")
+    check_url(url, version)
     try:
         if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", release_date):
             raise ValueError
@@ -89,10 +137,17 @@ def render(
     url: str | None = None,
     release_date: str | None = None,
     templates: Path = TEMPLATES,
+    changelog: Path = CHANGELOG,
 ) -> dict[str, str]:
-    """Each manifest's file name and text. WinGet-pkgs writes the hash in upper case."""
+    """Each manifest's file name and text. WinGet-pkgs writes the hash in upper case.
+
+    Without ``release_date``: the CHANGELOG's date for the version, or today (UTC) when a
+    ``url`` replaces the Release's (CI's build of an unreleased version)."""
+    if not _VERSION.fullmatch(version):
+        raise ManifestError(f"not a release version X.Y.Z: {version!r}")
+    if release_date is None:
+        release_date = changelog_date(version, changelog) if url is None else _today()
     url = url or release_url(version)
-    release_date = release_date or datetime.datetime.now(datetime.UTC).date().isoformat()
     check(version, sha256, url, release_date)
     values: Mapping[str, str] = {
         "__VERSION__": version,
@@ -129,7 +184,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     digest.add_argument("--zip", type=Path, help="the release zip, hashed here")
     digest.add_argument("--sha256", help="the zip's SHA-256, if the file is not at hand")
     parser.add_argument("--url", help="installer URL (default: the GitHub Release asset)")
-    parser.add_argument("--release-date", help="YYYY-MM-DD (default: today, UTC)")
+    parser.add_argument(
+        "--release-date",
+        help="YYYY-MM-DD (default: the CHANGELOG heading's date; today, UTC, with --url)",
+    )
     parser.add_argument("-o", "--out", type=Path, default=ROOT / "dist" / "winget")
     args = parser.parse_args(argv)
     try:
@@ -141,6 +199,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         rendered = render(args.version, sha, args.url, args.release_date)
     except ManifestError as exc:
         parser.error(str(exc))
+    try:
+        checkout = _release_notes().pyproject_version(ROOT / "pyproject.toml")
+    except (OSError, ValueError, KeyError):
+        checkout = None
+    if checkout != args.version:
+        print(
+            f"warning: this checkout is {checkout}, not {args.version}; "
+            "the templates may not be the released ones (run it on the tag)",
+            file=sys.stderr,
+        )
     target = manifest_dir(args.out, args.version)
     for path in write(rendered, target):
         print(path)

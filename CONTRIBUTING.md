@@ -182,16 +182,19 @@ Releases are cut by `.github/workflows/release.yml`, never by hand-made tags.
    gh attestation verify /tmp/epr-X.Y.Z/promptmend-X.Y.Z-windows-x64.zip \
      -R vlastimilbures/promptmend
    python3 scripts/winget_manifest.py --version X.Y.Z \
-     --zip /tmp/epr-X.Y.Z/promptmend-X.Y.Z-windows-x64.zip --release-date YYYY-MM-DD
+     --zip /tmp/epr-X.Y.Z/promptmend-X.Y.Z-windows-x64.zip
    ```
 
    It writes `dist/winget/manifests/v/vlastimilbures/PromptMend/X.Y.Z/` (the version,
-   installer and en-US locale manifests, with the Release asset's URL and SHA-256), the
-   layout of [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs). CI's
+   installer and en-US locale manifests, with the Release asset's URL and SHA-256 and the
+   release date of the version's CHANGELOG heading), the layout of [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs). CI's
    `frozen-windows` job already ran `winget validate` and a `winget install --manifest` on
    the same templates. Submitting them (a pull request to microsoft/winget-pkgs from the
    owner's fork, or `wingetcreate submit`) is a manual step that only the owner approves;
-   Microsoft's validation and review take days.
+   Microsoft's validation and review take days. The exe is unsigned, so if their Defender
+   scan flags it (a false positive is common for PyInstaller builds), submit the zip to
+   [Microsoft's WDSI](https://www.microsoft.com/en-us/wdsi/filesubmission) as a software
+   developer and mention the result in the winget-pkgs pull request.
 
 With the repository variable `RELEASE_ON_PUSH` set to `true`, step 2 also happens on every push
 to `main` whose version has no published Release yet. It is off by default, so merging a branch

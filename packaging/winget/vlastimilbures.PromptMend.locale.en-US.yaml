@@ -10,16 +10,16 @@ Author: Vlastimil Bures
 PackageName: PromptMend
 PackageUrl: https://github.com/vlastimilbures/promptmend
 License: MIT
-LicenseUrl: https://github.com/vlastimilbures/promptmend/blob/main/LICENSE
+LicenseUrl: https://github.com/vlastimilbures/promptmend/blob/v__VERSION__/LICENSE
 Copyright: Copyright (c) 2026 Vlastimil Bures
 ShortDescription: Rewrite a rough draft into a precise LLM prompt from an Espanso trigger.
 Description: |-
   PromptMend is a command-line tool that Espanso text-expansion triggers call to rewrite a
   rough draft from the clipboard into a precise prompt, with a local model (Ollama, LM
   Studio) or a cloud one (OpenRouter, Anthropic). A data-protection gate blocks a draft that
-  looks like it holds a secret before it can leave the machine. `promptmend setup` walks
-  through the settings and deploys the Espanso match files; `promptmend` alone opens a
-  full-screen interface. This build bundles its own Python.
+  looks like it holds a secret before it can leave the machine. Its setup command walks
+  through the settings and deploys the Espanso match files, and run without arguments it
+  opens a full-screen interface. This build bundles its own Python.
 Moniker: promptmend
 Tags:
 - cli

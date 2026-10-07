@@ -528,8 +528,11 @@ Rules for agents:
   `promptmend`, defaultLocale en-US), with `__NAME__` placeholders.
   `scripts/winget_manifest.py --version X.Y.Z --zip <zip>` (or `--sha256`;
   `--url`, `--release-date`, `-o`, default `dist/winget`) fills them (SHA-256 upper case, the
-  Release asset URL, notes URL = the tag's Release), refuses a bad version/hash/URL/date, a
-  zip named for another version or a leftover placeholder, and writes winget-pkgs' layout
+  Release asset URL, notes and licence URLs at the tag; the date from the version's CHANGELOG
+  heading via `release_notes.releases()`, or today (UTC) with `--url`), refuses a bad
+  version/hash/date, a URL that is not https (plain http only to 127.0.0.1, localhost, ::1)
+  or does not end in the release zip's name, a zip named for another version or a leftover
+  placeholder, warns when the checkout's version differs, and writes winget-pkgs' layout
   `manifests/v/vlastimilbures/PromptMend/X.Y.Z/` (`tests/test_winget_manifest.py`). Nothing
   here submits to microsoft/winget-pkgs: that is a manual step with the owner's go.
 - `relocate.py` — `migrate_folders(environ)` (#169), never on the trigger path

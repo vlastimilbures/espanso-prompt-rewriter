@@ -285,8 +285,9 @@ jobs:
           $zip = Get-ChildItem "$env:GITHUB_WORKSPACE\dist\promptmend-*-windows-x64.zip" | Select-Object -First 1
           $version = $zip.Name.Split('-')[1]
           $port = 8765
-          $server = Start-Process -PassThru -NoNewWindow -FilePath "$env:GITHUB_WORKSPACE\.venv\Scripts\python.exe" -ArgumentList "-m", "http.server", "$port", "--bind", "127.0.0.1", "--directory", "$env:GITHUB_WORKSPACE\dist"
+          $server = $null
           try {
+            $server = Start-Process -PassThru -NoNewWindow -FilePath "$env:GITHUB_WORKSPACE\.venv\Scripts\python.exe" -ArgumentList "-m", "http.server", "$port", "--bind", "127.0.0.1", "--directory", "$env:GITHUB_WORKSPACE\dist"
             $deadline = (Get-Date).AddSeconds(30)
             while (-not (Test-NetConnection 127.0.0.1 -Port $port -InformationLevel Quiet -WarningAction SilentlyContinue)) {
               if ((Get-Date) -gt $deadline) { throw "the local server did not start" }
@@ -299,7 +300,7 @@ jobs:
             winget settings --enable LocalArchiveMalwareScanOverride
             winget install --manifest $manifest --accept-package-agreements --accept-source-agreements --disable-interactivity --ignore-local-archive-malware-scan
           } finally {
-            Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+            if ($server) { Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue }
           }
           $link = "$env:LOCALAPPDATA\Microsoft\WinGet\Links\promptmend.exe"
           if (-not (Test-Path $link)) { throw "winget made no Links alias" }
