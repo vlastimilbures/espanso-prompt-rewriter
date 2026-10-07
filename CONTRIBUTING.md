@@ -490,18 +490,18 @@ self-review lines match the format in `OUTPUTS`. The gaps it left, and their sta
 1. **Published text on flash-lite** (closed 2026-10). The review rule now names its readers
    (only the user, a colleague, their manager or their team take the self-review; everyone
    else, including the CEO and published text, takes the independent review), and says that
-   "quick", "short" and "brief" never decide it. Over 6 runs each, flash-lite gives `faq` and
-   `quick-ceo` the independent review 6/6 (the 0.13.0 prompt: 0/6 and 1/6), and `light`,
-   `teams-jana`, `memo`, `slack`, `sql`, `outliers` and `code` the self-review 6/6.
+   "quick", "short" and "brief" never decide it. Flash-lite now gives `faq` and `quick-ceo` the
+   independent review and the drafts for the user and their team the self-review in every run
+   ([per-draft findings](docs/benchmark.md#per-draft-findings-of-the-2026-10-round)).
 2. **Self-review drafts on gpt-6-luna** (mostly closed). With a fixed fictitious persona,
-   `outliers`, `sql` and `memo` get the self-review in every run. Over 123 calls, gpt-6-luna chose
-   the wrong review branch once (`light`, 1 of 3).
+   `outliers`, `sql` and `memo` get the self-review in every run, and a wrong review branch is
+   rare ([per-draft findings](docs/benchmark.md#per-draft-findings-of-the-2026-10-round)).
 3. **Half-answers in work steps on flash-lite.** For "what's the difference between IFRS 9
    stage 2 and stage 3", flash-lite writes the answer into the steps, sometimes wrongly. Naming
    the aspects to cover is welcome; stating facts is not. Watch it on `question`.
 4. **Injection meta-commentary on flash-lite** (not reproduced). Instead of dropping "ignore
    previous instructions", flash-lite sometimes wrote a CONTEXT about "an instruction that
-   attempts to override my role". With a fixed fictitious persona it did not happen in 9 runs of
+   attempts to override my role". With a fixed fictitious persona it did not happen on
    `injection` and `pasted-injection` (2026-10). Watch it if a persona is set.
 5. **Unscored review branches.** Five drafts are not scored on the review branch: a one-page
    PRD for a fintech feature, `outage` (an incident summary for the user's manager), and since
@@ -510,30 +510,27 @@ self-review lines match the format in `OUTPUTS`. The gaps it left, and their sta
    take the self-review; who reads a PRD is still open. Score them once that is settled.
 6. **Persona bleed** (depends on the persona). With `PROMPT_PERSONA` set, near-empty drafts
    can pick up the persona's domain: "help with the report" became a report on "risk management
-   metrics". It did not reproduce with a neutral persona (`vague` and a near-empty draft, 12
-   gpt-6-luna and 3 flash-lite runs), so it likely depends on the persona's domain. A design
+   metrics". It did not reproduce with a neutral persona (`vague` and a near-empty draft, on
+   both models), so it likely depends on the persona's domain. A design
    trade-off, not a bug; check it with `--persona env` on your own machine.
 7. **Draft delimiting in the CLI.** Sending the draft wrapped in `<draft>…</draft>` gave a
    small, consistently positive but not significant gain once the prompt already said the
    whole message is the draft. If adopted, escape `</draft>` inside drafts.
 8. **Prompt length** (closed 2026-10). The 2026-09 and 2026-10-02 reworks made the system
-   prompt about 40% longer (about 3,900 input tokens per call). Against the shorter prompt, p50
-   latency stayed at 2.1 s on flash-lite and fell from 7.6 s to 6.6 s on gpt-6-luna, and the cost
-   per 1,000 calls rose from $0.96 to $1.13 on flash-lite and from $0.34 to $0.35 on gpt-6-luna.
-   Length does not drive latency; cost rose about 18% on flash-lite and is flat on gpt-6-luna.
+   prompt longer (about 3,900 input tokens per call). Length does not drive latency; cost rose
+   on flash-lite and is flat on gpt-6-luna ([per-draft findings](docs/benchmark.md#per-draft-findings-of-the-2026-10-round)).
 9. **The bench runs `default` on every model** (closed 2026-10). Both tiers now send `default`,
    so a plain `--suite all` run scores what ships; `tests/test_bench.py` checks that the bench's
    profile is the one the CLI uses.
-10. **Pasted material on flash-lite (#42).** The prompt now copies pasted material up to about
-    60 lines in full. gpt-6-luna copies it in every run (`pasted`, `outage`, `pasted-injection`,
-    the 35-line `long-thread` and the 57-line `cap-thread`, 6/6 each). flash-lite copies
-    `outage`, `pasted-injection` (6/6), `long-thread` and `cap-thread` (5/6), but still
-    summarises the short email in `pasted` (5 of 6 runs). It also gives `long-thread` ("summarise
-    this thread for me and draft my reply to Tomasz") the self-review in 6 of 6 runs, and
-    `cap-thread` (a 5-bullet summary for the user's manager) the `.md` line in 6 of 6, where the
-    bench expects a message. The 0.13.0 prompt did the same (`long-thread` 2 of 3, `cap-thread` 3
-    of 3). The `OUTPUTS` rule treats a summary as a document, so the `cap-thread` failure may be
-    the bench's expectation rather than the model's.
+10. **Pasted material on flash-lite (#42)** (partly closed in v0.19.0). The prompt copies pasted
+    material up to about 60 lines in full. gpt-6-luna copies it in every run; since v0.19.0
+    flash-lite also copies the short email in `pasted` and the holdout's `ho-signing`, which the
+    v0.14.0 prompt summarised ([Current](docs/benchmark.md#current-prompt-of-v0190), [per-draft findings](docs/benchmark.md#per-draft-findings-of-the-2026-10-round)). Still open on
+    flash-lite: it gives `long-thread` ("summarise this thread for me and draft my reply to
+    Tomasz") the self-review, and `cap-thread` (a 5-bullet summary for the user's manager) the
+    `.md` line, where the bench expects a message; the 0.13.0 prompt did the same. The `OUTPUTS`
+    rule treats a summary as a document, so the `cap-thread` failure may be the bench's
+    expectation rather than the model's.
 
 ### Next steps for the default prompt
 
@@ -546,17 +543,18 @@ Limits of the 2026-10-02 and 2026-10 evaluations, and what to do next:
    new drafts (outside emails, published text, internal notes, "for me" scripts and plans, a
    pasted email, a Spanish draft); judge the current prompts against the previous release on
    them, on both tiers, before changing anything else.
-2. **Use more runs per draft.** At 3 runs, a single draft flips between 0/3 and 2/3 from noise
-   alone (seen on `big-personal` and `memo`). Re-check any single-draft change at 6 runs or more
-   before acting on it.
+2. **Use more runs per draft.** At 3 runs, a single draft flips from noise alone (seen on
+   `big-personal` and `memo`, [per-draft findings](docs/benchmark.md#per-draft-findings-of-the-2026-10-round)). Re-check any single-draft change at 6
+   runs or more before acting on it.
 3. **Fix gap 1 (published FAQ text on flash-lite).** Done in 2026-10: the review rule names
-   its readers, and `quick-ceo` and `memo` held at 6/6.
-4. **Fix gap 10 on flash-lite.** Find a wording that makes flash-lite copy a short pasted
-   email and give a reply to an outside sender the independent review when the draft also says
-   "for me". Check `pasted`, `long-thread` and `cap-thread` at 6 runs or more, and decide
+   its readers, and `quick-ceo` and `memo` held in every run.
+4. **Fix the rest of gap 10 on flash-lite.** Copying a short pasted email is done in v0.19.0.
+   Find a wording that gives a reply to an outside sender the independent review when the draft
+   also says "for me". Check `pasted`, `long-thread` and `cap-thread` at 6 runs or more, and decide
    whether a summary for the user's manager should get the `.md` line.
 5. **Keep one profile.** The profiles were merged in 2026-10 (gap 9). Before splitting them
    again, show that no single wording serves both models: one prompt per tier doubles the bench
    and review work.
 6. **Watch the prompt length.** The prompt is now about 3,900 input tokens; check latency on the
-   pro tier (p50 5.6 s, p95 9.2 s in the 2026-10-04 bench) after any further additions.
+   pro tier against the newest table in [docs/benchmark.md](docs/benchmark.md#results) after any
+   further additions.

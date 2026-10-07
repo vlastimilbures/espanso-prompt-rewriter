@@ -255,6 +255,19 @@ def test_readme_benchmark_summary_links_the_details() -> None:
     assert f"]({GITHUB}docs/benchmark.md)" in section.group(1)
 
 
+# Benchmark numbers live only in docs/benchmark.md (CONTRIBUTING's "one home" rule): scores,
+# run counts, latencies, costs and percentages in CONTRIBUTING would go stale there unseen.
+_BENCH_FIGURE = re.compile(
+    r"(?<![\w/.-])\d+/\d+(?![\w/.-])|\b\d+ of \d+\b|\b\d+(?:\.\d+)? s\b|\$\d|\b\d+%|\b\d+ calls\b"
+)
+
+
+def test_contributing_holds_no_benchmark_figures() -> None:
+    text = _FENCE.sub("", (REPO / "CONTRIBUTING.md").read_text("utf-8"))
+    found = [m.group(0) for m in _BENCH_FIGURE.finditer(text)]
+    assert found == [], f"move {found} from CONTRIBUTING.md to docs/benchmark.md and link it"
+
+
 _LINK = re.compile(r"!?\[[^\]]*\]\(([^)\s]+)\)")
 
 

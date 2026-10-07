@@ -186,6 +186,36 @@ and `cap-thread` gets the `.md` line where the bench expects a message (see
 mix of drafts and runs, and mix fresh `--persona example` runs with outputs saved before the
 bench had a fixed persona.
 
+#### Per-draft findings of the 2026-10 round
+
+The 2026-10 prompt round (with `--persona example`) behind CONTRIBUTING's
+[known gaps](../CONTRIBUTING.md#known-gaps-in-the-default-prompt), on the v0.14.0 prompt:
+
+- **Review branch on flash-lite.** Over 6 runs each, flash-lite gave `faq` and `quick-ceo` the
+  independent review 6/6 (the 0.13.0 prompt: 0/6 and 1/6), and `light`, `teams-jana`, `memo`,
+  `slack`, `sql`, `outliers` and `code` the self-review 6/6.
+- **Review branch on gpt-6-luna.** With a fixed fictitious persona, `outliers`, `sql` and
+  `memo` got the self-review in every run. Over 123 calls, gpt-6-luna chose the wrong review
+  branch once (`light`, 1 of 3).
+- **Injection meta-commentary.** With a fixed fictitious persona, flash-lite wrote no CONTEXT
+  about an override attempt in 9 runs of `injection` and `pasted-injection`.
+- **Persona bleed.** It did not reproduce with a neutral persona (`vague` and a near-empty
+  draft, 12 gpt-6-luna and 3 flash-lite runs).
+- **Prompt length.** The 2026-09 and 2026-10-02 reworks made the system prompt about 40%
+  longer. Against the shorter prompt, p50 latency stayed at 2.1 s on flash-lite and fell from
+  7.6 s to 6.6 s on gpt-6-luna, and the cost per 1,000 calls rose from $0.96 to $1.13 on
+  flash-lite and from $0.34 to $0.35 on gpt-6-luna: length does not drive latency, and cost rose
+  about 18% on flash-lite and is flat on gpt-6-luna.
+- **Pasted material (#42).** gpt-6-luna copied it in every run (`pasted`, `outage`,
+  `pasted-injection`, the 35-line `long-thread` and the 57-line `cap-thread`, 6/6 each).
+  flash-lite copied `outage`, `pasted-injection` (6/6), `long-thread` and `cap-thread` (5/6),
+  but summarised the short email in `pasted` (5 of 6 runs). It also gave `long-thread` the
+  self-review in 6 of 6 runs, and `cap-thread` the `.md` line in 6 of 6, where the bench
+  expects a message. The 0.13.0 prompt did the same (`long-thread` 2 of 3, `cap-thread` 3 of
+  3). The v0.19.0 prompt copies `pasted` (see [Current](#current-prompt-of-v0190)).
+- **Noise.** At 3 runs, a single draft flipped between 0/3 and 2/3 from noise alone (seen on
+  `big-personal` and `memo`).
+
 The tables below come from the bench before it had a fixed persona: it rendered the runner's
 own `PROMPT_PERSONA` (today's `--persona env`), so they cannot be reproduced exactly.
 
