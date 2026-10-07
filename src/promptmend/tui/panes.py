@@ -429,15 +429,15 @@ def setting_line(row: settings_model.Row, *, cursor: bool) -> Table:
 
 class SettingsList(OptionList):
     """The Settings tab's list. Its keys are bound here, so they act only while it has the
-    focus: never under a dialog, in the filter or on another tab. Its `r` shadows the
-    screen's Reload."""
+    focus: never under a dialog, in the filter or on another tab. Reset is `u` (as `config
+    unset`), so `r` reloads here too (#215)."""
 
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("j", "cursor_down", "Down", show=False),
         Binding("k", "cursor_up", "Up", show=False),
         Binding("space", "switch", "Toggle"),
         Binding("enter", "select", "Edit"),
-        Binding("r", "reset", "Reset"),
+        Binding("u", "reset", "Reset"),
         Binding("slash", "filter", "Filter"),
     ]
 
@@ -1128,6 +1128,9 @@ class TriggersPane(Pane):
                 "written. Press Deploy again to see the new plan"
             )
         outcome = deploy.apply(plan, choices)
+        # The files are written: show them now, not after the restart, which can take a
+        # while (#215). _done() reloads again once Espanso answered.
+        self.app.call_from_thread(self.manage.reload)
         lines = list(outcome.lines)
         if outcome.changed and not deploy.restart_espanso():
             lines.append("Could not restart Espanso; run `espanso restart` yourself.")
@@ -1195,6 +1198,7 @@ class TriggersPane(Pane):
                 "Detach again"
             )
         outcome = deploy.detach(manifest, root, remove_all=remove_all)
+        self.app.call_from_thread(self.manage.reload)  # as in _apply(), before the restart
         lines = list(outcome.lines)
         if outcome.changed and not deploy.restart_espanso():
             lines.append("Could not restart Espanso; run `espanso restart` yourself.")
