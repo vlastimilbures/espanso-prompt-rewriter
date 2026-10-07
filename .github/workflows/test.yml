@@ -312,7 +312,7 @@ jobs:
           if ($report.checks.install.data.channel -ne "winget") { throw "doctor does not see the winget channel" }
           if ($report.checks.install.data.launcher -ne $link) { throw "the launcher is not the Links alias" }
           $PSNativeCommandUseErrorActionPreference = $true
-          winget uninstall --manifest $manifest --disable-interactivity
+          winget uninstall --manifest $manifest --accept-source-agreements --disable-interactivity
           if (Test-Path $link) { throw "the Links alias is still there" }
           $left = Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages" -Filter "vlastimilbures.PromptMend_*" -ErrorAction SilentlyContinue
           if ($left) { throw "winget left $($left.FullName)" }
