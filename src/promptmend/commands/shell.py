@@ -182,11 +182,28 @@ def run_here(argv: Sequence[str]) -> int:
     child = subprocess.Popen(  # noqa: S603 - our own interpreter and module, an argv list
         [sys.executable, "-P", "-m", "promptmend.cli", *argv]
     )
+    interrupted = False
     while True:
         try:
-            return child.wait()
+            code = child.wait()
         except KeyboardInterrupt:
+            interrupted = True
             continue
+        if interrupted:
+            # Ctrl-C at the child's prompt (a hidden key) left the cursor on that line.
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+        return code
+
+
+def load_settings() -> None:
+    """Read the settings in repair mode, as the interface does: that sets the user's
+    PROMPT_EXTRA_PATTERNS, so a word only they match is withheld too. A broken settings file
+    never stops the shell: it says so, and the built-in patterns still apply."""
+    try:
+        common.load_layers()
+    except Exception as exc:
+        common.warn(f"the settings could not be read ({exc}); only the built-in key patterns apply")
 
 
 Runner = Callable[[Sequence[str]], int]
@@ -206,9 +223,12 @@ def repl(
     read: Callable[[], str],
     runner: Runner | None = None,
     echo: Callable[[str], None] = typer.echo,
+    refresh: Callable[[], None] = lambda: None,
 ) -> int:
     """Read lines until exit, quit or Ctrl-D (EOFError), and do what plan() says with each.
-    Ctrl-C at the prompt (KeyboardInterrupt) drops the line. Returns the shell's exit code."""
+    Ctrl-C at the prompt (KeyboardInterrupt) drops the line. After each run, ``refresh``
+    reads the settings again (the command may have changed PROMPT_EXTRA_PATTERNS). Returns
+    the shell's exit code."""
     echo(recipes())
     while True:
         try:
@@ -224,6 +244,7 @@ def repl(
             echo(recipes())
         elif decided.kind == RUN:
             code = (runner or run_here)(decided.argv)
+            refresh()
             if code != 0:
                 echo(f"exit {code}")
         else:
@@ -348,4 +369,5 @@ def shell() -> None:
             "instead (see --help)",
             common.NEEDS_TERMINAL,
         )
-    raise typer.Exit(repl(Editor().read))
+    load_settings()
+    raise typer.Exit(repl(Editor().read, refresh=load_settings))

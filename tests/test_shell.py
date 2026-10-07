@@ -401,3 +401,91 @@ def test_console_and_shell_load_neither_textual_nor_prompt_toolkit() -> None:
     loaded = json.loads(proc.stdout)
     for module in ("textual", "prompt_toolkit"):
         assert not [m for m in loaded if m == module or m.startswith(module + ".")], module
+
+
+# --- The user's PROMPT_EXTRA_PATTERNS -------------------------------------------------------
+
+# A word only the user's pattern flags, no built-in one.
+CUSTOM = "zz-falcon-1234"
+
+
+def test_looks_like_a_key_uses_the_users_patterns(monkeypatch: pytest.MonkeyPatch) -> None:
+    import re
+
+    from promptmend import redaction
+
+    assert not common.looks_like_a_key(CUSTOM)
+    monkeypatch.setattr(redaction, "_user_patterns", (re.compile("zz-falcon"),))
+    assert common.looks_like_a_key(CUSTOM)
+    assert console.holds_a_key(f"config get {CUSTOM}")
+    # Showing PROMPT_EXTRA_PATTERNS itself never hides it behind its own pattern.
+    assert not common.looks_like_a_key("zz-falcon", user_patterns=False)
+
+
+def test_shell_loads_the_users_patterns_and_withholds_their_matches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PROMPT_EXTRA_PATTERNS", "zz-falcon")
+    monkeypatch.setattr(common, "stdin_is_tty", lambda: True)
+    monkeypatch.setattr(common, "stdout_is_tty", lambda: True)
+    fake = FakeRunner()
+    monkeypatch.setattr(shell, "run_here", fake)
+    with create_pipe_input() as pipe:
+        pipe.send_text(f"config get {CUSTOM}\rdoctor\rexit\r")
+        made = shell.Editor(input=pipe, output=DummyOutput())
+        monkeypatch.setattr(shell, "Editor", lambda: made)
+        result = runner.invoke(app, ["shell"])
+    assert result.exit_code == 0, result.output
+    assert fake.calls == [("doctor",)]
+    assert shell.WITHHELD_NOTE in result.output
+    assert CUSTOM not in result.output
+    assert list(made.prompt.history.get_strings()) == ["doctor"]
+
+
+def test_a_broken_config_does_not_stop_the_shell(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(common, "stdin_is_tty", lambda: True)
+    monkeypatch.setattr(common, "stdout_is_tty", lambda: True)
+
+    def broken() -> Any:
+        raise OSError("unreadable")
+
+    monkeypatch.setattr(common, "load_layers", broken)
+    monkeypatch.setattr(shell, "run_here", FakeRunner())
+    with create_pipe_input() as pipe:
+        pipe.send_text("exit\r")
+        made = shell.Editor(input=pipe, output=DummyOutput())
+        monkeypatch.setattr(shell, "Editor", lambda: made)
+        result = runner.invoke(app, ["shell"])
+    assert result.exit_code == 0, result.output
+    assert "unreadable" in result.output
+
+
+def test_patterns_are_read_again_after_each_run() -> None:
+    reloads: list[int] = []
+    shell.repl(
+        _lines("doctor", "stats", "improve", "exit"),
+        runner=FakeRunner(),
+        echo=lambda _: None,
+        refresh=lambda: reloads.append(1),
+    )
+    assert len(reloads) == 2
+
+
+def test_an_interrupted_child_leaves_the_exit_note_on_its_own_line(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(subprocess, "Popen", FakePopen)  # Ctrl-C once, then exit 130
+    assert REAL_RUN_HERE(("doctor",)) == 130
+    assert capsys.readouterr().out == "\n"
+
+
+def test_a_child_that_ends_by_itself_adds_no_line(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    class Quiet(FakePopen):
+        def wait(self) -> int:
+            return 0
+
+    monkeypatch.setattr(subprocess, "Popen", Quiet)
+    assert REAL_RUN_HERE(("doctor",)) == 0
+    assert capsys.readouterr().out == ""

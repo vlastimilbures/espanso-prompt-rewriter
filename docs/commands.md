@@ -109,7 +109,9 @@ use the full-screen interface. It completes and explains commands the way Home's
 - Refused: `improve` and `persona` (the triggers run them, and `improve` reads the
   clipboard; to try a rewrite, use the interface's [Try tab](interface.md#try-tab)) and
   `shell` itself. Their `--help` runs only when the rest of the line parses.
-- A line that looks like it holds a key, `secrets set` with anything after the key's name,
+- A line that looks like it holds a key (the built-in patterns and your
+  `PROMPT_EXTRA_PATTERNS`, read when the shell starts and after each command),
+  `secrets set` with anything after the key's name,
   or `config set|get|unset` with a key's name and a value never runs: Enter replaces it on
   screen with `<value withheld>`. Up and Down go through this session's lines that ran; the
   history stays in memory, never in a file, and keeps no line that was refused or did not

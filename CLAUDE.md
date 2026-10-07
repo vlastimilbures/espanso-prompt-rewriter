@@ -316,6 +316,9 @@ Rules for agents:
   re-checks `runs_here(argv)`, then starts `[sys.executable, "-P", "-m", "promptmend.cli",
   *argv]` with the terminal's stdio (no capture, no timeout, waits through Ctrl-C); `doctor`
   is not forced to `--no-clipboard`. The in-memory history keeps only lines `kept()` allows: those that plan to RUN.
+  `load_settings()` (repair mode, never fatal) runs at start and after each run, so
+  `holds_a_key()` sees `PROMPT_EXTRA_PATTERNS`: `common.looks_like_a_key()` scans with
+  `redaction._user_patterns` (`user_patterns=False` for `common.EXTRA_PATTERNS` itself).
   `repl(read, runner=, echo=)` is the loop tests drive; conftest refuses `run_here`. Started as the `prompt-workflow` alias (`cli._run_as_alias()`:
   `Path(sys.argv[0]).stem`), a management command or `ui` first prints
   `cli.DEPRECATED_ALIAS` on stderr, once; the triggers, `--version` and `--help` never do, and
