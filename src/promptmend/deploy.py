@@ -90,6 +90,8 @@ class CommandFailure:
     def describe(self, argv: Sequence[str]) -> str:
         name, command = argv[0], " ".join(argv)
         if not self.found:
+            if name == "espanso" and WINDOWS_ESPANSO:
+                return f"{name} was not found (PATH, %LOCALAPPDATA%\\Programs\\Espanso, registry)"
             return f"{name} was not found on PATH"
         if self.timed_out:
             return f"`{command}` timed out after {COMMAND_TIMEOUT} s"
@@ -128,7 +130,17 @@ def _error_line(stderr: str) -> str | None:
     return None
 
 
+# On Windows Espanso's output never reaches a pipe and a daemon it starts would share our
+# console and pipes: espanso_windows answers those calls without reading it (#209-#211).
+WINDOWS_ESPANSO = sys.platform == "win32"
+
+
 def run_command(argv: Sequence[str]) -> str | CommandFailure:
+    if WINDOWS_ESPANSO and argv and argv[0] == "espanso":
+        from . import espanso_windows
+
+        answer: str | CommandFailure = espanso_windows.run(argv)
+        return answer
     # Resolved through PATH (and PATHEXT) first: on Windows `espanso` is `espanso.cmd`, which
     # CreateProcess alone never finds, so an installed Espanso looked missing (#115).
     exe = shutil.which(argv[0])

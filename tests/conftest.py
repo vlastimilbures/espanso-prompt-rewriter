@@ -61,6 +61,8 @@ def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError(f"a test ran a real command: {argv}")
 
     monkeypatch.setattr(deploy, "run_command", refuse)
+    # The same answers on every OS: a test of the Windows Espanso path turns it on (#210).
+    monkeypatch.setattr(deploy, "WINDOWS_ESPANSO", False)
     # ...nor start a real promptmend from the interface's command line (#111): Pilot tests
     # pass a fake runner. Loaded only by the tui tests (collected before any test runs), so
     # patched wherever it is loaded; the one --version smoke test calls the function it

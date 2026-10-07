@@ -55,6 +55,16 @@ All notable changes to this project are documented here. The format follows
   does not exist (#222).
 - The deploy diff (`espanso status --diff`, Triggers "Show diff") says `(missing)` instead of
   `(on disk)` for a file that is not there yet (#222).
+- Windows: PromptMend no longer reads Espanso's output, which `espansod.exe` writes to the
+  terminal instead of to PromptMend (#209, #210, #211). The config folder is worked out as
+  Espanso does (a portable `.espanso` folder next to the running `espansod.exe`, else
+  `%APPDATA%\espanso`), so a portable Espanso gets the triggers; "running" is Espanso's
+  named pipe, so `doctor` no longer calls a stopped Espanso running; Espanso is found in the
+  running process, on PATH, in `%LOCALAPPDATA%\Programs\Espanso` or its uninstall entry,
+  so a stale Windows Terminal PATH no longer reports it missing. A restart after a deploy
+  runs Espanso in a hidden console of its own: quitting the interface no longer hangs, and
+  Ctrl+C or closing the terminal no longer stops Espanso. `espanso.cmd` is not used any more,
+  which also saves about half a second per Espanso call.
 
 ### Documentation
 - Troubleshooting: slow start on Windows, with bytecode, an antivirus exclusion or a Dev

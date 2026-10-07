@@ -418,7 +418,7 @@ def _espanso_check(runner: deploy.Runner, espanso_dir: Path | None) -> tuple[Che
         "error": why.error if why else None,
     }
     if why is not None and not why.found:
-        return Check("espanso", WARN, "espanso was not found on PATH", data), target
+        return Check("espanso", WARN, why.describe(deploy.PATH_CONFIG), data), target
     if why is not None:
         where = f" at {why.path}" if why.path else ""
         hint = "" if why.timed_out else "; start Espanso once (`espanso start`) or check its config"
@@ -830,6 +830,7 @@ HEAVY_MODULES = (
     "tomlkit",
     "keyring",
     "promptmend.deploy",
+    "promptmend.espanso_windows",
     "promptmend.commands",
     "promptmend.doctor",
     "promptmend.config_store",
