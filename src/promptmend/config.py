@@ -621,6 +621,9 @@ class Settings:
     # The interface's intro as it opens (tui/intro.py, #112); false skips it, as
     # `ui --no-intro` does. Only `ui` reads it; the triggers never do.
     ui_intro: bool = _env("PROMPT_UI_INTRO", "true", _bool)
+    # Whether doctor and the interface's Home ask PyPI, at most once a day, for a newer
+    # release (update_check.py, #197); false makes no request. The triggers never ask.
+    update_check: bool = _env("PROMPT_UPDATE_CHECK", "true", _bool)
     # Not a setting (no env var, see setting_fields()): the --max-tokens of one call, for the
     # providers without a cap setting (Ollama num_predict, LM Studio max_tokens). None sends
     # them no cap, as before.

@@ -56,6 +56,7 @@ other project cannot change its endpoint or switch off the gate. Only the settin
 | `backups/`, `migration.json` | config folder (written by `config migrate`) | config folder |
 | `history.sqlite3`, `history.lost` | data folder | data folder |
 | `espanso-manifest.json` | data folder | data folder |
+| `update-check.json` | data folder (the [update check](privacy.md#update-check)'s last answer) | data folder |
 
 On Windows `XDG_CONFIG_HOME` and `XDG_DATA_HOME` are ignored. `config.toml` holds plain TOML
 with the same names (`OPENROUTER_MODEL = "…"`, `OLLAMA_THINK = true`) and a `config_version`;
@@ -230,6 +231,7 @@ See [Privacy](privacy.md) for what each one changes.
 | Setting | Default | Purpose |
 |---------|---------|---------|
 | `PROMPT_UI_INTRO` | `true` | `false` skips the [interface](interface.md#intro)'s intro, as `ui --no-intro` does once |
+| `PROMPT_UPDATE_CHECK` | `true` | `doctor` and the interface's Home ask pypi.org, once a day, whether a newer release exists ([privacy](privacy.md#update-check)); `false` makes no request |
 
 ### Files
 

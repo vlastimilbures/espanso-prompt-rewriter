@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from test_tui_snapshots import fixed_state
 
-from promptmend import deploy, doctor
+from promptmend import deploy, doctor, update_check
 from promptmend.config import OUTPUTS, ConfigLayers
 from promptmend.tui import home
 from promptmend.tui.home import READY, HomeRow, headline, home_rows, pill
@@ -57,7 +57,7 @@ def _with_env(state: State, **environ: str) -> State:
 
 def test_ready_install() -> None:
     rows = home_rows(ready())
-    labels = ["Rewrites", "Pro (-ip-)", "Triggers", "History", "Output", "Checks"]
+    labels = ["Version", "Rewrites", "Pro (-ip-)", "Triggers", "History", "Output", "Checks"]
     assert [r.label for r in rows] == labels
     assert {r.status for r in rows} == {doctor.OK}
     assert headline(rows) == (READY, None)
@@ -69,6 +69,48 @@ def test_ready_install() -> None:
     assert found["Triggers"].text == "3 of 3 match files in sync · Espanso running"
     assert found["History"].text == "on · 57 calls recorded"
     assert found["Checks"].text == "14 ok · 0 warn · 0 fail"
+
+
+def _update(state: State, status: str, latest: str | None = "0.22.0") -> State:
+    return dataclasses.replace(state, update=update_check.UpdateStatus(status, latest, "x"))
+
+
+def test_version_row_latest(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(home, "__version__", "0.21.0")
+    row = _rows(_update(ready(), update_check.LATEST, "0.21.0"))["Version"]
+    assert (row.status, row.text, row.detail) == (doctor.OK, "0.21.0 · latest", "")
+
+
+@pytest.mark.parametrize(
+    ("status", "text"),
+    [(update_check.UNKNOWN, "0.21.0"), (update_check.OFF, "0.21.0 · check off")],
+)
+def test_version_row_without_an_answer(
+    monkeypatch: pytest.MonkeyPatch, status: str, text: str
+) -> None:
+    monkeypatch.setattr(home, "__version__", "0.21.0")
+    row = _rows(_update(ready(), status, None))["Version"]
+    assert (row.status, row.text) == (doctor.OK, text)
+
+
+def test_a_newer_release_is_a_note_with_its_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(home, "__version__", "0.21.0")
+    state = _update(ready(), update_check.AVAILABLE)
+    row = _rows(state)["Version"]
+    # The header shows the installed version; About (a) the update command.
+    assert (row.status, row.text, row.detail) == (home.NOTE, "0.22.0 available", home.HOW_TO_UPDATE)
+    # An update is no problem: still ready, and the pill counts only doctor's checks.
+    assert headline(home_rows(state)) == (READY, None)
+    assert pill(state.report) == "ok"
+
+
+def test_a_note_never_outranks_a_problem() -> None:
+    state = _update(fixed_state(), update_check.AVAILABLE)
+    assert headline(home_rows(state)) == (
+        "Almost ready: one match file was edited since the last deploy.",
+        "triggers",
+    )
+    assert home.worst(home.NOTE) == doctor.OK
 
 
 def test_the_snapshot_state_reads_as_mockup_b() -> None:

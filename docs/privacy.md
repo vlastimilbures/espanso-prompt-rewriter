@@ -15,6 +15,7 @@ with work material.
 - [Clipboard safety](#clipboard-safety)
 - [Output clean-up](#output-clean-up)
 - [Usage history](#usage-history)
+- [Update check](#update-check)
 
 ## In short
 
@@ -28,6 +29,8 @@ with work material.
   removed from what is sent and what is pasted.
 - The usage history is metadata only and stays on this device. Your settings files and keys
   never leave it, except a key as the authentication header of its own provider.
+- `doctor` and the interface ask pypi.org once a day whether a newer release exists
+  (`PROMPT_UPDATE_CHECK=false` turns that off).
 
 > [!WARNING]
 > The gate is a heuristic safety net, not a compliance control. It misses things (names,
@@ -333,6 +336,30 @@ output = 15.00
 ```
 
 An estimate is stored with the table's `version` and always shown apart from reported costs.
+
+## Update check
+
+`promptmend doctor` and the [interface](interface.md#home)'s Home tab say whether a newer
+release exists, and so does the `doctor` that `install.ps1` runs at its end. To find out,
+they ask pypi.org for the list of PromptMend releases (`https://pypi.org/pypi/promptmend/json`)
+once a day, and keep the answer (the newest version and when it was asked) in
+`update-check.json` in the [data folder](configuration.md#files-and-folders). When pypi.org
+cannot be reached, that is kept too, and they ask again at most once an hour. A trigger never
+asks.
+
+pypi.org sees what any download from it shows: your IP address and a User-Agent naming
+PromptMend and its version. Nothing else is sent: no setting, key, draft or history. A proxy
+set in `HTTPS_PROXY` is used.
+
+To turn it off:
+
+```bash
+promptmend config set PROMPT_UPDATE_CHECK false
+```
+
+Then nothing asks, and Home shows only the installed version. A value that is not `true`
+or `false`, or a settings file that cannot be read, also makes no request, since it may have
+meant `false`.
 
 ## See also
 

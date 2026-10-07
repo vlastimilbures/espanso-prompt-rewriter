@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .. import assets, deploy, doctor, history, previous_install
+from .. import assets, deploy, doctor, history, previous_install, update_check
 from ..commands import common
 from ..commands.usage import store
 from ..config import ConfigLayers, Settings
@@ -29,6 +29,8 @@ class State:
     # nothing could be looked for.
     previous: previous_install.Detection = field(default_factory=previous_install.Detection)
     previous_error: str | None = None
+    # Whether a newer release exists (#197): Home's Version row and About.
+    update: update_check.UpdateStatus = field(default_factory=update_check.UpdateStatus)
 
 
 def current_plan() -> deploy.Plan:
@@ -41,10 +43,12 @@ def current_plan() -> deploy.Plan:
 
 def gather(group_by: str = "trigger") -> State:
     """Everything the screens show. Read-only: doctor without the clipboard, the deploy plan,
-    the profiles, the usage stats and an earlier checkout install, each failure kept to show
-    instead of raised."""
+    the profiles, the usage stats, an earlier checkout install and the update check (cached
+    for a day, so a reload asks PyPI no more often), each failure kept to show instead of
+    raised."""
     layers, settings = common.load_layers()
-    report = doctor.run(clipboard=False)
+    update = update_check.check_configured()
+    report = doctor.run(clipboard=False, update=update)
     plan: deploy.Plan | None = None
     plan_error = None
     try:
@@ -76,4 +80,5 @@ def gather(group_by: str = "trigger") -> State:
         stats_error=stats_error,
         previous=previous,
         previous_error=previous_error,
+        update=update,
     )

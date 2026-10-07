@@ -1974,6 +1974,26 @@ def test_brand_is_ascii_and_narrow_terminals_get_text_only() -> None:
     assert all(line == line.rstrip() for line in brand.LOGO.splitlines())
 
 
+def test_about_says_whether_a_newer_release_exists(monkeypatch: pytest.MonkeyPatch) -> None:
+    from promptmend import update_check
+    from promptmend.tui import brand
+
+    monkeypatch.setattr(brand, "runtime", lambda: {"python": "3", "textual": "8"})
+
+    def update_line(update: update_check.UpdateStatus | None) -> str:
+        install = {"channel": "uv", "editable": False}
+        return next(f for f in brand.about_facts(install, "0.21.0", update) if "Update:" in f)
+
+    newer = update_check.UpdateStatus(update_check.AVAILABLE, "0.22.0", "x")
+    assert update_line(newer) == f"Update:    0.22.0 available: {update_check._UV}"
+    assert update_line(None).endswith("unknown (pypi.org could not be asked)")
+    assert update_line(update_check.UpdateStatus(update_check.OFF)).endswith(
+        "not checked (PROMPT_UPDATE_CHECK=false)"
+    )
+    latest = update_check.UpdateStatus(update_check.LATEST, "0.21.0", "x")
+    assert update_line(latest).endswith("this is the latest release")
+
+
 # --- Every action shows its command (#111, stage 1) ---------------------------------------
 
 

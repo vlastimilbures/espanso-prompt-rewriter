@@ -204,14 +204,16 @@ text field and wait without typing or switching windows (see [Usage](usage.md)).
 ## Update
 
 Update through the channel you installed with, then check the result with
-`promptmend doctor`.
+`promptmend doctor`. `doctor` and the [interface](interface.md#home)'s About screen give the
+command below for your channel when a newer release exists.
 
 | Channel | Update command |
 |---------|----------------|
-| Homebrew | `brew update`, then `brew upgrade promptmend` |
+| Homebrew | `brew update && brew upgrade promptmend` |
 | One-command install | The same `irm … \| iex` command again, with `PROMPTMEND_VERSION` unset |
 | uv from PyPI | `uv tool install --force promptmend -c <latest constraints URL>` (below) |
 | uv from a Release wheel | The install command with the new version and `--force` |
+| A checkout ([below](#install-from-a-checkout)) | `git pull`, then rerun `./scripts/install_macos.sh` (`.\scripts\install_windows.ps1` on Windows) |
 
 With uv, install the new release over the old one with its own `constraints.txt`; `--force`
 makes uv replace the tool already there (`install.ps1` and the checkout install scripts pass it
@@ -227,7 +229,8 @@ the match files keep working. `uv tool upgrade promptmend` does not move such an
 since uv pins the wheel's URL: run the command again instead.
 
 The tap's formula is updated by hand after each release, so Homebrew can trail the GitHub
-Release by a while.
+Release and PyPI by a while: `doctor` may name a release that `brew upgrade` does not offer
+yet.
 
 Upgrading the CLI does not touch the match files Espanso holds. If `doctor` reports one as
 `stale` (for example `prompts-template.yml: stale`), run `promptmend espanso deploy` to bring
