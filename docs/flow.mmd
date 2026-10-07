@@ -1,0 +1,7 @@
+flowchart LR
+    A["Copy a draft"] --> B["Type -i-"]
+    B --> C["Espanso runs promptmend"]
+    C --> D{"Data-protection gate"}
+    D -- clean --> E["Cloud or local model"]
+    E --> F["Rewrite pasted"]
+    D -- "sensitive content" --> G["[promptmend: …] marker pasted"]

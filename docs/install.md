@@ -236,6 +236,9 @@ Upgrading the CLI does not touch the match files Espanso holds. If `doctor` repo
 `stale` (for example `prompts-template.yml: stale`), run `promptmend espanso deploy` to bring
 it up to date.
 
+On Windows, a deploy is needed after upgrading from 0.20.0 or earlier: those match files ran
+the CLI through PowerShell, which fails on every trigger (#18).
+
 ## Switch channel
 
 To move from one channel to another (say from uv to Homebrew):

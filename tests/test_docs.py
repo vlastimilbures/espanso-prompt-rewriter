@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import importlib.util
 import itertools
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
+from types import ModuleType
 from typing import TYPE_CHECKING
 
 import pytest
@@ -34,6 +37,16 @@ DOC_PAGES = (
 DOCS = ("README.md", *(f"docs/{page}" for page in DOC_PAGES))
 GITHUB = "https://github.com/vlastimilbures/promptmend/blob/main/"
 RAW = "https://raw.githubusercontent.com/vlastimilbures/promptmend/main/"
+
+
+def _load_script(name: str) -> ModuleType:
+    spec = importlib.util.spec_from_file_location(name, REPO / "scripts" / f"{name}.py")
+    assert spec
+    assert spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def _config_rows() -> set[str]:
@@ -276,24 +289,66 @@ def _links(text: str) -> list[str]:
     return _LINK.findall(_FENCE.sub("", text))
 
 
+# The only HTML tags README may use: PyPI's renderer keeps <details>/<summary> and <img>, and
+# shows a <picture>'s <img> fallback.
+_README_TAGS = {"details", "summary", "picture", "source", "img"}
+
+
 # PyPI renders README.md as the project page, where a relative link or image is broken and
-# GitHub-only syntax shows as raw text: every target is absolute, and there is no mermaid,
-# <details> or alert block.
+# GitHub-only syntax shows as raw text: every target is absolute, there is no mermaid or alert
+# block, and only the HTML tags PyPI renders.
 def test_readme_is_pypi_safe() -> None:
     readme = (REPO / "README.md").read_text("utf-8")
     relative = [t for t in _links(readme) if not t.startswith(("https://", "#"))]
     assert relative == [], f"README links must be absolute (PyPI): {relative}"
     assert re.search(r"<img\b[^>]*src=\"(?!https://)", readme) is None
-    for syntax in ("```mermaid", "<details", "> [!"):
+    assert re.search(r"<source\b[^>]*srcset=\"(?!https://)", readme) is None
+    for syntax in ("```mermaid", "> [!"):
         assert syntax not in readme, f"README uses {syntax!r}, which PyPI does not render"
+    tags = set(re.findall(r"</?([a-zA-Z][\w-]*)[\s>/]", _FENCE.sub("", readme)))
+    assert tags <= _README_TAGS, f"README uses HTML tags PyPI may drop: {tags - _README_TAGS}"
 
 
-# README's hero is the interface's logo, from one source.
-def test_readme_logo_is_the_brand_logo() -> None:
-    from promptmend.tui import brand
+if TYPE_CHECKING:
+    import render_diagram
+else:
+    render_diagram = _load_script("render_diagram")
 
+
+# README's flow diagram is rendered from docs/flow.mmd: both SVGs carry the source's current
+# hash, so an edited diagram fails here until scripts/render_diagram.py ran again.
+def test_flow_diagram_svgs_match_the_source() -> None:
+    assert render_diagram.SOURCE == REPO / "docs" / "flow.mmd"
+    assert render_diagram.stale() == [], "docs/flow.mmd changed: run scripts/render_diagram.py"
+    for svg in render_diagram.OUTPUTS.values():
+        text = svg.read_text("utf-8")
+        assert "<foreignObject" not in text, f"{svg.name}: labels must be SVG text (GitHub)"
+
+
+def test_render_diagram_stamp_replaces_an_older_hash() -> None:
+    old, new = "a" * 64, "b" * 64
+    svg = render_diagram.stamp("<svg/>", old)
+    assert render_diagram.stamped_digest(svg) == old
+    assert render_diagram.stamp(svg, new) == f"<!-- flow.mmd sha256:{new} -->\n<svg/>"
+    declared = render_diagram.stamp('<?xml version="1.0"?>\n<svg/>', new)
+    assert declared.splitlines()[1] == f"<!-- flow.mmd sha256:{new} -->"
+    assert render_diagram.stamped_digest("<svg/>") is None
+
+
+# README's <picture> shows the dark SVG under a dark theme and the light one otherwise (PyPI
+# shows the <img>), both by absolute raw URL.
+def test_readme_picture_shows_the_flow_diagram() -> None:
     readme = (REPO / "README.md").read_text("utf-8")
-    assert f"```text\n{brand.LOGO}\n```" in readme
+    picture = re.search(r"<picture>(.*?)</picture>", readme, re.DOTALL)
+    assert picture, "README lost its flow diagram"
+    dark = re.search(r'<source media="\(prefers-color-scheme: dark\)" srcset="([^"]+)"', picture[1])
+    light = re.search(r'<img alt="[^"]+" src="([^"]+)"', picture[1])
+    assert dark
+    assert dark[1] == f"{RAW}docs/flow-dark.svg"
+    assert light
+    assert light[1] == f"{RAW}docs/flow-light.svg"
+    for url in (dark[1], light[1]):
+        assert (REPO / url[len(RAW) :]).is_file(), url
 
 
 def _slug(heading: str) -> str:

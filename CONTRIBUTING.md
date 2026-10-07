@@ -107,8 +107,12 @@ uv run pytest -m live
   fact has one home (the settings tables in `docs/configuration.md`, the exit codes in
   `docs/commands.md`, the benchmark numbers in `docs/benchmark.md`); link to it rather than
   repeat it. README.md is also the PyPI page, so its links and images are absolute and it uses
-  no mermaid, `<details>` or alert blocks. `tests/test_docs.py` checks the commands, options,
-  settings and links.
+  no mermaid or alert blocks, and no HTML but `<details>`/`<summary>` and `<picture>`.
+  `tests/test_docs.py` checks the commands, options, settings and links.
+- **Flow diagram.** README's diagram is drawn from `docs/flow.mmd`. After editing it, run
+  `python3 scripts/render_diagram.py` (needs Node.js; `--browser <path to Chrome>` reuses an
+  installed Chrome) and commit `docs/flow-light.svg` and `docs/flow-dark.svg`;
+  `tests/test_docs.py` fails until both carry the new source's hash.
 - **Releases.** After tagging `vX.Y.Z`, run `uv run python scripts/update_match_history.py` and
   commit any change, so deploy keeps recognising every released match file.
 
@@ -291,6 +295,7 @@ promptmend/
 │   ├── bench_models.py           score models on template fidelity, latency, cost
 │   ├── check_wheel.py            CI: what an installed wheel really contains
 │   ├── brew_formula.py           release: the tap's Homebrew formula from uv.lock
+│   ├── render_diagram.py         docs/flow.mmd to README's light and dark SVGs
 │   └── release_notes.py          release: the version and its CHANGELOG notes
 ├── tests/                        unit tests, no network (fake_http in conftest.py)
 │   ├── test_live.py              opt-in real OpenRouter calls (pytest -m live)
