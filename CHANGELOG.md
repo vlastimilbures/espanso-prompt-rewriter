@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## 0.21.0 - 2026-10-07
+
 ### Added
 - `promptmend shell` (#183): a plain command line for the terminal with the completion and
   live help of the interface's command line (Tab completes, the bar below explains the line).
