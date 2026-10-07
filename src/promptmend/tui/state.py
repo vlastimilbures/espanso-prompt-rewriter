@@ -47,7 +47,7 @@ def gather(group_by: str = "trigger") -> State:
     for a day, so a reload asks PyPI no more often), each failure kept to show instead of
     raised."""
     layers, settings = common.load_layers()
-    update = update_check.check(settings)
+    update = update_check.check_configured()
     report = doctor.run(clipboard=False, update=update)
     plan: deploy.Plan | None = None
     plan_error = None

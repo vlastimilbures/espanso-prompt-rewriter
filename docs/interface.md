@@ -58,10 +58,9 @@ Home says in one line whether you are ready, or names the most urgent problem an
 fixes it. Below, each row has a status word (ok, warn, FAIL) and the tab that fixes it:
 
 - the installed version and whether it is the latest release (`0.21.0 · latest`); a newer
-  one shows as `new` (`0.21.0 · 0.22.0 available`) with its update command, such as
-  `brew upgrade promptmend`. It is no problem: it never changes the headline or the
-  header's status. The About screen (`a`) shows it too, with the full command for uv and
-  `install.ps1`, which are too long for the row. It asks pypi.org at most once a day
+  one shows as `new` (`0.22.0 available  a: how to update`), and the About screen (`a`)
+  gives the update command for your install channel. It is no problem: it never changes the
+  headline or the header's status. It asks pypi.org once a day
   ([privacy](privacy.md#update-check)); `PROMPT_UPDATE_CHECK=false` turns it off;
 - what `-i-` and `-ip-` run;
 - the match files and Espanso;
@@ -144,7 +143,7 @@ models, never a made-up 0.
 |-----|--------|
 | `1`-`7` | Switch tabs |
 | `c` | Open Home's command line |
-| `a` | About: version, whether a newer release exists, install channel, folders and licence |
+| `a` | About: version, whether a newer release exists and the command to update, install channel, folders and licence |
 | `r` | Reload |
 | `t` | Switch to the high-contrast theme |
 | `q` | Quit |

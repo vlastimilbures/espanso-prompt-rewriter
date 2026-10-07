@@ -29,16 +29,6 @@ def _report(state: State, **statuses: str) -> doctor.Report:
     )
 
 
-def _report_data(state: State, **data: dict[str, object]) -> doctor.Report:
-    """The fixed report with some checks' data replaced."""
-    return doctor.Report(
-        tuple(
-            dataclasses.replace(c, data=data[c.id]) if c.id in data else c
-            for c in state.report.checks
-        )
-    )
-
-
 def _plan(state: State, **states: str) -> deploy.Plan:
     assert state.plan is not None
     steps = [
@@ -107,13 +97,8 @@ def test_a_newer_release_is_a_note_with_its_command(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(home, "__version__", "0.21.0")
     state = _update(ready(), update_check.AVAILABLE)
     row = _rows(state)["Version"]
-    assert (row.status, row.text) == (home.NOTE, "0.21.0 · 0.22.0 available")
-    # The snapshot state's install channel is uv, whose long command About shows instead.
-    assert row.detail == "press a for the command"
-    brew = dataclasses.replace(
-        state, report=_report_data(state, install={"channel": "homebrew", "editable": False})
-    )
-    assert _rows(brew)["Version"].detail == "brew upgrade promptmend"
+    # The header shows the installed version; About (a) the update command.
+    assert (row.status, row.text, row.detail) == (home.NOTE, "0.22.0 available", home.HOW_TO_UPDATE)
     # An update is no problem: still ready, and the pill counts only doctor's checks.
     assert headline(home_rows(state)) == (READY, None)
     assert pill(state.report) == "ok"

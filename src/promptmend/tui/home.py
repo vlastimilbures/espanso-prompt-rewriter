@@ -16,8 +16,9 @@ OK, WARN, FAIL = doctor.OK, doctor.WARN, doctor.FAIL
 # A newer release (#197): highlighted, but no problem, so worst() and headline() count it as
 # ok and an update never makes Home "Almost ready".
 NOTE = "note"
-# The longest update command the Version row shows; a longer one is left to About.
-SHORT_COMMAND = 32
+# The Version row's pointer to the update command, which About (`a`) shows in full: every
+# channel's command is too long for the row at 70 columns.
+HOW_TO_UPDATE = "a: how to update"
 _RANK = {OK: 0, WARN: 1, FAIL: 2}
 
 # Tab id -> its label; the digit in each label is its key (app.TABS adds the panes).
@@ -68,16 +69,11 @@ def _checks(state: State) -> dict[str, doctor.Check]:
 
 
 def _version_row(state: State) -> HomeRow:
-    """The installed version and whether a newer release exists, with its update command (a
-    long one, uv's or install.ps1's, would squeeze every row: About shows it instead)."""
+    """The installed version, or the newer release (the header shows the installed one) and
+    where to find its update command."""
     update = state.update
     if update.state == update_check.AVAILABLE:
-        install = _checks(state).get("install")
-        command = doctor.upgrade_hint(install.data if install else {})
-        if len(command) > SHORT_COMMAND:
-            command = "press a for the command"
-        text = f"{__version__} · {update.latest} available"
-        return HomeRow(NOTE, "Version", text, command)
+        return HomeRow(NOTE, "Version", f"{update.latest} available", HOW_TO_UPDATE)
     words = {update_check.LATEST: " · latest", update_check.OFF: " · check off"}
     return HomeRow(OK, "Version", f"{__version__}{words.get(update.state, '')}")
 

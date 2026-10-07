@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+import promptmend
 from promptmend import assets, config, deploy, doctor, update_check
 from promptmend.config import ConfigLayers, Settings
 from promptmend.history import Health
@@ -69,7 +70,9 @@ def test_version_with_a_newer_release(monkeypatch: pytest.MonkeyPatch) -> None:
     update = update_check.UpdateStatus(update_check.AVAILABLE, "0.22.0", "2026-10-07T12:00:00Z")
     check = doctor._version_check(update, _install("homebrew"))
     assert check.status == doctor.INFO
-    assert check.message == "promptmend 0.21.0, 0.22.0 available: brew upgrade promptmend"
+    assert check.message == (
+        "promptmend 0.21.0, 0.22.0 available: brew update && brew upgrade promptmend"
+    )
     assert {k: check.data[k] for k in ("latest", "update_available", "checked_at")} == {
         "latest": "0.22.0",
         "update_available": True,
@@ -78,7 +81,7 @@ def test_version_with_a_newer_release(monkeypatch: pytest.MonkeyPatch) -> None:
     assert set(check.data) == set(doctor.DATA_KEYS["version"])
     # A checkout's own update wins over its uv launcher.
     editable = doctor._version_check(update, _install("uv", editable=True))
-    assert editable.message.endswith("available: git pull")
+    assert editable.message.endswith(f"available: {update_check.upgrade_command('editable')}")
     assert doctor._version_check(update, None).message.endswith("see docs/install.md")
 
 
@@ -100,11 +103,11 @@ def test_run_checks_for_an_update_unless_given_one(
 ) -> None:
     asked: list[bool] = []
 
-    def fake_check(cfg: Settings) -> update_check.UpdateStatus:
-        asked.append(cfg.update_check)
+    def fake_check(on: bool, now: object) -> update_check.UpdateStatus:
+        asked.append(on)
         return update_check.UpdateStatus(update_check.AVAILABLE, "99.0.0", "now")
 
-    monkeypatch.setattr(update_check, "check", fake_check)
+    monkeypatch.setattr(update_check, "_check", fake_check)
     report = doctor.run(espanso_dir=espanso, launcher=LAUNCHER, runner=_runner())
     version = _status("version", report)
     assert asked == [True]
@@ -117,20 +120,26 @@ def test_run_checks_for_an_update_unless_given_one(
     assert _status("version", report).data["latest"] == "1.0.0"
 
 
-def test_run_checks_with_the_default_when_the_setting_is_bad(
+def test_run_asks_nothing_when_the_setting_is_bad(
     espanso: Path, no_clipboard: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Fail closed: a rejected PROMPT_UPDATE_CHECK may have meant off, so nothing is asked,
+    although repair mode falls back to the default (on) for the rest of the report."""
     monkeypatch.setenv("PROMPT_UPDATE_CHECK", "maybe")
     asked: list[bool] = []
 
-    def fake_check(cfg: Settings) -> update_check.UpdateStatus:
-        asked.append(cfg.update_check)
-        return update_check.UpdateStatus()
+    def fake_fetch() -> str:
+        asked.append(True)
+        return "99.0.0"
 
-    monkeypatch.setattr(update_check, "check", fake_check)
+    monkeypatch.setattr(update_check, "_fetch", fake_fetch)
     report = doctor.run(espanso_dir=espanso, launcher=LAUNCHER, runner=_runner())
-    assert asked == [True]
-    assert _status("version", report).data["update_available"] is None
+    assert asked == []
+    version = _status("version", report)
+    assert (version.message, version.data["update_available"]) == (
+        f"promptmend {promptmend.__version__}",
+        None,
+    )
 
 
 # --- config and keys ----------------------------------------------------------------------

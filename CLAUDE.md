@@ -377,8 +377,8 @@ Rules for agents:
   Home (Mockup B, #112) is `tui/home.py`'s pure `home_rows(state)` (no reads of its own, no
   Textual; `tests/test_tui_home.py`): first `Version` (#197, from `State.update`, which
   `gather()` checks once and hands to `doctor.run(update=)`; a newer release is status
-  `NOTE`, word `new`, detail the update command up to `SHORT_COMMAND` chars, else a pointer
-  to About; `worst()`/`headline()` count it as ok and `pill()` never sees it; the
+  `NOTE`, word `new`, text `<latest> available`, detail `HOW_TO_UPDATE` (About has the
+  command); `worst()`/`headline()` count it as ok and `pill()` never sees it; the
   snapshots pin it to `latest`), then rows for `-i-`, `-ip-`, the match files/Espanso, the
   history, `Output` (`PROMPT_OUTPUT`, #134: paste or clipboard), and
   the doctor counts; each a status word plus the tab that fixes it, and `headline()` names the
@@ -507,13 +507,20 @@ Rules for agents:
   `legacy`, `conflicts`.
 - `update_check.py` — whether a newer release exists (#197), for `doctor` and the
   interface only (FORBIDDEN in `tests/test_trigger_contract.py`). `check(cfg)` never raises:
-  `PROMPT_UPDATE_CHECK=false` is `off` (no request, no file read); else
-  `user_data_dir()/update-check.json` (`checked_at`, `latest`) younger than 24 h is reused (a
-  future or damaged one counts as expired), otherwise one `httpx.Client(timeout=3)` GET of
-  `https://pypi.org/pypi/promptmend/json` (env proxies honoured), newest plain `X.Y.Z` release
-  not all yanked, compared as int tuples (an install newer than PyPI is `latest`), cached with
-  `write_atomic()`; any error is `unknown`. `upgrade_command(channel)` gives docs/install.md's
-  command per channel; `doctor.upgrade_hint()` prefers `editable` (git pull). doctor's
+  `PROMPT_UPDATE_CHECK=false` is `off` (no request, no file read); else the answer in memory
+  (`_last`, so a failed cache write never refetches) or `user_data_dir()/update-check.json`
+  (`checked_at`, `latest`) is reused while younger than 24 h, or 1 h (`RETRY_AFTER`) for a
+  failure (`"latest": null`); a future, naive or damaged one counts as expired. Otherwise one
+  GET of `https://pypi.org/pypi/promptmend/json` (`httpx.Timeout(3)` per phase, the whole call
+  bounded to `TIMEOUT` by a daemon thread in `_within()`; env proxies honoured): newest plain
+  `X.Y.Z` release not all yanked (`info.version` when `releases` is not a map), compared as
+  int tuples (an installed pre/dev release is older than its final, a dev build newer than
+  PyPI is `latest`), cached with `write_atomic()`, success or failure. `check_configured()`
+  (doctor and `gather()`) resolves only `PROMPT_UPDATE_CHECK` strictly and fails closed
+  (`unknown`, no request) on its rejected value or an unreadable settings file.
+  `upgrade_command(channel)` gives docs/install.md's command per channel (`script`, a plain
+  console script, has none); `doctor.upgrade_hint()` prefers `editable` (git pull, then the
+  platform's install script). doctor's
   `version` check (built after `install`, report order unchanged) stays INFO and adds
   `latest`, `update_available`, `checked_at`. `tests/conftest.py` stubs `_fetch` in every
   test; `tests/test_update_check.py` puts the real one back (`REAL_FETCH`) under `fake_http`.

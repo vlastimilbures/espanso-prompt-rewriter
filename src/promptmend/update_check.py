@@ -2,7 +2,8 @@
 trigger (tests/test_trigger_contract.py).
 
 One GET of PyPI's JSON for promptmend, at most once a day: the answer is cached in
-user_data_dir()/update-check.json. PROMPT_UPDATE_CHECK=false makes no request and reads no
+user_data_dir()/update-check.json. A failed request is cached too, as ``"latest": null``, and
+asked again only after RETRY_AFTER. PROMPT_UPDATE_CHECK=false makes no request and reads no
 file. Every failure (network, a bad reply, a damaged cache) is ``unknown``; nothing raises.
 """
 
@@ -10,6 +11,8 @@ from __future__ import annotations
 
 import json
 import re
+import sys
+import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -18,28 +21,38 @@ from typing import Any
 from . import __version__, config, config_files
 
 URL = "https://pypi.org/pypi/promptmend/json"
+SETTING = "PROMPT_UPDATE_CHECK"
+# The whole request, connect to last byte; httpx's own timeout is per phase.
 TIMEOUT = 3.0
 MAX_AGE = timedelta(hours=24)
+# A failed request is not repeated sooner than this.
+RETRY_AFTER = timedelta(hours=1)
 CACHE_FILE = "update-check.json"
 LATEST, AVAILABLE, UNKNOWN, OFF = "latest", "available", "unknown", "off"
 # A final release only: X.Y.Z, no pre, dev, rc, post or local suffix.
 _RELEASE = re.compile(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)")
-_INSTALL_PS1 = (
-    'powershell -ExecutionPolicy ByPass -c "irm https://github.com/vlastimilbures/promptmend/'
-    'releases/latest/download/install.ps1 | iex"'
-)
+# What makes an installed X.Y.Z older than the final X.Y.Z (PEP 440 pre and dev releases).
+_PRE = re.compile(r"[-_.]?(a|b|c|rc|alpha|beta|pre|preview|dev)", re.IGNORECASE)
 _UV = (
     "uv tool install --force promptmend -c "
     "https://github.com/vlastimilbures/promptmend/releases/latest/download/constraints.txt"
 )
 # Install channel (doctor's install check) -> the command that updates it (docs/install.md,
 # "Update"). uv's own `uv tool upgrade` keeps the old constraints and a Release wheel's URL.
+# The `script` channel is any other console script (pipx, pip, a venv): no one command.
 UPGRADE_COMMANDS = {
     "uv": _UV,
-    "homebrew": "brew upgrade promptmend",
-    "script": _INSTALL_PS1,
-    "editable": "git pull",
+    "homebrew": "brew update && brew upgrade promptmend",
 }
+# A checkout (CONTRIBUTING.md, "Set up"): its install script syncs the tool with uv.lock.
+_CHECKOUT = {
+    "darwin": "git pull, then ./scripts/install_macos.sh",
+    "win32": r"git pull, then .\scripts\install_windows.ps1",
+}
+_CHECKOUT_ELSE = "git pull, then reinstall as CONTRIBUTING.md says"
+# The last answer this process got (latest, checked_at), so a cache that cannot be written
+# never makes a reload ask again.
+_last: tuple[str | None, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -52,23 +65,29 @@ class UpdateStatus:
     checked_at: str | None = None
 
 
-def upgrade_command(channel: str) -> str:
+def upgrade_command(channel: str, platform: str = sys.platform) -> str:
     """How to update an install of ``channel`` (doctor's install check)."""
+    if channel == "editable":
+        return _CHECKOUT.get(platform, _CHECKOUT_ELSE)
     return UPGRADE_COMMANDS.get(channel, "see docs/install.md")
 
 
-def _release(text: str) -> tuple[int, int, int] | None:
-    match = _RELEASE.fullmatch(text)
+def _release(text: object) -> tuple[int, int, int] | None:
+    match = _RELEASE.fullmatch(text) if isinstance(text, str) else None
     if match is None:
         return None
     major, minor, patch = (int(part) for part in match.groups())
     return major, minor, patch
 
 
-def _installed() -> tuple[int, ...] | None:
-    """The running version as numbers: its leading X.Y.Z (a dev build's suffix dropped)."""
-    match = re.match(r"(\d+)\.(\d+)\.(\d+)", __version__)
-    return tuple(int(part) for part in match.groups()) if match else None
+def _installed() -> tuple[int, int, int, int] | None:
+    """The running version as numbers: its leading X.Y.Z, then 0 for a pre or dev release
+    (older than the final X.Y.Z) and 1 otherwise (a post release or a local build)."""
+    match = re.match(r"(\d+)\.(\d+)\.(\d+)(.*)", __version__)
+    if match is None:
+        return None
+    major, minor, patch = (int(part) for part in match.groups()[:3])
+    return major, minor, patch, 0 if _PRE.match(match.group(4)) else 1
 
 
 def newest(releases: Any) -> str | None:
@@ -90,61 +109,128 @@ def _fetch() -> str:
     import httpx
 
     headers = {"User-Agent": f"promptmend/{__version__}"}
-    with httpx.Client(timeout=TIMEOUT) as client:
+    # Per phase (connect, read, ...); _within() bounds the whole call.
+    with httpx.Client(timeout=httpx.Timeout(TIMEOUT)) as client:
         response = client.get(URL, headers=headers)
     response.raise_for_status()
-    latest = newest(response.json()["releases"])
+    data = response.json()
+    releases = data.get("releases")
+    if isinstance(releases, dict):
+        latest = newest(releases)
+    else:  # an answer without the release list: the project's current version
+        version = data["info"]["version"]
+        latest = version if _release(version) else None
     if latest is None:
         raise ValueError("no release listed")
     return latest
+
+
+def _within(seconds: float) -> str:
+    """_fetch() in a daemon thread, given up after ``seconds``: a slow server can never hold
+    doctor or the interface longer, whatever httpx's per-phase timeouts allow."""
+    outcome: list[str | BaseException] = []
+
+    def run() -> None:
+        try:
+            outcome.append(_fetch())
+        except BaseException as exc:
+            outcome.append(exc)
+
+    worker = threading.Thread(target=run, name="promptmend-update-check", daemon=True)
+    worker.start()
+    worker.join(seconds)
+    if not outcome:
+        raise TimeoutError("pypi.org did not answer in time")
+    if isinstance(outcome[0], BaseException):
+        raise outcome[0]
+    return outcome[0]
 
 
 def cache_path() -> Path:
     return config.user_data_dir() / CACHE_FILE
 
 
-def _cached(now: datetime) -> tuple[str, str] | None:
-    """The cached (latest, checked_at) while younger than MAX_AGE. A damaged file or a time in
-    the future (a clock set back) counts as expired."""
+def _fresh(latest: object, checked_at: object, now: datetime) -> bool:
+    """Whether a cached answer still holds: a release for MAX_AGE, a failure (None) for
+    RETRY_AFTER. A bad value or a time in the future (a clock set back) does not."""
+    if latest is not None and _release(latest) is None:
+        return False
+    if not isinstance(checked_at, str):
+        return False
+    try:
+        when = datetime.fromisoformat(checked_at)
+        age = now - when
+    except (ValueError, TypeError):  # not a time, or one without a time zone
+        return False
+    return timedelta(0) <= age < (MAX_AGE if latest is not None else RETRY_AFTER)
+
+
+def _cached(now: datetime) -> tuple[str | None, str] | None:
+    """The answer this process or the cache file holds while it is fresh."""
+    if _last is not None and _fresh(*_last, now):
+        return _last
     try:
         data = json.loads(cache_path().read_text("utf-8"))
         latest, checked_at = data["latest"], data["checked_at"]
-        when = datetime.fromisoformat(checked_at)
-        if not isinstance(latest, str) or _release(latest) is None or when.tzinfo is None:
-            return None
     except (OSError, ValueError, TypeError, KeyError):
         return None
-    if not timedelta(0) <= now - when < MAX_AGE:
-        return None
-    return latest, checked_at
+    return (latest, checked_at) if _fresh(latest, checked_at, now) else None
 
 
-def _status(latest: str, checked_at: str) -> UpdateStatus:
+def _remember(latest: str | None, checked_at: str) -> None:
+    global _last
+    _last = (latest, checked_at)
+    try:
+        body = json.dumps({"checked_at": checked_at, "latest": latest}) + "\n"
+        config_files.write_atomic(cache_path(), body.encode("utf-8"), private=False)
+    except Exception:  # noqa: S110 - _last keeps this process from asking again
+        pass
+
+
+def _status(latest: str | None, checked_at: str) -> UpdateStatus:
     installed = _installed()
     number = _release(latest)
-    if installed is None or number is None:
-        return UpdateStatus(UNKNOWN, latest, checked_at)
-    # An install newer than PyPI (an editable dev build) is up to date.
-    state = AVAILABLE if number > installed else LATEST
+    if latest is None or installed is None or number is None:
+        return UpdateStatus(UNKNOWN, None, checked_at)
+    # An install newer than PyPI (an editable dev build) is up to date; a pre-release of
+    # the listed version is not.
+    state = AVAILABLE if (*number, 1) > installed else LATEST
     return UpdateStatus(state, latest, checked_at)
 
 
 def check(cfg: config.Settings, now: datetime | None = None) -> UpdateStatus:
     """Whether a newer release exists; never raises. Off: no request and no file read."""
-    if not cfg.update_check:
+    return _check(cfg.update_check, now)
+
+
+def _check(on: bool, now: datetime | None) -> UpdateStatus:
+    if not on:
         return UpdateStatus(OFF)
     try:
         now = now or datetime.now(UTC)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=UTC)
         cached = _cached(now)
         if cached is not None:
             return _status(*cached)
-        latest = _fetch()
         checked_at = now.isoformat(timespec="seconds")
         try:
-            body = json.dumps({"checked_at": checked_at, "latest": latest}) + "\n"
-            config_files.write_atomic(cache_path(), body.encode("utf-8"), private=False)
-        except Exception:  # noqa: S110 - a cache that cannot be written only asks again
-            pass
+            latest: str | None = _within(TIMEOUT)
+        except Exception:
+            latest = None
+        _remember(latest, checked_at)
         return _status(latest, checked_at)
     except Exception:
         return UpdateStatus(UNKNOWN)
+
+
+def check_configured(now: datetime | None = None) -> UpdateStatus:
+    """check() for the saved settings, failing closed: when PROMPT_UPDATE_CHECK itself was
+    rejected, or a settings file that could change it cannot be read, nothing is asked
+    (unknown), since the user may have turned it off there. Never raises."""
+    try:
+        layers = config.ConfigLayers.resolve(only=SETTING)
+        on = config._bool(layers.entries[SETTING].value)
+    except Exception:
+        return UpdateStatus(UNKNOWN)
+    return _check(on, now)

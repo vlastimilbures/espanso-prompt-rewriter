@@ -86,6 +86,8 @@ def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         raise httpx.ConnectError("tests never reach pypi.org")
 
     monkeypatch.setattr(update_check, "_fetch", no_pypi)
+    # ...and starts without the previous test's answer kept in memory.
+    monkeypatch.setattr(update_check, "_last", None)
     # The user patterns safe_repr() hides are set by every settings load: start each test
     # without the previous test's.
     from promptmend import redaction

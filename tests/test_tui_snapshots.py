@@ -13,6 +13,7 @@ so its Pilot tests (tests/test_tui.py) cover it instead.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import os
 import sys
 from collections.abc import Callable
@@ -327,3 +328,21 @@ def test_snapshot_intro(name: str, size: tuple[int, int]) -> None:
 
 def test_snapshot_about() -> None:
     _check("about", _shoot("a"))
+
+
+# A newer release (#197): Home's Version row as `new`, at 80 and 70 columns, and About with
+# the update command for the snapshot's install channel (uv).
+def available_state(group_by: str = "trigger") -> State:
+    newer = update_check.UpdateStatus(update_check.AVAILABLE, "0.21.0", UPDATE.checked_at)
+    return dataclasses.replace(fixed_state(group_by), update=newer)
+
+
+@pytest.mark.parametrize(
+    ("name", "size"), [("home-available", (80, 24)), ("home-available-70", (70, 24))]
+)
+def test_snapshot_home_update_available(name: str, size: tuple[int, int]) -> None:
+    _check(name, _shoot("1", loader=available_state, size=size))
+
+
+def test_snapshot_about_update_available() -> None:
+    _check("about-available", _shoot("a", loader=available_state))

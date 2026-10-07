@@ -609,7 +609,7 @@ def run(
     layers = ConfigLayers.resolve(strict=False)
     settings = layers.settings()
     if update is None:
-        update = update_check.check(settings)
+        update = update_check.check_configured()
     try:
         ConfigLayers.resolve().settings()
         strict_error = None
