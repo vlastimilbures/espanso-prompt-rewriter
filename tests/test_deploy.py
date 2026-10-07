@@ -84,10 +84,17 @@ def test_assets_are_the_repo_match_files() -> None:
 
 
 # The launcher is a double-quoted YAML string that Espanso runs with no shell (#18): refused
-# are what YAML would read as an escape or the string's end, control characters, and the
-# %HOME%, %CONFIG% and %PACKAGES% Espanso replaces in every script arg.
-_REFUSED = ['"', "\\", "\n", "\t", "\x7f", "\x85", "%HOME%", "%CONFIG%", "%PACKAGES%"]
-_REFUSED_IDS = ["quote", "bslash", "lf", "tab", "del", "nel", "home", "config", "packages"]
+# are what YAML would read as an escape or the string's end, characters YAML cannot hold,
+# `{{` (Espanso fills {{name}} from its variables in every script param), and the %HOME%,
+# %CONFIG% and %PACKAGES% Espanso replaces in every script arg.
+_REFUSED = [
+    *['"', "\\", "\n", "\t", "\x7f", "\x85", "\udc80", "\uffff", "{{x}}"],
+    *["%HOME%", "%CONFIG%", "%PACKAGES%"],
+]
+_REFUSED_IDS = [
+    *["quote", "bslash", "lf", "tab", "del", "nel", "surr", "ffff", "var"],
+    *["home", "config", "packages"],
+]
 
 
 @pytest.mark.parametrize("bad", _REFUSED, ids=_REFUSED_IDS)
@@ -106,11 +113,12 @@ def test_launcher_guard_windows(bad: str) -> None:
 
 
 # No shell runs the launcher any more, so what only sh or cmd.exe would interpret is allowed.
-_SHELL_ONLY = ["$", "`", "%", "^", "&", "|", "<", ">", "'", " ", "#", ",", "]", "%HOM"]
+_SHELL_ONLY = ["$", "`", "%", "^", "&", "|", "<", ">", "'", " ", "#", ",", "]", "%HOM", "{x}"]
 _ALLOWED = ["dollar", "tick", "pct", "caret", "amp", "pipe", "lt", "gt", "apos", "sp", "hash"]
+_ALLOWED += ["comma", "bracket", "partial", "brace"]
 
 
-@pytest.mark.parametrize("char", _SHELL_ONLY, ids=[*_ALLOWED, "comma", "bracket", "partial"])
+@pytest.mark.parametrize("char", _SHELL_ONLY, ids=_ALLOWED)
 @pytest.mark.parametrize("windows", [False, True], ids=["posix", "win"])
 def test_launcher_shell_characters_are_allowed(char: str, windows: bool) -> None:
     path = rf"C:\a{char}b\promptmend.exe" if windows else f"/opt/a{char}b/promptmend"

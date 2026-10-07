@@ -328,6 +328,10 @@ def test_every_cli_trigger_has_a_script_var() -> None:
 # as an argument instead of the clipboard, every provider pointed at the local stub, the usage
 # history on), exit 0, print the stub's reply on stdout and nothing on stderr. On
 # windows-latest this exercises the real CreateProcess path.
+# Every warning shown, as a user's PYTHONWARNINGS or a dev build might: none may reach stderr.
+_LOUD = {"PYTHONWARNINGS": "always", "PYTHONDEVMODE": "1"}
+
+
 @pytest.mark.parametrize("trigger", sorted(SCRIPT_VARS))
 def test_trigger_args_run_as_a_process(trigger: str) -> None:
     args = list(SCRIPT_VARS[trigger])
@@ -338,7 +342,7 @@ def test_trigger_args_run_as_a_process(trigger: str) -> None:
         source = args.index("--source")
         args[source : source + 2] = ["--source", "argument", "--text", "draft"]
     with smoke.stub_server() as stub:
-        env = {**smoke.stub_env(stub.port, os.environ), "PROMPT_HISTORY": "true"}
+        env = {**smoke.stub_env(stub.port, os.environ), "PROMPT_HISTORY": "true", **_LOUD}
         proc = subprocess.run(
             [*_launcher(), *args[1:]], env=env, capture_output=True, timeout=60, check=False
         )

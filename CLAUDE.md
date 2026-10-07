@@ -293,8 +293,9 @@ Rules for agents:
   `<prefix>/bin` or `opt`, Scoop shim, else a running console script outside any versioned,
   `Cellar` or `.venv` dir); `launcher_text()` guards the path, which sits in a
   double-quoted YAML string that Espanso runs with no shell (Windows converts `\` to `/`
-  first): it refuses a quote, a backslash, a control character and Espanso's `%HOME%`,
-  `%CONFIG%`, `%PACKAGES%` (replaced in every script arg); shell characters (`$`, backtick,
+  first): it refuses a quote, a backslash, a character YAML cannot hold, `{{` (Espanso fills
+  its variables into every script param) and Espanso's `%HOME%`, `%CONFIG%`, `%PACKAGES%`
+  (replaced in every script arg); shell characters (`$`, backtick,
   `% ^ & | < >`) are allowed since #18. Every external command
   (`espanso path config`, `espanso restart`/`start`, `uv tool dir`, `brew --prefix`) goes
   through `run_command`, which `tests/conftest.py` replaces with a refusal.

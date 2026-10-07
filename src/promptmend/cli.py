@@ -26,6 +26,7 @@ from .config import (
     Settings,
     openrouter_only,
 )
+from .entry import TRIGGER_COMMANDS
 from .factory import PROVIDER_NAMES, make_provider
 from .gate import GateBlocked, GatedProvider
 from .prompt_builder import (
@@ -111,9 +112,9 @@ PROGRAM = "promptmend"
 LEGACY_PROGRAM = "prompt-workflow"
 DEPRECATED_ALIAS = "`prompt-workflow` is deprecated; use `promptmend` (removed in 1.0.0)"
 
-# The commands Espanso runs: they never move a folder (config.folder_in_use() keeps them on the
-# legacy one until a management command has moved it).
-_TRIGGER_COMMANDS = frozenset({"improve", "persona"})
+# The commands Espanso runs (entry.py keeps their stderr empty): they never move a folder
+# (config.folder_in_use() keeps them on the legacy one until a management command has moved it).
+_TRIGGER_COMMANDS = TRIGGER_COMMANDS
 
 
 def _management_command(group: _LazyGroup, ctx: Context) -> bool:
@@ -735,5 +736,5 @@ if __name__ == "__main__":
     # script's entry.main() silences a trigger's warnings before this module's imports.
     from .entry import quiet_trigger
 
-    quiet_trigger(sys.argv[1:])
+    quiet_trigger(sys.argv[1:])  # late here: this module's imports have already run
     app()

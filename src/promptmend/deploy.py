@@ -55,10 +55,14 @@ CHOICES = (KEEP, OURS, SIDE)
 
 # The launcher is the first item of a script var's args (#18), a double-quoted YAML string
 # that Espanso hands to the OS as the program, with no shell. Refuse what YAML would read as
-# an escape or the string's end (a quote, a backslash), any control character, and Espanso's
-# own %HOME%, %CONFIG% and %PACKAGES%, which it replaces in every arg, rather than try to
-# escape them. On Windows the path is checked after its backslashes become slashes.
-_UNSAFE = re.compile(r'["\\\x00-\x1f\x7f-\x9f]|%(?:HOME|CONFIG|PACKAGES)%')
+# an escape or the string's end (a quote, a backslash), any character YAML cannot hold
+# (control characters, lone surrogates, U+FFFE/U+FFFF), `{{`, which Espanso fills from its
+# variables in every script param, and its own %HOME%, %CONFIG% and %PACKAGES%, which it
+# replaces in every arg, rather than try to escape them. On Windows the path is checked
+# after its backslashes become slashes.
+_UNSAFE = re.compile(
+    r'["\\\x00-\x1f\x7f-\x9f\ud800-\udfff\ufffe\uffff]|\{\{|%(?:HOME|CONFIG|PACKAGES)%'
+)
 # The launcher as the match files hold it: the first script arg, `args: ["<path>", ...`
 # (since #18), or the quoted path in a shell cmd line as every earlier release wrote it,
 # `cmd: "\"<path>\" improve`.
@@ -211,8 +215,8 @@ def launcher_text(path: Path | str, *, windows: bool = os.name == "nt") -> str:
         text = text.replace("\\", "/")
     if _UNSAFE.search(text):
         raise DeployError(
-            "The CLI path contains a quote, a backslash, a control character or one of "
-            f"Espanso's %HOME%, %CONFIG% or %PACKAGES%: {path}"
+            "The CLI path contains a quote, a backslash, a control character, `{{` or one "
+            f"of Espanso's %HOME%, %CONFIG% or %PACKAGES%: {path}"
         )
     return text
 

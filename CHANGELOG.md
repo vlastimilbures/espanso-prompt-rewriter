@@ -21,7 +21,8 @@ All notable changes to this project are documented here. The format follows
   commands now start through `promptmend.entry:main`.
 - `promptmend espanso deploy` no longer refuses a CLI path holding `$`, a backtick or (on
   Windows) `% ^ & | < >`, which no shell reads any more. It still refuses a quote, a
-  backslash, a control character and Espanso's own `%HOME%`, `%CONFIG%` and `%PACKAGES%`.
+  backslash, a control character, and what Espanso itself would replace in the path: `{{`
+  (its variables) and `%HOME%`, `%CONFIG%` and `%PACKAGES%`.
 
 ### Documentation
 - The Homebrew install adds `brew tap` and `brew trust --formula`: recent Homebrew refuses
