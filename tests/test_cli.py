@@ -1223,6 +1223,38 @@ def test_entry_quiets_only_trigger_calls(
     assert bool(discarded) is quiet
 
 
+# `--version` is answered before the CLI loads (#223), with the line Typer's eager option
+# prints; with anything after it, the CLI parses the line as before.
+def test_entry_answers_version_itself(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from promptmend import entry, installed_version
+
+    monkeypatch.setattr(sys, "argv", ["promptmend", "--version"])
+    monkeypatch.setattr(entry, "quiet_trigger", lambda argv: pytest.fail("reached the CLI"))
+    entry.main()
+    assert capsys.readouterr().out == f"{installed_version()}\n"
+    assert runner.invoke(app, ["--version"]).stdout == f"{installed_version()}\n"
+
+
+# The version is read once, on first use; a source tree that was never installed has none.
+def test_installed_version(monkeypatch: pytest.MonkeyPatch) -> None:
+    import importlib.metadata
+
+    import promptmend
+
+    def missing(name: str) -> str:
+        raise importlib.metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(promptmend, "_version", None)
+    monkeypatch.setattr(importlib.metadata, "version", missing)
+    assert promptmend.__version__ == "0+unknown"
+    monkeypatch.setattr(importlib.metadata, "version", lambda name: pytest.fail("read twice"))
+    assert promptmend.installed_version() == "0+unknown"
+    with pytest.raises(AttributeError, match="no attribute 'nothing'"):
+        _ = promptmend.nothing
+
+
 @pytest.mark.parametrize("command", ["improve", "persona"])
 def test_entry_keeps_stderr_empty_on_a_warning(
     monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], command: str

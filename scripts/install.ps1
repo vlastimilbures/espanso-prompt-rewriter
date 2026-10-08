@@ -120,7 +120,8 @@ function Invoke-PromptMendInstall {
         $Spec = "$Download/promptmend-$Version-py3-none-any.whl"
         $Constraints = "$Download/constraints.txt"
     }
-    $InstallArgs = @('tool', 'install', '--force', $Spec, '-c', $Constraints)
+    # Bytecode compiled now, where a wait is expected, not on the first run (#216).
+    $InstallArgs = @('tool', 'install', '--force', '--compile-bytecode', $Spec, '-c', $Constraints)
     Write-Host "Installing $Spec"
     Write-Host "with the dependency versions in $Constraints"
     if ($env:PROMPTMEND_DRY_RUN -eq '1') {

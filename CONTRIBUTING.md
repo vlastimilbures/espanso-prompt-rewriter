@@ -237,6 +237,16 @@ pulls in (email, zipfile, csv) load anyway, so a literal `__version__` saves onl
 wall time per run (median of 30 in a clean wheel venv, 3.12 and 3.14, 2026-10-06, #132). CI runner numbers
 (Linux, Windows) are still to be recorded from a CI run.
 
+Since #223 (2026-10-08, same machine, Python 3.12, load average about 10, medians of 25
+interleaved runs): `promptmend --version` is answered in `entry.main()` before the CLI is
+imported, `__version__` is read on first use, and httpx and pyperclip load only for the
+provider call and the clipboard. `import promptmend.cli` adds 148 modules (220 before),
+about 41 ms cumulative (135 ms). `--version` adds 108 modules (221), 49 ms wall time (121 ms);
+`persona` 78 ms (117 ms). A real trigger still loads httpx for its call, so `improve` against
+`smoke`'s stub adds 288 modules (299) and its wall time is unchanged. `tests/test_trigger_contract.py`
+holds these as ceilings (`VERSION_CEILING`, `IMPROVE_CEILING`, up to the provider call) and
+forbids httpx, pyperclip and sqlite3 before it.
+
 Re-measure with:
 
 ```bash

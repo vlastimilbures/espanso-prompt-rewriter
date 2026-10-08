@@ -5,12 +5,11 @@ import io
 import re
 import sys
 import unicodedata
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import pyperclip
 import typer
 from typer.core import TyperGroup
 
@@ -252,9 +251,13 @@ class ConcealedClipboard(ProviderError):
     """The clipboard held a password-manager item, which was cleared and not sent."""
 
 
-def _clipboard[T](op: Callable[..., T], *args: str) -> T:
+def _clipboard(op: str, *args: str) -> object:
+    """pyperclip's ``op`` ("paste" or "copy"). pyperclip is imported only here, once a run
+    touches the clipboard: a trigger that gets its draft another way never loads it (#223)."""
+    import pyperclip
+
     try:
-        return op(*args)
+        return getattr(pyperclip, op)(*args)
     except pyperclip.PyperclipException as exc:
         raise ClipboardUnavailable(f"Clipboard unavailable: {exc}") from exc
 
@@ -267,13 +270,13 @@ def _read_input(source: str, text: str | None) -> str:
             # Cleared, not left in place: Espanso pastes this marker through the clipboard and
             # then restores what it held as plain text, without the concealed marker, so the
             # next trigger would send the password. Espanso restores the empty clipboard instead.
-            with contextlib.suppress(pyperclip.PyperclipException):
-                pyperclip.copy("")
+            with contextlib.suppress(ClipboardUnavailable):
+                _clipboard("copy", "")
             raise ConcealedClipboard(
                 "The clipboard held a password-manager item (marked concealed); it was cleared "
                 "and not sent. Copy the draft first"
             )
-        return str(_clipboard(pyperclip.paste))
+        return str(_clipboard("paste"))
     if source == "stdin":
         return sys.stdin.read()
     if source == "argument":
@@ -311,6 +314,8 @@ def _deliver(result: str, note: str, rec: recorder.Recorder) -> str:
     markers (the sent-despite ``note``, a stop note), so a plain success prints nothing and
     Espanso just erases the trigger. If the copy fails, the rewrite is printed after the
     error marker instead, so it is pasted rather than lost (outcome clipboard_failed)."""
+    import pyperclip
+
     rewrite, stop = _split_stop_note(result)
     try:
         pyperclip.copy(rewrite)
@@ -478,7 +483,7 @@ def improve(
         )
         clipboard_output = cfg.output == CLIPBOARD
         if copy and not clipboard_output:
-            _clipboard(pyperclip.copy, result)
+            _clipboard("copy", result)
     except Exception as exc:
         # Nothing may traceback or exit nonzero: Espanso cannot surface stderr, so emit a
         # visible bracketed marker instead of a blank expansion.
