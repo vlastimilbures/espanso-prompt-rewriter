@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## 0.23.0 - 2026-10-08
+
 ### Changed
 - `config show` and the other commands that list settings show a key only as `<set>` or
   `<not set>`, no longer with its length (#222).
