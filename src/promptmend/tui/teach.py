@@ -20,6 +20,11 @@ CHECKOUT = "<CHECKOUT>"
 # Button id -> the commands it runs, in order (Home's "Previous install…" is four steps).
 BUTTONS: dict[str, tuple[tuple[str, ...], ...]] = {
     "home-reload": (("doctor",),),
+    "home-setup": (("setup",),),
+    "setup-migrate-env": (("config", "migrate"),),
+    "setup-save-keys": (("secrets", "set", "<NAME>"),),
+    "setup-deploy": (("espanso", "deploy"),),
+    "setup-run-test": (("setup",),),
     "home-previous": (
         ("config", "migrate", "--from", CHECKOUT),
         ("profiles", "migrate", "--checkout", CHECKOUT),
@@ -67,6 +72,8 @@ SETTING_ACTIONS: dict[str, tuple[str, ...]] = {
 # What a button's command does not cover, said in its tooltip.
 NOTES = {
     "smoke": "Its last step, the smoke test against a stub on 127.0.0.1.",
+    "setup-run-test": "Its last step, the smoke test against a stub on 127.0.0.1.",
+    "home-setup": "On a terminal it opens this same setup; --plain asks line by line.",
     "edit-profile": "Shows where each profile is; open the file in your editor.",
     "export": "Or --format csv.",
     "try-run": "Local stub runs it against a stub on 127.0.0.1 instead; no provider is called.",
@@ -78,6 +85,11 @@ NO_COMMAND = {
     "home-copy": "Copy the latest command of this session, as Home's log shows it, to the\n"
     "terminal clipboard (OSC 52); the clipboard is never read.",
     "previous-enter": "",
+    "setup-previous": "Opens the switch from an earlier checkout install, step by step.",
+    "setup-back": "",
+    "setup-next-step": "",
+    "setup-open": "",
+    "setup-quit": "",
     "previous-skip": "",
     "previous-close": "",
     "about-close": "",

@@ -28,6 +28,7 @@ from .panes import (
     TriggersPane,
 )
 from .previous import PreviousInstallScreen, wants_offer
+from .setup_wizard import SetupOptions, SetupScreen, needs_setup
 from .state import State, gather
 from .try_pane import TryPane
 
@@ -109,6 +110,17 @@ ModalScreen { align: center middle; }
 #previous-steps, .step { height: auto; }
 .step Button { width: 34; margin-right: 1; }
 .step-state { width: 1fr; padding-top: 1; }
+/* The setup wizard: the steps on the left, one step at a time on the right. */
+#setup { height: 1fr; }
+#setup-rail { width: 20; padding: 1 1 1 2; border-right: tall $panel-lighten-2; }
+#setup-body { padding: 1 2; }
+#setup-title { text-style: bold; margin-bottom: 1; }
+#setup-steps { height: 1fr; }
+#setup-steps OptionList { height: auto; max-height: 14; }
+#setup-welcome-notes { margin-top: 1; }
+#setup-steps Input { margin-bottom: 1; }
+#setup-next { margin-top: 1; text-style: bold; }
+#setup-nav { height: auto; }
 """
 
 
@@ -167,6 +179,8 @@ class ManageApp(App[int]):
         *,
         loader: Callable[[str], State] = gather,
         intro: bool = True,
+        setup: SetupOptions | None = None,
+        first_run: bool = False,
     ) -> None:
         super().__init__()
         # Whether the intro opens (#112); it then stays until a key or click (#173). Off for
@@ -185,13 +199,21 @@ class ManageApp(App[int]):
         self.session: list[teach.Entry] = []
         # The previous install screen opens by itself once per session (#110).
         self.offered = False
+        # `setup` opens the wizard at once; `first_run` opens it by itself once when nothing
+        # is set up yet (a bare `promptmend`; off in the tests).
+        self.setup_options = setup
+        self.first_run = first_run
         self.register_theme(HIGH_CONTRAST)
         self.theme = DEFAULT_THEME
 
     def on_mount(self) -> None:
         self.push_screen(self.main)
         self.reload()
-        if self.intro:
+        if self.setup_options is not None:
+            self.first_run = False
+            self.offered = True  # its Earlier settings step offers the previous install
+            self.push_screen(SetupScreen(self.setup_options))
+        elif self.intro:
             # Over the main screen while the state loads; the previous install offer waits
             # until it closes.
             self.push_screen(IntroScreen(__version__), lambda _: self._maybe_offer())
@@ -245,18 +267,31 @@ class ManageApp(App[int]):
             if pane.ready:
                 pane.show(state)
         for screen in self.screen_stack:
-            if isinstance(screen, PreviousInstallScreen) and screen.is_mounted:
+            if isinstance(screen, (PreviousInstallScreen, SetupScreen)) and screen.is_mounted:
                 screen.show(state)
         self._maybe_offer()
 
     def _maybe_offer(self) -> None:
         """Open the previous install screen by itself, once per session, when the state found
         one, and not while the intro is still showing (its close calls this again)."""
-        if self.state is None or self.offered or not wants_offer(self.state.previous):
+        if self.state is None:
             return
-        if any(isinstance(s, IntroScreen) for s in self.screen_stack):
+        if any(isinstance(s, (IntroScreen, SetupScreen)) for s in self.screen_stack):
+            return
+        if self.first_run:
+            self.first_run = False
+            if needs_setup(self.state):
+                self.offered = True  # the wizard's Earlier settings step offers it
+                self.open_setup()
+                return
+        if self.offered or not wants_offer(self.state.previous):
             return
         self.open_previous()
+
+    def open_setup(self) -> None:
+        """Show the setup wizard over the tabs, unless it is already open."""
+        if not any(isinstance(s, SetupScreen) for s in self.screen_stack):
+            self.push_screen(SetupScreen())
 
     def open_previous(self) -> None:
         """Show the switch from an earlier checkout install, unless it is already open."""

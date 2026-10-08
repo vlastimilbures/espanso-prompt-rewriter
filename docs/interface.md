@@ -9,6 +9,7 @@ on Home, the Settings and Try tabs and the keys. Everything it does, a headless 
 ## Contents
 
 - [Open it](#open-it)
+- [Setup](#setup)
 - [Tabs](#tabs)
 - [Home](#home)
 - [Command line](#command-line)
@@ -35,6 +36,31 @@ a Try tab run you confirm.
 When it finds an earlier checkout install, it opens a "Previous install" checklist once per
 session (also on Home's "Previous install…", shown only while there is one): copy the settings, copy the profiles, deploy,
 retire the old `.env`. See [From a checkout install](install.md#from-a-checkout-install).
+
+## Setup
+
+`promptmend setup` in a terminal opens the interface on its setup, one step at a time, with
+the steps listed on the left. The first time you open `promptmend` with nothing set up yet (no
+`config.toml`, no key, no match file), it opens by itself, once; Home's "Setup…" opens it any
+time.
+
+| Step | What you do |
+|------|-------------|
+| Welcome | Read what setup does and what the usage history keeps |
+| Earlier settings | Shown only when there is one: move a `.env` into `config.toml` and the secret store, or open the Previous install checklist |
+| Provider | Pick the default provider from a list; each line says whether it is cloud or local, whether it needs a key, and which triggers use it |
+| Profile | Pick the default profile; each line says how it rewrites |
+| API keys | Paste each key the triggers need (hidden); the step names the triggers each key is for |
+| Espanso | See the match folder and each file in words (not installed yet, up to date, you edited it), then install them; a file you edited is kept |
+| Test | Run `improve` against a stub on `127.0.0.1`; no provider is called |
+| Done | A checklist of what is set and what is left, with the command for each, and how to try `-i-` |
+
+Next and Back (or Escape) move between the steps; Enter on a list picks and moves on. Each
+change is made through the same code as its command and shows that command. With `--plain`,
+or any of `--provider`, `--profile`, `--migrate-from`, `--deploy`/`--no-deploy` or
+`--no-smoke-test`, `setup` asks line by line instead (see [Commands](commands.md#management-commands)).
+
+![The setup's provider step](../tests/snapshots/setup-provider.svg)
 
 ## Tabs
 
