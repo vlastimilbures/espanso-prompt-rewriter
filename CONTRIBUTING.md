@@ -292,6 +292,7 @@ promptmend/
 │   │                             (Home's command line and `promptmend shell`)
 │   ├── doctor.py                 the doctor report (stable JSON, never a key or persona)
 │   ├── update_check.py           asks PyPI, at most once a day, for a newer release
+│   ├── local_probe.py            asks a loopback Ollama or LM Studio whether it answers
 │   ├── smoke.py                  setup's smoke test: improve against a stub on 127.0.0.1
 │   ├── previous_install.py       finds an earlier checkout install whose .env this one misses
 │   ├── config.py                 Settings from the environment, config.toml or .env

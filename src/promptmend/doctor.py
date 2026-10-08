@@ -3,9 +3,10 @@
 Read-only: it runs only `espanso path config`, `espanso status` and the launcher lookup
 (`uv tool dir`, `brew --prefix`) through deploy.run_command, reads the settings in repair
 mode, asks PyPI for the newest release at most once a day (update_check, unless
-PROMPT_UPDATE_CHECK is false), and reads the clipboard only to report its length. The report
-never holds a key, the persona or clipboard text, since people paste it into bug reports. Its
-JSON shape is stable (SCHEMA_VERSION): ids and keys are only ever added.
+PROMPT_UPDATE_CHECK is false), asks a loopback Ollama or LM Studio whether it answers
+(local_probe), reads the deployed match files, and reads the clipboard only to report its
+length. The report never holds a key, the persona or clipboard text, since people paste it
+into bug reports. Its JSON shape is stable (SCHEMA_VERSION): ids and keys are only ever added.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from . import __version__, config, config_files, deploy, update_check
+from . import __version__, assets, config, config_files, deploy, factory, local_probe, update_check
 from .config import ConfigLayers, secret_names
 
 if TYPE_CHECKING:
@@ -46,6 +47,7 @@ CHECK_IDS = (
     "profiles",
     "previous_install",
     "folders",
+    "local_servers",
 )
 # Every key of each check's data, in every report: a check that could not run has them all
 # as None, so a consumer never meets a missing key.
@@ -54,7 +56,7 @@ DATA_KEYS = {
     "cli": ("path", "executable", "frozen"),
     "install": ("channel", "launcher", "editable"),
     "config": ("mode", "files", "valid", "findings"),
-    "keys": ("keys", "provider"),
+    "keys": ("keys", "provider", "triggers"),
     "persona": ("set", "local_only", "findings"),
     "espanso": (
         "found",
@@ -86,9 +88,10 @@ DATA_KEYS = {
     "profiles": ("profile", "pro_profile", "user"),
     "previous_install": ("gated", "roots", "signals", "env_file", "retire_pending", "shadow"),
     "folders": ("config_dir", "data_dir", "legacy", "conflicts"),
+    "local_servers": ("servers", "deployed"),
 }
-# The keys each check needs, by provider; -i-, -ip-, -if- and -iok- always use OpenRouter.
-_PROVIDER_KEYS = {"openrouter": "OPENROUTER_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
+# Where local_probe asks each local server, below its base URL.
+_PROBE_PATHS = {"ollama": "/api/tags", "lmstudio": "/models"}
 
 
 @dataclass(frozen=True)
@@ -151,6 +154,11 @@ def _version_check(update: update_check.UpdateStatus, install: Check | None) -> 
 
 def _cli_check() -> Check:
     script = Path(sys.argv[0]) if sys.argv and sys.argv[0] else None
+    if sys.platform == "win32" and script and not script.suffix:
+        exe = script.with_name(script.name + ".exe")
+        # Windows starts the console script's launcher, but argv[0] drops its `.exe` (#222).
+        if exe.is_file():
+            script = exe
     frozen = bool(getattr(sys, "frozen", False))
     data = {
         "path": str(script) if script else None,
@@ -204,24 +212,107 @@ def _config_check(layers: ConfigLayers, strict_error: str | None) -> Check:
     return Check("config", OK, f"valid ({mode}: {where})", data)
 
 
-def _keys_check(layers: ConfigLayers, provider: str, local_only: bool) -> Check:
+def deployed_triggers(espanso_dir: Path) -> tuple[list[assets.Trigger], bool]:
+    """The triggers in the managed match files Espanso has, and True; when none is deployed,
+    the ones a deploy would write, and False. Each a regular file, never a link followed."""
+    found: list[assets.Trigger] = []
+    deployed = False
+    for name in assets.match_names():
+        path = espanso_dir / "match" / name
+        try:
+            if path.is_symlink() or not path.is_file():
+                continue
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        deployed = True
+        found.extend(assets.triggers_in(text, name))
+    return (found, True) if deployed else (assets.triggers(), False)
+
+
+def _rewrites(triggers: list[assets.Trigger], settings: config.Settings) -> dict[str, list[str]]:
+    """Each provider the active rewrite triggers run on, with those triggers, in file order;
+    a trigger naming no provider runs on PROMPT_PROVIDER."""
+    found: dict[str, list[str]] = {}
+    for t in triggers:
+        if t.active and t.command == "improve":
+            found.setdefault(t.provider or settings.provider, []).append(t.trigger)
+    return found
+
+
+def _keys_check(
+    layers: ConfigLayers,
+    settings: config.Settings,
+    triggers: list[assets.Trigger],
+    deployed: bool,
+) -> Check:
+    """Named by the triggers that need each missing key (#217): the deployed ones, else those a
+    deploy would write. PROMPT_PROVIDER only counts for a bare `improve` and the Try tab."""
     keys = {}
     for name in secret_names():
         entry = layers.entries[name]
         keys[name] = {"set": bool(entry.value), "source": entry.source if entry.value else None}
-    data = {"keys": keys, "provider": provider}
-    needed = _PROVIDER_KEYS.get(provider)
-    if needed and not keys[needed]["set"]:
-        return Check("keys", FAIL, f"PROMPT_PROVIDER is {provider} but {needed} is not set", data)
-    if not local_only and not keys["OPENROUTER_API_KEY"]["set"]:
+    routes = {r.name: r for r in factory.routes(settings)}
+    missing: dict[str, list[str]] = {}
+    problems = []
+    for provider, names in _rewrites(triggers, settings).items():
+        route = routes.get(provider)
+        # A refused provider (PROMPT_LOCAL_ONLY) never needs its key.
+        if route is None or route.refused or not route.key or keys[route.key]["set"]:
+            continue
+        missing[route.key] = names
+        label = factory.PROVIDER_LABELS[provider]
+        if deployed:
+            problems.append(f"{', '.join(names)} use {label}, but {route.key} is not set")
+        else:
+            problems.append(
+                f"{', '.join(names)} will use {label} once deployed, but {route.key} is not set"
+            )
+    data = {"keys": keys, "provider": settings.provider, "triggers": missing}
+    if problems:
+        return Check("keys", FAIL if deployed else WARN, "; ".join(problems), data)
+    bare = routes.get(settings.provider)
+    if bare and not bare.refused and bare.key and not keys[bare.key]["set"]:
         return Check(
             "keys",
             WARN,
-            "OPENROUTER_API_KEY is not set: -i-, -ip-, -if- and -iok- will fail",
+            f"PROMPT_PROVIDER (a bare `promptmend improve`, the Try tab) is {settings.provider}, "
+            f"but {bare.key} is not set",
             data,
         )
     shown = ", ".join(f"{n}: {'set' if k['set'] else 'not set'}" for n, k in keys.items())
     return Check("keys", OK, shown, data)
+
+
+def _local_servers_check(
+    settings: config.Settings, triggers: list[assets.Trigger], deployed: bool
+) -> Check:
+    """Whether the Ollama and LM Studio the local triggers need answer (#220). The triggers
+    stay deployed either way; this says what typing one would need. Never fails or warns."""
+    used = _rewrites(triggers, settings)
+    servers: dict[str, dict[str, Any]] = {}
+    notes = []
+    for provider, base_url in (
+        ("ollama", settings.ollama_base_url),
+        ("lmstudio", settings.lmstudio_base_url),
+    ):
+        names = used.get(provider)
+        if not names:
+            continue
+        answers = local_probe.answers(base_url.rstrip("/") + _PROBE_PATHS[provider])
+        servers[provider] = {"answers": answers, "triggers": names}
+        label = factory.PROVIDER_LABELS[provider]
+        setting = f"{provider.upper()}_BASE_URL"
+        if answers is None:
+            notes.append(f"{label} ({', '.join(names)}) is not on this machine; not asked")
+        elif answers:
+            notes.append(f"{label} answers ({', '.join(names)})")
+        else:
+            notes.append(f"{', '.join(names)} needs {label}: no answer at {setting}")
+    data = {"servers": servers, "deployed": deployed}
+    if not notes:
+        return Check("local_servers", INFO, "no trigger uses Ollama or LM Studio", data)
+    return Check("local_servers", INFO, "; ".join(notes), data)
 
 
 def persona_findings(settings: config.Settings) -> list[str]:
@@ -465,6 +556,10 @@ def _history_checks(settings: config.Settings) -> tuple[Check, Check]:
         history = Check("history", INFO, "off (PROMPT_HISTORY=false)", data)
     elif health.error or health.tracking_incomplete or health.spooled:
         history = Check("history", WARN, f"{_history_problem(health)} ({health.path})", data)
+    elif not health.exists:
+        history = Check(
+            "history", OK, f"no calls yet ({health.path} is created by the first)", data
+        )
     else:
         count = health.operations if health.operations is not None else 0
         history = Check("history", OK, f"{count} call(s) recorded in {health.path}", data)
@@ -693,15 +788,21 @@ def run(
         _safely("cli", _cli_check),
         install,
         _safely("config", lambda: _config_check(layers, strict_error)),
-        _safely("keys", lambda: _keys_check(layers, settings.provider, settings.local_only)),
-        _safely("persona", lambda: _persona_check(settings, _persona_readable())),
     ]
     try:
         espanso, target = _espanso_check(run_command, espanso_dir)
     except Exception as exc:
         espanso = Check("espanso", FAIL, f"check failed: {type(exc).__name__}")
         target = espanso_dir or deploy.default_espanso_dir()
-    checks.append(espanso)
+    try:
+        triggers, deployed = deployed_triggers(target)
+    except Exception:
+        triggers, deployed = [], False
+    checks += [
+        _safely("keys", lambda: _keys_check(layers, settings, triggers, deployed)),
+        _safely("persona", lambda: _persona_check(settings, _persona_readable())),
+        espanso,
+    ]
     checks.append(_safely("match_files", lambda: _match_check(target, compare, manifest)))
     checks.append(_safely("launcher", lambda: _launcher_check(current, manifest)))
     try:
@@ -715,6 +816,9 @@ def run(
         _safely("previous_install", lambda: _previous_install_check(run_command, target, current))
     )
     checks.append(_safely("folders", _folders_check))
+    checks.append(
+        _safely("local_servers", lambda: _local_servers_check(settings, triggers, deployed))
+    )
     return Report(tuple(checks))
 
 
@@ -731,6 +835,7 @@ HEAVY_MODULES = (
     "promptmend.config_store",
     "promptmend.previous_install",
     "promptmend.relocate",
+    "promptmend.local_probe",
     "promptmend.console",
 )
 IMPORT_TIMEOUT = 30

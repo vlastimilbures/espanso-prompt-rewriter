@@ -241,7 +241,7 @@ def test_real_run_cancelled_sends_nothing(
     assert "Model: google/gemini-3.5-flash-lite" in preview
     assert "Base URL: https://openrouter.ai/api/v1" in preview
     assert f"Draft: {len(DRAFT)} characters" in preview
-    assert "recorded in the usage history as a direct call" in preview
+    assert "recorded in the usage history as -try- (a direct call" in preview
     assert DRAFT not in preview
 
 
@@ -265,7 +265,7 @@ def test_real_run_confirmed_is_one_call_recorded_as_direct(
     (op,) = history_rows("operations")
     assert (op["origin"], op["trigger_id"], op["kind"], op["outcome"], op["profile_id"]) == (
         "direct",
-        None,
+        "-try-",
         "improve",
         "ok",
         "default",

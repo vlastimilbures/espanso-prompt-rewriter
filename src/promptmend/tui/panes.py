@@ -42,7 +42,7 @@ from ..console import (
     shown_arg,
     transcript,
 )
-from ..factory import PROVIDER_NAMES, routes
+from ..factory import PROVIDER_LABELS, PROVIDER_NAMES, routes
 from ..prompt_builder import ADDED, ALIASES, PROFILES, user_profiles_dir
 from . import settings_model, teach
 from .console import CommandLine
@@ -282,9 +282,14 @@ class HomePane(Pane):
         self.rows = tuple(home_rows(state))
         self.query_one("#home-headline", Static).update(home_headline(self.rows))
         self.query_one("#home-rows", Static).update(home_table(self.rows))
+        # Only when there is something to show (#222): a checkout found, a copy whose `.env` is
+        # not retired yet, or why looking failed. The offer itself opens by itself once.
+        found = state.previous.candidates or state.previous.pending or state.previous_error
+        self.query_one("#home-previous", Button).display = bool(found)
 
     def setup(self) -> None:
         self.query_one("#home-copy", Button).disabled = not self.manage.session
+        self.query_one("#home-previous", Button).display = False
 
     def show_session(self, entries: Sequence[teach.Entry]) -> None:
         self.query_one("#home-session", Static).update(session_text(entries))
@@ -995,11 +1000,22 @@ def _copy(source: Path, pristine: dict[str, str], dest: Path, names: list[str]) 
 # --- Triggers -----------------------------------------------------------------------------
 
 
+def _servers_down(state: State) -> set[str]:
+    """The local providers (ollama, lmstudio) whose server did not answer doctor's
+    local_servers check (#220); asked there once, never again here."""
+    for check in state.report.checks:
+        if check.id == "local_servers":
+            servers = check.data.get("servers", {})
+            return {name for name, info in servers.items() if info.get("answers") is False}
+    return set()
+
+
 class TriggersPane(Pane):
     def compose(self) -> ComposeResult:
         yield Static(
             "Each trigger names its provider in its command line, so PROMPT_PROVIDER does not "
-            "change these. An empty PROMPT_PRO_PROFILE means PROMPT_PROFILE.",
+            "change these. An empty PROMPT_PRO_PROFILE means PROMPT_PROFILE. A local trigger "
+            "stays deployed while its server is down: State says what it needs.",
             classes="note",
             markup=False,
         )
@@ -1019,6 +1035,7 @@ class TriggersPane(Pane):
 
     def show(self, state: State) -> None:
         states = {s.name: s.state for s in state.plan.steps} if state.plan else {}
+        down = _servers_down(state)
         table = self.query_one("#triggers", DataTable)
         table.clear()
         for t in state.triggers:
@@ -1032,6 +1049,10 @@ class TriggersPane(Pane):
                 provider = "prints PROMPT_PERSONA" if t.command == "persona" else "static snippet"
                 profile = tier = "-"
             where = states.get(t.file, "unknown") if t.active else "commented out"
+            # Once its file is there, what typing it needs beats the file's state (#220).
+            deployed = where not in (deploy.MISSING, "unknown")
+            if deployed and t.active and t.command == "improve" and t.provider in down:
+                where = f"needs {PROVIDER_LABELS[t.provider]}"
             _add_row(table, t.trigger, provider, tier, profile, where, t.file)
         target = self.query_one("#deploy-target", Static)
         if state.plan is None:

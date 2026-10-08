@@ -41,7 +41,8 @@ def read_match(name: str) -> str:
 
 # A match's trigger line, commented out or not, and the CLI call in its script var's args.
 TRIGGER_LINE = re.compile(r'^\s*(#\s*)?- trigger: "([^"]+)"')
-_CMD = re.compile(r'^\s*(?:#\s*)?args: \["__PROMPT_WORKFLOW__", "(\w+)"(.*)\]')
+# The first item is the placeholder as shipped, or the launcher a deploy put there.
+_CMD = re.compile(r'^\s*(?:#\s*)?args: \["[^"]+", "(\w+)"(.*)\]')
 _OPTION = re.compile(r'"--(provider|profile|tier)", "([^"]+)"')
 
 
@@ -61,23 +62,27 @@ class Trigger:
 
 def triggers() -> list[Trigger]:
     """Every trigger the match files ship, in file order, with what its CLI call fixes."""
+    return [t for name in match_names() for t in triggers_in(read_match(name), name)]
+
+
+def triggers_in(text: str, name: str) -> list[Trigger]:
+    """The triggers of one match file's text, shipped or deployed, in file order."""
     found: list[Trigger] = []
-    for name in match_names():
-        current: Trigger | None = None
-        for line in read_match(name).splitlines():
-            if head := TRIGGER_LINE.match(line):
-                if current is not None:
-                    found.append(current)
-                current = Trigger(head.group(2), name, active=not head.group(1))
-            elif current is not None and (cmd := _CMD.match(line)):
-                options = dict(_OPTION.findall(cmd.group(2)))
-                current = replace(
-                    current,
-                    command=cmd.group(1),
-                    provider=options.get("provider"),
-                    profile=options.get("profile"),
-                    tier=options.get("tier"),
-                )
-        if current is not None:
-            found.append(current)
+    current: Trigger | None = None
+    for line in text.splitlines():
+        if head := TRIGGER_LINE.match(line):
+            if current is not None:
+                found.append(current)
+            current = Trigger(head.group(2), name, active=not head.group(1))
+        elif current is not None and (cmd := _CMD.match(line)):
+            options = dict(_OPTION.findall(cmd.group(2)))
+            current = replace(
+                current,
+                command=cmd.group(1),
+                provider=options.get("provider"),
+                profile=options.get("profile"),
+                tier=options.get("tier"),
+            )
+    if current is not None:
+        found.append(current)
     return found

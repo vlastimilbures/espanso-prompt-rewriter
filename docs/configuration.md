@@ -150,7 +150,7 @@ included (see [Privacy](privacy.md#what-is-sent-and-to-whom)).
 
 | Setting | Default | Purpose |
 |---------|---------|---------|
-| `PROMPT_PROVIDER` | `openrouter` | Provider when `--provider` is not given (the bare CLI; every trigger passes its own) |
+| `PROMPT_PROVIDER` | `openrouter` | Provider when `--provider` is not given: a bare `promptmend improve` and the interface's Try tab. The triggers name their own provider, so it does not change them |
 | `PROMPT_PROFILE` | `default` | Profile when `--profile` is not given (`-i-`, and `-if-` on a non-pro model) |
 | `PROMPT_PERSONA` | *(empty)* | Your first-person role, see [Persona](profiles.md#persona) |
 | `PROMPT_PROFILE_OVERRIDES` | *(empty)* | Comma-separated built-in profiles (`default`, `general`) your own same-named file replaces, see [Profiles](profiles.md#replacing-a-built-in) |

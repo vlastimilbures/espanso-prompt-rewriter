@@ -14,6 +14,13 @@ from .providers.usage import UsageObserver
 from .redaction import compile_extra, safe_repr
 
 PROVIDER_NAMES = ("ollama", "lmstudio", "openrouter", "anthropic")
+# How messages name each provider.
+PROVIDER_LABELS = {
+    "ollama": "Ollama",
+    "lmstudio": "LM Studio",
+    "openrouter": "OpenRouter",
+    "anthropic": "Anthropic",
+}
 # Sent as OpenRouter's X-Title so calls are attributed to this app in its dashboard.
 APP_TITLE = "promptmend"
 

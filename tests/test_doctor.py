@@ -4,6 +4,7 @@ history store are faked; the CLI-level tests are in tests/test_commands.py."""
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -172,21 +173,139 @@ def test_config_strict_error_fails() -> None:
 
 
 def _keys(
-    monkeypatch: pytest.MonkeyPatch, provider: str, local_only: bool = False, **env: str
+    monkeypatch: pytest.MonkeyPatch,
+    provider: str = "openrouter",
+    local_only: bool = False,
+    triggers: list[assets.Trigger] | None = None,
+    deployed: bool = True,
+    **env: str,
 ) -> doctor.Check:
+    monkeypatch.setenv("PROMPT_PROVIDER", provider)
+    monkeypatch.setenv("PROMPT_LOCAL_ONLY", "true" if local_only else "false")
     for name, value in env.items():
         monkeypatch.setenv(name, value)
-    return doctor._keys_check(ConfigLayers.resolve(strict=False), provider, local_only)
+    layers = ConfigLayers.resolve(strict=False)
+    shipped = assets.triggers() if triggers is None else triggers
+    return doctor._keys_check(layers, layers.settings(), shipped, deployed)
 
 
-def test_keys(monkeypatch: pytest.MonkeyPatch) -> None:
-    assert _keys(monkeypatch, "anthropic").status == "fail"
-    assert _keys(monkeypatch, "ollama").status == "warn"  # -i- needs the OpenRouter key
-    assert _keys(monkeypatch, "ollama", local_only=True).status == "ok"
-    check = _keys(monkeypatch, "openrouter", OPENROUTER_API_KEY="-".join(("test", "key")))
+def test_keys_name_the_triggers_that_need_them(monkeypatch: pytest.MonkeyPatch) -> None:
+    check = _keys(monkeypatch)
+    assert check.status == "fail"
+    assert check.message == (
+        "-i-, -iok-, -ip-, -if- use OpenRouter, but OPENROUTER_API_KEY is not set"
+    )
+    assert check.data["triggers"] == {"OPENROUTER_API_KEY": ["-i-", "-iok-", "-ip-", "-if-"]}
+    assert "PROMPT_PROVIDER" not in check.message
+    # Before a deploy: what one would write, as a warning.
+    check = _keys(monkeypatch, deployed=False)
+    assert check.status == "warn"
+    assert "will use OpenRouter once deployed" in check.message
+    # PROMPT_LOCAL_ONLY refuses OpenRouter, so its key is never needed.
+    assert _keys(monkeypatch, local_only=True).status == "ok"
+
+
+def test_keys_only_count_active_rewrite_triggers(monkeypatch: pytest.MonkeyPatch) -> None:
+    local = [
+        assets.Trigger("-il-", "prompts-llm.yml", True, "improve", "ollama"),
+        assets.Trigger("-ic-", "prompts-llm.yml", False, "improve", "anthropic"),
+        assets.Trigger("-p-", "prompts-template.yml", True, "persona"),
+    ]
+    assert _keys(monkeypatch, "ollama", triggers=local).status == "ok"
+    # A trigger naming no provider runs on PROMPT_PROVIDER.
+    bare = [assets.Trigger("-x-", "prompts-llm.yml", True, "improve")]
+    check = _keys(monkeypatch, "anthropic", triggers=bare)
+    assert check.message == "-x- use Anthropic, but ANTHROPIC_API_KEY is not set"
+
+
+def test_keys_mention_prompt_provider_only_for_a_bare_improve(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    key = "-".join(("test", "key"))
+    check = _keys(monkeypatch, "anthropic", OPENROUTER_API_KEY=key)
+    assert check.status == "warn"
+    assert check.message == (
+        "PROMPT_PROVIDER (a bare `promptmend improve`, the Try tab) is anthropic, "
+        "but ANTHROPIC_API_KEY is not set"
+    )
+    check = _keys(monkeypatch, OPENROUTER_API_KEY=key)
     assert check.status == "ok"
     assert check.data["keys"]["OPENROUTER_API_KEY"] == {"set": True, "source": "env"}
-    assert "test-key" not in check.message
+    assert key not in check.message
+
+
+def _deploy(espanso: Path, name: str, text: str) -> None:
+    (espanso / "match").mkdir(parents=True, exist_ok=True)
+    (espanso / "match" / name).write_text(text, "utf-8")
+
+
+def test_deployed_triggers_read_the_files_espanso_has(tmp_path: Path) -> None:
+    shipped, deployed = doctor.deployed_triggers(tmp_path)
+    assert (shipped, deployed) == (assets.triggers(), False)
+    text = deploy.render(assets.read_match("prompts-llm.yml"), LAUNCHER)
+    # A user who commented out -ip- in the deployed file.
+    _deploy(tmp_path, "prompts-llm.yml", text.replace('- trigger: "-ip-"', '# - trigger: "-ip-"'))
+    found, deployed = doctor.deployed_triggers(tmp_path)
+    assert deployed
+    active = [t.trigger for t in found if t.active and t.command == "improve"]
+    assert active == ["-i-", "-iok-", "-if-", "-il-", "-ilm-"]
+    assert {t.provider for t in found if t.trigger == "-il-"} == {"ollama"}
+
+
+# --- local servers (#220) -----------------------------------------------------------------
+
+
+def _servers(monkeypatch: pytest.MonkeyPatch, answering: set[str]) -> doctor.Check:
+    from promptmend import local_probe
+
+    asked: list[str] = []
+
+    def get(url: str) -> None:
+        asked.append(url)
+        if not any(port in url for port in answering):
+            raise OSError("refused")
+
+    monkeypatch.setattr(local_probe, "_get", get)
+    settings = ConfigLayers.resolve(strict=False).settings()
+    check = doctor._local_servers_check(settings, assets.triggers(), True)
+    assert asked == ["http://localhost:11434/api/tags", "http://localhost:1234/v1/models"]
+    return check
+
+
+def test_local_servers_say_what_a_local_trigger_needs(monkeypatch: pytest.MonkeyPatch) -> None:
+    check = _servers(monkeypatch, set())
+    assert check.status == "info"
+    assert check.message == (
+        "-il- needs Ollama: no answer at OLLAMA_BASE_URL; "
+        "-ilm- needs LM Studio: no answer at LMSTUDIO_BASE_URL"
+    )
+    assert check.data["servers"]["ollama"] == {"answers": False, "triggers": ["-il-"]}
+    check = _servers(monkeypatch, {"11434", "1234"})
+    assert check.message == "Ollama answers (-il-); LM Studio answers (-ilm-)"
+
+
+def test_local_servers_never_ask_another_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    from promptmend import local_probe
+
+    monkeypatch.setenv("OLLAMA_BASE_URL", "https://ollama.example.com")
+    monkeypatch.setattr(local_probe, "_get", lambda url: pytest.fail(f"asked {url}"))
+    settings = ConfigLayers.resolve(strict=False).settings()
+    only = [t for t in assets.triggers() if t.trigger == "-il-"]
+    check = doctor._local_servers_check(settings, only, True)
+    assert check.message == "Ollama (-il-) is not on this machine; not asked"
+    assert check.data["servers"]["ollama"]["answers"] is None
+    none = doctor._local_servers_check(settings, [], False)
+    assert none.message == "no trigger uses Ollama or LM Studio"
+
+
+def test_cli_path_names_the_windows_exe(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    exe = tmp_path / "promptmend.exe"
+    exe.write_text("", "utf-8")
+    monkeypatch.setattr(sys, "argv", [str(tmp_path / "promptmend")])
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert doctor._cli_check().data["path"] == str(exe)
+    monkeypatch.setattr(sys, "platform", "darwin")
+    assert doctor._cli_check().data["path"] == str(tmp_path / "promptmend")
 
 
 # --- Espanso, match files, launcher -------------------------------------------------------
@@ -381,6 +500,7 @@ def _health(**changes: Any) -> Health:
     ("history_on", "health", "status", "words"),
     [
         (True, {}, "ok", "3 call(s)"),
+        (True, {"exists": False, "operations": None}, "ok", "no calls yet (/x/history.sqlite3"),
         (False, {}, "info", "off"),
         (True, {"lost_writes": 2, "tracking_incomplete": True}, "warn", "2 write(s) lost"),
         (True, {"writable": False, "tracking_incomplete": True}, "warn", "not writable"),

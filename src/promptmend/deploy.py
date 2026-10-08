@@ -547,7 +547,7 @@ class FileStep:
         lines = difflib.unified_diff(
             (self.current or "").splitlines(keepends=True),
             self.rendered.splitlines(keepends=True),
-            fromfile=f"{self.target} (on disk)",
+            fromfile=f"{self.target} ({'missing' if self.current is None else 'on disk'})",
             tofile=f"{self.target} (promptmend {__version__})",
         )
         return "".join(line if line.endswith("\n") else line + "\n" for line in lines)

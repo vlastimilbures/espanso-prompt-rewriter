@@ -88,6 +88,14 @@ def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(update_check, "_fetch", no_pypi)
     # ...and starts without the previous test's answer kept in memory.
     monkeypatch.setattr(update_check, "_last", None)
+    # ...nor ask a local Ollama or LM Studio whether it answers (#220): nothing does, unless a
+    # test puts the real GET back (test_local_probe.REAL_GET) and answers it with fake_http.
+    from promptmend import local_probe
+
+    def no_server(url: str) -> None:
+        raise httpx.ConnectError("tests never reach a local model server")
+
+    monkeypatch.setattr(local_probe, "_get", no_server)
     # The user patterns safe_repr() hides are set by every settings load: start each test
     # without the previous test's.
     from promptmend import redaction

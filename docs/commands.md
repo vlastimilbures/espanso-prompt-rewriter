@@ -87,9 +87,9 @@ read gives the `[role]` placeholder. See [Persona](profiles.md#persona).
 | `promptmend secrets set NAME [--stdin]` / `status` / `remove NAME` | Saves a key from a hidden prompt or stdin (never an argument); shows whether each key is set and where from, never the value; deletes one |
 | `promptmend profiles list` / `migrate` | Lists built-in and your own profiles and their state; copies profiles you added or edited in a checkout to your profile folder (copies only, never overwrites) |
 | `promptmend espanso deploy [--dry-run]` / `status` / `detach` | Writes, checks or removes the match files. See [Managing the match files](usage.md#managing-the-match-files) |
-| `promptmend stats [--by trigger\|provider\|model\|day] [--json]` | Calls, latency, tokens and costs from the [usage history](privacy.md#usage-history) |
+| `promptmend stats [--by trigger\|provider\|model\|day] [--json] [--verbose]` | Calls, latency, tokens and costs from the [usage history](privacy.md#usage-history); `--verbose` also says what the history records and how to read the numbers (below) |
 | `promptmend history export [--format json\|csv] [-o FILE]` / `prune [--older-than DAYS]` / `reset` | Exports the history (metadata only), deletes old records (asking first when the age is shorter than `PROMPT_HISTORY_RETENTION_DAYS`), or deletes them all |
-| `promptmend doctor [--json]` | Version and whether a newer release exists (information only, with the update command for your install channel; `--json` adds `latest`, `update_available` and `checked_at`; one pypi.org request a day (an hour after a failure), `PROMPT_UPDATE_CHECK=false` turns it off), CLI path and install channel, config validity, keys set or not, Espanso found and running, each deployed match file (`in sync`, `stale`, `modified`, `missing`), launcher drift, history health, SQLite version and the history's journal mode, the folders, and a clipboard read test that reports only the length (`--no-clipboard` skips it). Safe to paste into an issue: it never shows a key, your persona or clipboard text |
+| `promptmend doctor [--json]` | Version and whether a newer release exists (information only, with the update command for your install channel; `--json` adds `latest`, `update_available` and `checked_at`; one pypi.org request a day (an hour after a failure), `PROMPT_UPDATE_CHECK=false` turns it off), CLI path and install channel, config validity, keys set or not (a missing key names the deployed triggers that need it), whether the Ollama or LM Studio a deployed trigger uses answers, Espanso found and running, each deployed match file (`in sync`, `stale`, `modified`, `missing`), launcher drift, history health, SQLite version and the history's journal mode, the folders, and a clipboard read test that reports only the length (`--no-clipboard` skips it). Safe to paste into an issue: it never shows a key, your persona or clipboard text |
 
 ## shell
 
@@ -132,6 +132,8 @@ provider's dashboard for what you were charged.
   clipboard output, that the rewrite was copied).
 - Triggers that name a provider (`-i-`, `-ip-`, `-if-`, `-iok-`, `-il-`, `-ilm-`) ignore
   `PROMPT_PROVIDER`, so changing it does not move their calls to another provider.
+- By trigger, a real run from the interface's Try tab is listed as `-try-`, and a bare
+  `promptmend improve` as `no trigger (direct call)`.
 
 ## How management commands behave
 
