@@ -513,7 +513,10 @@ def test_a_read_only_database_never_raises(store: HistoryStore) -> None:
     try:
         assert store.record(_op()) is False
     finally:
-        store.path.chmod(stat.S_IREAD | stat.S_IWRITE)
+        # SQLite gives a -wal/-shm it creates the database's mode, so restore those too.
+        for suffix in ("", "-wal", "-shm"):
+            with contextlib.suppress(FileNotFoundError):
+                Path(f"{store.path}{suffix}").chmod(stat.S_IREAD | stat.S_IWRITE)
     assert store.health().spooled == 1
     assert store.replay() == 1
     assert store.health().operations == 2
@@ -837,16 +840,21 @@ def test_concurrent_writers_complete_or_drop_without_duplicates(
         lambda worker: [str(store.path), str(worker)],
     )
     stored = {op_id for out in outputs for op_id in out}
+    # A write that lost the race waits in the spool (#213) and is stored by a later one.
+    store.replay()
     ops = _rows(store, "operations")
-    assert {row["id"] for row in ops} == stored
-    assert len(ops) == len(stored)
+    ids = {row["id"] for row in ops}
+    assert stored <= ids
+    assert ids <= {f"{worker:016x}{n:016x}" for worker in range(4) for n in range(count)}
+    assert len(ops) == len(ids)
+    assert store.health().spooled == 0
     keys = [(row["operation_id"], row["seq"]) for row in _rows(store, "attempts")]
-    assert len(keys) == len(set(keys)) == 2 * len(stored)
+    assert len(keys) == len(set(keys)) == 2 * len(ids)
     # Each write is one transaction: no operation without its attempts.
-    assert {op_id for op_id, _ in keys} == stored
-    # Most writes get through; the rest were dropped within the budget and counted.
+    assert {op_id for op_id, _ in keys} == ids
+    # Most writes get through; the rest were spooled (and are stored now) or counted as lost.
     assert len(stored) > count
-    if len(stored) < 4 * count:
+    if len(ids) < 4 * count:
         assert store.health().lost_writes > 0
 
 
