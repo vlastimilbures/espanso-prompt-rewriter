@@ -61,6 +61,13 @@ def self_command() -> list[str]:
 
 
 def main() -> None:
+    if sys.argv[1:] == ["--version"]:
+        # Answered before the CLI and its dependencies load (#223): the same line Typer's
+        # eager --version prints, in a fraction of the start-up on a slow machine.
+        from . import installed_version
+
+        sys.stdout.write(installed_version() + "\n")
+        return
     quiet_trigger(sys.argv[1:])
     from .cli import app
 

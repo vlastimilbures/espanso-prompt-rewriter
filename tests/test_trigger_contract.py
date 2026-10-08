@@ -119,7 +119,7 @@ def test_improve_sent_despite_note_with_error(monkeypatch: pytest.MonkeyPatch) -
 def test_improve_clipboard_output(
     monkeypatch: pytest.MonkeyPatch, stub_provider: StubProvider
 ) -> None:
-    monkeypatch.setattr("promptmend.cli.pyperclip.copy", lambda text: None)
+    monkeypatch.setattr("pyperclip.copy", lambda text: None)
     monkeypatch.setenv("PROMPT_OUTPUT", "clipboard")
     _golden(IMPROVE, b"")
     stub_provider.exc = ProviderError("Ollama request failed")
@@ -129,7 +129,7 @@ def test_improve_clipboard_output(
 def test_improve_clipboard_output_sent_despite(
     monkeypatch: pytest.MonkeyPatch, fake_http: FakeHttp
 ) -> None:
-    monkeypatch.setattr("promptmend.cli.pyperclip.copy", lambda text: None)
+    monkeypatch.setattr("pyperclip.copy", lambda text: None)
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     fake_http.reply({"choices": [{"message": {"content": "rewrite"}}]})
     _golden([*FLAGGED, "--output", "clipboard", "--text", DRAFT], NOTE.rstrip(b"\n"))
@@ -169,6 +169,7 @@ import os
 from pathlib import Path
 
 import httpx
+import pyperclip
 
 import promptmend.cli as cli
 from promptmend.providers import base
@@ -194,9 +195,9 @@ def client(*args, **kwargs):
 httpx.Client = client
 base._sleep = lambda seconds: None
 cli.is_concealed = lambda: None
-cli.pyperclip.paste = lambda: "rewrite this draft"
+pyperclip.paste = lambda: "rewrite this draft"
 copied = []
-cli.pyperclip.copy = copied.append
+pyperclip.copy = copied.append
 
 local = ["improve", "--provider", "ollama", "--source", "argument", "--text", "x"]
 cloud = ["improve", "--provider", "openrouter", "--source", "clipboard"]
@@ -349,6 +350,110 @@ def test_trigger_path_module_count(trigger_run: tuple[list[bytes], dict[str, Any
     assert added <= MODULE_CEILING, f"the trigger run added {added} modules"
 
 
+# Start-up budget (#223): what a call loads before it does any work, each in a fresh
+# interpreter through the console script's entry.main(), as Espanso and a terminal run it.
+# `--version` is answered before the CLI is imported; `improve` loads no HTTP client and no
+# clipboard library before it reaches the provider (a --text draft never touches the
+# clipboard) and nothing of the usage history before it records.
+_VERSION_RUN = """
+import sys
+out = sys.argv[1]
+started = set(sys.modules)
+sys.argv = ["promptmend", "--version"]
+from promptmend.entry import main
+main()
+added = sorted(set(sys.modules) - started)
+import json
+from pathlib import Path
+Path(out).write_text(json.dumps({"added": added}), encoding="utf-8")
+"""
+
+_IMPROVE_RUN = """
+import sys
+out = sys.argv[1]
+started = set(sys.modules)
+sys.argv = ["promptmend", "improve", "--provider", "ollama", "--source", "argument", "--text", "x"]
+from promptmend.providers import ollama
+seen = []
+
+
+def post_json(*args, **kwargs):
+    seen.append(sorted(set(sys.modules) - started))
+    return {"message": {"content": "done"}, "done_reason": "stop"}
+
+
+ollama.post_json = post_json
+from promptmend.entry import main
+try:
+    main()
+except SystemExit as exc:
+    code = exc.code
+import json
+from pathlib import Path
+Path(out).write_text(json.dumps({"code": code, "added": seen[0]}), encoding="utf-8")
+"""
+
+# Never loaded by `--version`, nor by `improve` before its provider call. `--version` reads
+# the installed metadata; `improve` does not need it.
+STARTUP_FORBIDDEN = ("httpx", "pyperclip", "sqlite3", "textual", "prompt_toolkit", *FORBIDDEN)
+VERSION_FORBIDDEN = (*STARTUP_FORBIDDEN, "typer", "click", "rich", "promptmend.cli")
+IMPROVE_FORBIDDEN = (*STARTUP_FORBIDDEN, "importlib.metadata")
+# Modules each run adds to a bare interpreter, macOS, Python 3.12, 2026-10-08: `--version`
+# 108 (importlib.metadata is most of them), `improve` up to the provider call 149; both were
+# 221 before #223. Coarse, like MODULE_CEILING: a new import tree crosses them.
+VERSION_CEILING = 150
+IMPROVE_CEILING = 200
+
+
+def _isolated_env(tmp: Path) -> dict[str, str]:
+    """The environment without any setting or preloading variable, with the config, data
+    and home folders in ``tmp``."""
+    env = {
+        key: value for key, value in os.environ.items() if key not in {*env_names(), *_PRELOADING}
+    }
+    env["PROMPTMEND_ENV"] = str(tmp / ".env")
+    for name in ("XDG_CONFIG_HOME", "APPDATA", "XDG_DATA_HOME", "LOCALAPPDATA"):
+        env[name] = str(tmp / name.lower())
+    for name in ("HOME", "USERPROFILE"):
+        env[name] = str(tmp / "home")
+    return env
+
+
+def _startup(script: str, tmp: Path) -> tuple[bytes, dict[str, Any]]:
+    out = tmp / "modules.json"
+    proc = subprocess.run(
+        [sys.executable, "-c", script, str(out)],
+        capture_output=True,
+        stdin=subprocess.DEVNULL,
+        env=_isolated_env(tmp),
+        cwd=tmp,
+        timeout=60,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr.decode("utf-8", "replace")
+    return proc.stdout, json.loads(out.read_text(encoding="utf-8"))
+
+
+def _loaded(added: list[str], modules: tuple[str, ...]) -> list[str]:
+    return [m for m in added if any(m == x or m.startswith(x + ".") for x in modules)]
+
+
+def test_version_startup_budget(tmp_path: Path) -> None:
+    from promptmend import installed_version
+
+    stdout, data = _startup(_VERSION_RUN, tmp_path)
+    assert stdout == f"{installed_version()}\n".encode().replace(b"\n", EOL)
+    assert _loaded(data["added"], VERSION_FORBIDDEN) == []
+    assert len(data["added"]) <= VERSION_CEILING, f"--version added {len(data['added'])}"
+
+
+def test_improve_startup_budget(tmp_path: Path) -> None:
+    stdout, data = _startup(_IMPROVE_RUN, tmp_path)
+    assert (stdout, data["code"]) == (b"done", 0)
+    assert _loaded(data["added"], IMPROVE_FORBIDDEN) == []
+    assert len(data["added"]) <= IMPROVE_CEILING, f"improve added {len(data['added'])}"
+
+
 # The headless management commands, --help and the bare command without a terminal never load
 # the interface (#93): Textual is imported only once it opens. Run in one fresh interpreter,
 # with Espanso, uv and brew answering nothing and the clipboard never read.
@@ -385,14 +490,7 @@ Path(sys.argv[1]).write_text(json.dumps({"codes": codes, "loaded": sorted(sys.mo
 
 
 def test_management_commands_do_not_import_the_interface(tmp_path: Path) -> None:
-    env = {
-        key: value for key, value in os.environ.items() if key not in {*env_names(), *_PRELOADING}
-    }
-    env["PROMPTMEND_ENV"] = str(tmp_path / ".env")
-    for name in ("XDG_CONFIG_HOME", "APPDATA", "XDG_DATA_HOME", "LOCALAPPDATA"):
-        env[name] = str(tmp_path / name.lower())
-    for name in ("HOME", "USERPROFILE"):
-        env[name] = str(tmp_path / "home")
+    env = _isolated_env(tmp_path)
     out = tmp_path / "modules.json"
     proc = subprocess.run(
         [sys.executable, "-c", _MANAGEMENT_RUN, str(out)],

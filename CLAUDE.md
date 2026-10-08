@@ -10,7 +10,7 @@ paste back stdout.
 
 ## Commands
 
-Contributor install (`uv tool install --editable` constrained to `uv.lock`, checked by
+Contributor install (`uv tool install --editable --compile-bytecode` constrained to `uv.lock`, checked by
 `scripts/check_tool_lock.py`, then `promptmend espanso deploy --yes`, which substitutes the
 absolute CLI path into the match files, since GUI-launched Espanso does not inherit shell PATH):
 
@@ -512,7 +512,21 @@ Rules for agents:
 - `entry.self_command()` — the argv prefix of every child that runs the CLI again (the
   interface's command line, `promptmend shell`, `smoke.run()`): `[sys.executable, "-P", "-m",
   "promptmend.cli"]`, or `[sys.executable]` in a frozen build. Stays import-light (trigger
-  contract).
+  contract). `entry.main()` answers a bare `--version` (exactly `argv == ["--version"]`)
+  itself, through `promptmend.installed_version()`, before `quiet_trigger()` and the CLI
+  import (#223); `promptmend/__init__.py` gives `__version__` through a module `__getattr__`,
+  so importing the package never loads `importlib.metadata`. Start-up budget (#223):
+  `providers/base.py` imports httpx only inside `_encode_headers()`/`_exchange()` (type-only
+  at module level) and `cli.py` imports pyperclip only in `_clipboard(op)` and `_deliver()`
+  (tests patch the `pyperclip` module, never `cli.pyperclip`).
+  `tests/test_trigger_contract.py`'s `test_version_startup_budget` and
+  `test_improve_startup_budget` (fresh interpreter through `entry.main()`, the latter
+  snapshotting `sys.modules` in a fake `ollama.post_json`) forbid httpx, pyperclip, sqlite3,
+  textual, prompt_toolkit and `FORBIDDEN` (plus typer/click/rich/`promptmend.cli` for
+  `--version`, `importlib.metadata` for `improve`) and cap the count (`VERSION_CEILING`,
+  `IMPROVE_CEILING`). The installers (`install.ps1`, `install_windows.ps1`,
+  `install_macos.sh`) pass `--compile-bytecode` to `uv tool install` (#216;
+  `tests/test_install_scripts.py`, and the `install-script` job's dry-run string).
 - `packaging/windows/` — the frozen Windows build (#185): `promptmend.spec` (PyInstaller 6
   onedir, console `promptmend.exe` + `_internal\`, entry `promptmend_main.py` calling
   `entry.main()`, so the trigger's fd-2 silencing is unchanged; `collect_submodules` for

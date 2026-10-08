@@ -6,13 +6,14 @@ import math
 import re
 import time
 from collections.abc import Mapping
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 from urllib.parse import urlsplit
-
-import httpx
 
 from ..redaction import safe_repr, scan
 from .usage import Meter
+
+if TYPE_CHECKING:
+    import httpx
 
 
 class ProviderError(RuntimeError):
@@ -155,6 +156,10 @@ def _retry_delay(retry_after: str | None) -> float | None:
 
 
 def _encode_headers(label: str, headers: Mapping[str, str] | None) -> httpx.Headers:
+    # httpx is imported only once a request is made: every trigger starts a fresh process,
+    # and httpx is the largest import on its path (#223).
+    import httpx
+
     try:
         # httpx encodes header values as ASCII; a key pasted with a smart quote or an accented
         # letter fails here, before anything is sent. The error quotes the key, so it is dropped.
@@ -264,6 +269,8 @@ def _exchange(
     """One request, given ``budget`` seconds in total. httpx's own timeouts apply to each
     network operation, and its read timer restarts with every chunk, so a server that
     trickles bytes is cut off here once the budget is spent."""
+    import httpx
+
     transport = httpx.HTTPTransport() if is_loopback(url) else None
     limits = httpx.Timeout(budget, connect=min(budget, CONNECT_TIMEOUT_MAX))
     stop_at = time.monotonic() + budget

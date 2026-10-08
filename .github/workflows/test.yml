@@ -139,7 +139,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "dry run exited $LASTEXITCODE`n$out" }
           Write-Host $out
           $download = "https://github.com/vlastimilbures/promptmend/releases/download/v$version"
-          $want = "> uv tool install --force $download/promptmend-$version-py3-none-any.whl -c $download/constraints.txt"
+          $want = "> uv tool install --force --compile-bytecode $download/promptmend-$version-py3-none-any.whl -c $download/constraints.txt"
           if (-not $out.Contains($want)) { throw "the dry run did not print: $want" }
           $env:PROMPTMEND_VERSION = '0.18.0'
           $out = powershell -NoProfile -ExecutionPolicy ByPass -Command "Get-Content -Raw '$rendered' | Invoke-Expression" | Out-String

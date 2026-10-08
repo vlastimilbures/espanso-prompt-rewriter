@@ -12,6 +12,12 @@ All notable changes to this project are documented here. The format follows
 - Interface: in the Settings list, `u` (as `config unset`) puts a setting back to its default
   or opens Remove key; `r` now reloads there too, as on every other tab, so a reload can no
   longer undo a setting (#215).
+- Faster start, most of all on Windows with endpoint scanning (#223): `promptmend --version`
+  answers before the CLI loads (108 modules instead of 221 on macOS), and the triggers load
+  httpx only for the provider call and the clipboard library only when they touch the
+  clipboard (149 modules up to the call instead of 221).
+- The install scripts (`install.ps1`, `install_windows.ps1`, `install_macos.sh`) compile the
+  bytecode at install, so the first run after an install is no longer the slow one (#216).
 
 ### Fixed
 - `doctor` no longer warns about the launcher on Windows when the match files call the same
@@ -27,6 +33,10 @@ All notable changes to this project are documented here. The format follows
   `promptmend stats`, `promptmend history export` or `promptmend doctor` stores it.
   `history.lost` now counts only records that could not be kept at all. doctor's `history`
   warning says why and what to do, and its data gains `spooled` (#213).
+
+### Documentation
+- Troubleshooting: slow start on Windows, with bytecode, an antivirus exclusion or a Dev
+  Drive for uv's folders (`UV_TOOL_DIR`, `UV_PYTHON_INSTALL_DIR`) (#223, #216).
 
 ## 0.22.0 - 2026-10-07
 

@@ -116,6 +116,16 @@ def test_release_renders() -> None:
     assert '"promptmend-$VERSION-py3-none-any.whl"' in workflow
 
 
+# Every install compiles the bytecode then, where a wait is expected, rather than on the first
+# run, which takes seconds on a machine that scans each new file (#216).
+@pytest.mark.parametrize("name", ["install.ps1", "install_macos.sh", "install_windows.ps1"])
+def test_install_compiles_bytecode(name: str) -> None:
+    text = (SCRIPTS / name).read_text("utf-8")
+    calls = re.findall(r"(?m)^\s*(?:uv tool install|\$InstallArgs = @\('tool', 'install').*$", text)
+    assert calls
+    assert all("--compile-bytecode" in call for call in calls), calls
+
+
 def test_readme_url() -> None:
     readme = (REPO / "README.md").read_text("utf-8")
     url = "https://github.com/vlastimilbures/promptmend/releases/latest/download/"
@@ -140,7 +150,10 @@ def test_install_command() -> None:
     assert '$Download = "$Repo/releases/download/v$Version"' in code
     assert '$Spec = "$Download/promptmend-$Version-py3-none-any.whl"' in code
     assert '$Constraints = "$Download/constraints.txt"' in code
-    assert "$InstallArgs = @('tool', 'install', '--force', $Spec, '-c', $Constraints)" in code
+    assert (
+        "$InstallArgs = @('tool', 'install', '--force', '--compile-bytecode', $Spec, "
+        "'-c', $Constraints)" in code
+    )
     assert "Assert-Native 'uv' $InstallArgs" in code
     assert "promptmend==" not in code
     assert "@('tool', 'update-shell')" in code

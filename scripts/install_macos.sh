@@ -33,11 +33,12 @@ if grep -q '^espanso-prompt-rewriter ' <<<"$tools"; then
 fi
 
 # `uv tool install` ignores uv.lock, so pass the locked versions as constraints (#34). The
-# tool gets its own isolated environment; dev dependencies are not needed to deploy.
+# tool gets its own isolated environment; dev dependencies are not needed to deploy. Bytecode is
+# compiled now, where a wait is expected, not on the first run (#216).
 constraints="$(mktemp)"
 trap 'rm -f "$constraints"' EXIT
 uv export --frozen --no-dev --no-emit-project --no-hashes --quiet -o "$constraints"
-uv tool install --editable . --force -c "$constraints"
+uv tool install --editable . --force --compile-bytecode -c "$constraints"
 
 # Ask uv where it installed the tool rather than `command -v`, which would pick up an
 # activated project venv whose binary disappears if .venv is removed.
