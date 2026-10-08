@@ -317,6 +317,15 @@ Rules for agents:
   `% ^ & | < >`) are allowed since #18. Every external command
   (`espanso path config`, `espanso restart`/`start`, `uv tool dir`, `brew --prefix`) goes
   through `run_command`, which `tests/conftest.py` replaces with a refusal.
+- `espanso_windows.py` — on Windows (`deploy.WINDOWS_ESPANSO`, which conftest pins to
+  False), `deploy.run_command()` hands every `espanso …` argv to `run()`, which never reads
+  Espanso's output (`espansod.exe` writes to the parent console, #210): it finds
+  `espansod.exe` (running process via ctypes, PATH, `%LOCALAPPDATA%\Programs\Espanso`, the
+  uninstall registry; #211), answers `path config` from disk (portable `.espanso` next to it,
+  else `%APPDATA%\espanso`), `status` from the named pipe `espansodaemonv2`, and runs
+  `start`/`restart` behind `%SystemRoot%\System32\cmd.exe /d /c` with `CREATE_NO_WINDOW |
+  CREATE_NEW_PROCESS_GROUP` and DEVNULL stdio, then polls the pipe (#209). Probes are
+  injected via `System` (`tests/test_espanso_windows.py`).
 - `commands/` — the management commands (#92): `setup`, `config show|get|set|unset|validate|
   migrate|rollback`, `secrets set|status|remove`, `profiles list|migrate`, `stats` (`--verbose` adds the disclosure and notes, #222),
   `history export|prune|reset`, `doctor` (plus `espanso` in `cli.py`, which gained

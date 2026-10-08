@@ -309,6 +309,7 @@ promptmend/
 │   ├── profiles.py               migrate a checkout's own profiles to the user directory
 │   ├── assets.py                 the packaged Espanso match files (importlib.resources)
 │   ├── deploy.py                 espanso deploy/status/detach: manifest, states, stable launcher
+│   ├── espanso_windows.py        Espanso on Windows without reading its output (#209-#211)
 │   ├── match_history.py          generated: digests of every released match file source
 │   ├── prompts/
 │   │   ├── default.md            golden-template rewrite (-i-, -ip-, -if-)

@@ -836,7 +836,8 @@ def test_run_command_keeps_the_first_useful_stderr_line() -> None:
 
 def test_run_command_resolves_through_path(monkeypatch: pytest.MonkeyPatch) -> None:
     """On Windows `espanso` is `espanso.cmd`: it is run by the path `shutil.which` gives, so
-    an installed command is never reported as missing (#115)."""
+    an installed command is never reported as missing (#115). (Since #210 a Windows run
+    answers `espanso` itself; that is tested in test_espanso_windows.py.)"""
     seen = []
 
     def which(name: str) -> str:

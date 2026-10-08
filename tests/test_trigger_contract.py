@@ -244,6 +244,7 @@ FORBIDDEN = (
     "tomlkit",
     "keyring",
     "promptmend.deploy",
+    "promptmend.espanso_windows",
     "promptmend.commands",
     "promptmend.doctor",
     "promptmend.smoke",
