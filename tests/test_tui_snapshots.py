@@ -33,6 +33,7 @@ from promptmend.tui import app as app_module
 from promptmend.tui import brand, home
 from promptmend.tui.app import HIGH_CONTRAST, ManageApp
 from promptmend.tui.console import CommandLine
+from promptmend.tui.setup_wizard import SetupOptions, SetupScreen
 from promptmend.tui.state import State
 
 pytestmark = pytest.mark.skipif(
@@ -242,8 +243,11 @@ def _shoot(
     typed: str = "",
     ran: Ran | None = None,
     button: str | None = None,
+    setup: int | None = None,
 ) -> str:
-    app = ManageApp(loader=loader, intro=intro)
+    # With ``setup``, the setup wizard as `setup` opens it, moved on that many steps.
+    options = SetupOptions(standalone=True) if setup is not None else None
+    app = ManageApp(loader=loader, intro=intro, setup=options)
     # The active tab's underline slides into place; a snapshot must not catch it midway.
     app.animation_level = "none"
     shots: list[str] = []
@@ -264,6 +268,15 @@ def _shoot(
                 if ran is not None:  # Enter runs the line through a fake: no child
                     line.runner = lambda argv: ran
                 await pilot.press(*typed, *(["enter"] if ran is not None else []))
+                for _ in range(3):
+                    await pilot.pause()
+                    await app.workers.wait_for_complete()
+            for _ in range(setup or 0):
+                # The action, not Button.press(): a pressed button keeps its active style
+                # for a moment, so a shot would depend on the runner's speed.
+                wizard = app.screen
+                assert isinstance(wizard, SetupScreen)
+                wizard.action_next()
                 for _ in range(3):
                     await pilot.pause()
                     await app.workers.wait_for_complete()
@@ -306,6 +319,19 @@ def test_snapshot_settings(name: str, size: tuple[int, int]) -> None:
     svg = _shoot("2", loader=settings_state, size=size)
     assert "snapshot persona" not in svg
     _check(name, svg)
+
+
+# The setup wizard: the first step, the provider list (80 columns) and the last step.
+@pytest.mark.parametrize(
+    ("name", "steps", "size"),
+    [
+        ("setup-welcome", 0, SIZE),
+        ("setup-provider", 1, (80, 24)),
+        ("setup-done", 6, SIZE),
+    ],
+)
+def test_snapshot_setup(name: str, steps: int, size: tuple[int, int]) -> None:
+    _check(name, _shoot(None, size=size, setup=steps))
 
 
 def test_snapshot_high_contrast() -> None:

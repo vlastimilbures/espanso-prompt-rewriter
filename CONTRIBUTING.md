@@ -287,13 +287,14 @@ promptmend/
 │   │                             shell: thin Typer wrappers over the services (common.py: exit
 │   │                             codes)
 │   ├── tui/                      the full-screen Textual interface; only `ui` (commands/ui.py,
-│   │                             also a bare promptmend on a terminal) loads it
+│   │                             also a bare promptmend and `setup` on a terminal) loads it
 │   ├── console.py                the command line without a screen: completion, help, POLICY
 │   │                             (Home's command line and `promptmend shell`)
 │   ├── doctor.py                 the doctor report (stable JSON, never a key or persona)
 │   ├── update_check.py           asks PyPI, at most once a day, for a newer release
 │   ├── local_probe.py            asks a loopback Ollama or LM Studio whether it answers
 │   ├── smoke.py                  setup's smoke test: improve against a stub on 127.0.0.1
+│   ├── setup_guide.py            what setup says at each step (wizard and text flow), no Textual
 │   ├── previous_install.py       finds an earlier checkout install whose .env this one misses
 │   ├── config.py                 Settings from the environment, config.toml or .env
 │   ├── config_files.py           reads config.toml/secrets.toml; atomic, private writes

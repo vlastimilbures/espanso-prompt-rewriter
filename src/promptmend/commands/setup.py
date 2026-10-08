@@ -10,12 +10,23 @@ from pathlib import Path
 
 import typer
 
-from .. import config, config_files, config_store, deploy, previous_install, profiles, smoke
+from .. import (
+    assets,
+    config,
+    config_files,
+    config_store,
+    deploy,
+    previous_install,
+    profiles,
+    setup_guide,
+    smoke,
+)
 from ..config import setting_fields
 from ..factory import PROVIDER_NAMES
-from ..prompt_builder import PROFILES, system_prompt
+from ..prompt_builder import PROFILES, system_prompt, user_profiles
 from ..redaction import safe_repr
 from . import common
+from . import settings as settings_cmd
 from .common import guard
 from .usage import disclosure
 
@@ -200,13 +211,46 @@ def _choose(option: str | None, question: str, current: str, interactive: bool) 
     return common.ask(question, current) if interactive else current
 
 
+# The setting each choice is, and its Settings field.
+_CHOICES = {"PROMPT_PROVIDER": "provider", "PROMPT_PROFILE": "profile"}
+
+
+def save_choice(name: str, value: str) -> str | None:
+    """Save PROMPT_PROVIDER or PROMPT_PROFILE as setup does, shared with the wizard: an
+    unchanged value writes nothing (None), and a default is not pinned but removed from
+    config.toml, so a later change of the default still applies. Else what was done."""
+    field = _CHOICES[name]
+    if getattr(common.load_layers()[1], field) == value:
+        return None
+    if value == _DEFAULTS[name]:
+        removed, path = settings_cmd.unset_setting(name)
+        if removed and getattr(common.load_layers()[1], field) == value:
+            return f"{name} removed from {path}; its default, {value}, applies"
+    saved = settings_cmd.save_setting(name, value)
+    notes = settings_cmd.after_save(name)
+    return "; ".join([f"{name}={value} saved in {saved.path}", *notes])
+
+
 def _save_choices(steps: _Steps, provider: str, profile: str) -> None:
-    changes: dict[str, str | None] = {}
+    changed = False
     for name, value in (("PROMPT_PROVIDER", provider), ("PROMPT_PROFILE", profile)):
-        # A default is not pinned, so a later change of the default still applies.
-        changes[name] = None if value == _DEFAULTS[name] else value
+        try:
+            message = save_choice(name, value)
+        except (ValueError, common.CommandError, config_store.ConfigStoreError) as exc:
+            steps.fail("settings", str(exc))
+            return
+        if message:
+            typer.echo(f"  {message}")
+            changed = True
+    if changed:
+        return
+    snapshot = config_store.read_settings()
+    if config_files.is_file(snapshot.path):
+        typer.echo("  Unchanged.")
+        return
+    # Saved mode from here on, even with every default: config.toml is where settings go.
     try:
-        saved = config_store.save_settings(config_store.read_settings(), changes)
+        saved = config_store.save_settings(snapshot, {})
     except (ValueError, config_store.ConfigStoreError) as exc:
         steps.fail("settings", str(exc))
         return
@@ -216,12 +260,29 @@ def _save_choices(steps: _Steps, provider: str, profile: str) -> None:
 def _key_step(
     steps: _Steps, provider: str, *, writable: bool, from_stdin: bool, interactive: bool
 ) -> None:
-    name = PROVIDER_KEYS.get(provider)
-    if name is None:
-        typer.echo(f"  {provider} runs locally and needs no key (the OpenRouter triggers do).")
-        if from_stdin:
+    """With --api-key-stdin, the provider's key; else every key the triggers or the provider
+    need (an Ollama default still leaves -i- on OpenRouter)."""
+    if from_stdin:
+        name = PROVIDER_KEYS.get(provider)
+        if name is None:
             steps.fail("key", f"--api-key-stdin was given, but {provider} takes no key")
+            return
+        _one_key(steps, name, writable=writable, from_stdin=True, interactive=interactive)
         return
+    layers, settings = common.load_layers()
+    rows = [r for r in setup_guide.key_rows(layers, settings, assets.triggers()) if r.needed]
+    if not rows:
+        typer.echo("  No key needed: every active trigger and your provider run locally.")
+        return
+    for row in rows:
+        typer.echo(f"  {setup_guide.key_line(row)}")
+    for row in rows:
+        _one_key(steps, row.name, writable=writable, from_stdin=False, interactive=interactive)
+
+
+def _one_key(
+    steps: _Steps, name: str, *, writable: bool, from_stdin: bool, interactive: bool
+) -> None:
     layers, _ = common.load_layers()
     entry = layers.entries[name]
     if not writable:
@@ -270,8 +331,9 @@ def _deploy_step(
     except (deploy.DeployError, ValueError, OSError) as exc:
         steps.fail("deploy", str(exc))
         return
-    for step in the_plan.steps:
-        typer.echo(f"  {step.state:<9} {step.name}")
+    width = max((len(step.name) for step in the_plan.steps), default=0)
+    for name, words in setup_guide.file_rows(the_plan):
+        typer.echo(f"  {name:<{width}}  {words}")
     if the_plan.is_noop or the_plan.only_forgets:
         if the_plan.only_forgets:
             try:
@@ -284,9 +346,13 @@ def _deploy_step(
         typer.echo("  Every match file is in sync.")
         return
     if apply is None and interactive:
-        apply = typer.confirm("  Write these match files now?", default=ask_default)
-    if not apply:
+        typer.echo(f"  {setup_guide.deploy_summary(the_plan)}")
+        apply = typer.confirm("  Install them now?", default=ask_default)
+        if not apply:
+            typer.echo("  Not installed; nothing was written.")
+    elif not apply:
         typer.echo("  Dry run: nothing was written.")
+    if not apply:
         steps.later("deploy the match files: `promptmend espanso deploy`")
         return
     try:
@@ -341,9 +407,16 @@ def setup(
         "the match files, the deploy manifest or uv name",
         metavar="PATH",
     ),
+    plain: bool = typer.Option(
+        False,
+        "--plain",
+        help="Ask line by line instead of opening the full-screen setup",
+    ),
 ) -> None:
-    """First run: settings, the API key, the Espanso match files and a smoke test against a
-    stub on 127.0.0.1 (never a paid call). Re-run it any time; it changes only what you
+    """First run: settings, the API keys, the Espanso match files and a smoke test against a
+    stub on 127.0.0.1 (never a paid call). On a terminal it opens full screen, one step at a
+    time; with --plain, or any of --provider, --profile, --migrate-from, --deploy/--no-deploy
+    or --no-smoke-test, it asks line by line. Re-run it any time; it changes only what you
     choose."""
     interactive = not non_interactive
     if interactive:
@@ -361,9 +434,21 @@ def setup(
         (migrate_from, "--migrate-from"),
     ):
         common.no_key(value, option)
+    line_by_line = plain or any(
+        (provider, profile, migrate_from, deploy_files is not None, not smoke_test)
+    )
+    if interactive and not line_by_line and common.stdout_is_tty():
+        from .ui import open_setup
+
+        open_setup(espanso_dir=espanso_dir, launcher=launcher, no_restart=no_restart)
+        return
     steps = _Steps()
     layers, settings = common.load_layers()
     common.show_findings(layers)
+    typer.echo(
+        "PromptMend setup: settings, API keys, Espanso's match files and a test on a local "
+        "stub. Nothing changes unless you say yes; re-run it any time."
+    )
 
     steps.heading("Usage history")
     for line in disclosure(settings):
@@ -397,7 +482,13 @@ def setup(
         _profiles_step(steps, previous.root, interactive)
     if writable:
         layers, settings = common.load_layers()
-    chosen = _choose(provider, "  Provider", settings.provider, interactive)
+    if provider is None and interactive:
+        typer.echo(f"  {setup_guide.PROVIDER_INTRO}")
+        for choice in setup_guide.provider_choices(settings, assets.triggers()):
+            typer.echo(f"    {choice.value:<10} {choice.detail}")
+    chosen = _choose(
+        provider, f"  Provider ({', '.join(PROVIDER_NAMES)})", settings.provider, interactive
+    )
     while chosen not in PROVIDER_NAMES:
         if not interactive:
             raise typer.BadParameter(
@@ -406,6 +497,10 @@ def setup(
         typer.echo(f"  Choose one of {', '.join(PROVIDER_NAMES)}.")
         chosen = common.ask("  Provider", settings.provider)
     choices = ", ".join(PROFILES)
+    if profile is None and interactive:
+        typer.echo(f"  {setup_guide.PROFILE_INTRO}")
+        for choice in setup_guide.profile_choices(settings, user_profiles(())):
+            typer.echo(f"    {choice.value:<10} {choice.detail}")
     picked = _choose(
         profile, f"  Default profile ({choices}, or one of yours)", settings.profile, interactive
     )
@@ -419,7 +514,7 @@ def setup(
     elif (chosen, picked) != (settings.provider, settings.profile):
         steps.later(f"set PROMPT_PROVIDER={chosen} and PROMPT_PROFILE={picked} yourself")
 
-    steps.heading("API key")
+    steps.heading("API keys")
     _key_step(steps, chosen, writable=writable, from_stdin=api_key_stdin, interactive=interactive)
 
     steps.heading("Espanso match files")
@@ -459,4 +554,8 @@ def setup(
         typer.echo(f"  to do: {item}")
     if steps.failed:
         common.fail(f"setup did not finish: {', '.join(steps.failed)} failed (see above)")
-    typer.echo("  Setup finished. `promptmend doctor` checks everything again.")
+    if steps.todo:
+        typer.echo(f"  Setup finished with {len(steps.todo)} thing(s) still to do (above).")
+    else:
+        typer.echo(f"  Setup finished. {setup_guide.NEXT_STEP}")
+    typer.echo("  `promptmend doctor` checks everything again.")

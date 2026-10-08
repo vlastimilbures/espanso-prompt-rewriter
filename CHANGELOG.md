@@ -6,6 +6,28 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Added
+- `promptmend setup` in a terminal now opens a full-screen setup, one step at a time:
+  welcome, earlier settings (only when there is a `.env` or an earlier checkout install),
+  provider and profile picked from a list that says what each is and which triggers use it,
+  the API keys, Espanso's match files in words (not installed yet, up to date, you edited it)
+  with an install button, the stub test, and a checklist of what is left with how to try
+  `-i-`. Home's "Setup…" opens it, and a bare `promptmend` opens it by itself once while
+  nothing is set up. `setup --plain` (or any of `--provider`, `--profile`, `--migrate-from`,
+  `--deploy`/`--no-deploy`, `--no-smoke-test`) asks line by line as before;
+  `--non-interactive` is unchanged.
+
+### Fixed
+- `setup` asks for every key the triggers need, not only the chosen provider's: picking
+  Ollama no longer skips `OPENROUTER_API_KEY`, which `-i-` still needs, and no longer ends
+  with "Setup finished" while `-i-` cannot work.
+- `setup` run again with the same choices no longer rewrites `config.toml`.
+
+### Changed
+- `setup` line by line lists the providers and profiles with what each does, shows each
+  match file's state in words, says "Not installed" (not "Dry run") when you answer no, and
+  ends with how to try `-i-` or how many things are left to do.
+
 ## 0.23.0 - 2026-10-08
 
 ### Changed

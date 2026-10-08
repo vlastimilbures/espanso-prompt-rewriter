@@ -262,6 +262,7 @@ class HomePane(Pane):
         yield Static("Checking…", markup=False, id="home-headline")
         yield Static("", id="home-rows")
         yield _buttons(
+            ("home-setup", "Setup…"),
             ("home-reload", "Check again"),
             ("home-previous", "Previous install…"),
             ("home-recipes", "Recipes…"),
@@ -370,6 +371,10 @@ class HomePane(Pane):
     @on(Button.Pressed, "#home-previous")
     def _previous(self) -> None:
         self.manage.open_previous()
+
+    @on(Button.Pressed, "#home-setup")
+    def _setup(self) -> None:
+        self.manage.open_setup()
 
     @on(Button.Pressed, "#home-recipes")
     def _recipes(self) -> None:

@@ -41,6 +41,18 @@ def ui(
         )
     from ..tui.app import ManageApp
 
-    interface = ManageApp(intro=not no_intro and wants_intro())
+    interface = ManageApp(intro=not no_intro and wants_intro(), first_run=True)
+    interface.run()
+    sys.exit(interface.return_code or 0)
+
+
+def open_setup(*, espanso_dir: str | None, launcher: str | None, no_restart: bool) -> None:
+    """`setup` on a terminal: the interface opened on its setup wizard, which quits when done
+    (Open PromptMend stays in the interface)."""
+    from ..tui.app import ManageApp
+    from ..tui.setup_wizard import SetupOptions
+
+    options = SetupOptions(espanso_dir, launcher, no_restart, standalone=True)
+    interface = ManageApp(intro=False, setup=options)
     interface.run()
     sys.exit(interface.return_code or 0)
