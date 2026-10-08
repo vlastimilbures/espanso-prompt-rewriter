@@ -201,7 +201,7 @@ promptmend config set PROMPT_LOCAL_ONLY true    # optional: refuse every cloud c
 | `-il-` | General prompt improvement, fully local | Ollama |
 | `-ilm-` | General prompt improvement, fully local | LM Studio |
 | `-p-` | An empty golden template to fill in, opening with your persona | — |
-| `-risk-` | An enterprise-risk analysis prompt scaffold | — |
+| `-risk-` | A static risk-analysis prompt scaffold to fill in | — |
 
 - A trigger fires only at the start of a word, never inside `a[n-i-1]`.
 - It sends whatever is on the clipboard, so copy the draft first.
@@ -276,7 +276,7 @@ such call carries:
 - the model name and request settings;
 - the API key, only as the authentication header of its own provider.
 
-The gate blocks keys, tokens, passwords, payment cards, Vietnamese national IDs, emails, IBANs,
+The gate blocks keys, tokens, passwords, payment cards, some national ID numbers, emails, IBANs,
 confidentiality labels and your own patterns. `-iok-` sends one flagged draft on purpose when
 every finding is a label, ID, email or IBAN.
 

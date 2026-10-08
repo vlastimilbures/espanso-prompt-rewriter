@@ -74,6 +74,17 @@ All notable changes to this project are documented here. The format follows
   ("Update", "Uninstall"; #221).
 - Troubleshooting: `doctor`'s daily update check (`update-check.json`,
   `PROMPT_UPDATE_CHECK=false`) and its local server check (#222).
+- Install: "Espanso on Windows": open Espanso once from the Start menu and accept its PATH
+  and autostart offer, close every Windows Terminal window before the first `promptmend`
+  command, and where a portable Espanso keeps its configuration (#218).
+- Troubleshooting: on Windows, `promptmend` or `espanso` not recognized right after an
+  install, and two Espanso instances after installing next to a portable copy (#218).
+- Usage: the trigger list gives each trigger's key and whether the draft leaves the machine,
+  and links the data-protection gate and `-iok-`; "The -if- form" lists the shipped models
+  and how `model@endpoint` sets the endpoint pin (#219).
+- Neutral wording: `-risk-` is described as a risk-analysis scaffold, and the gate's ID
+  check as national ID numbers (Vietnamese formats only today); the match files and patterns
+  are unchanged (#219).
 
 ## 0.22.0 - 2026-10-07
 

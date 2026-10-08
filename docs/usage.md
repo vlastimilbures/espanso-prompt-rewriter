@@ -18,21 +18,30 @@ match files it writes into Espanso. Read it after [installing](install.md) and r
 
 ## Triggers
 
-| Trigger | What it does | Provider | Profile |
-|---------|--------------|----------|---------|
-| `-i-` | Rewrites the clipboard into the golden template | OpenRouter | `PROMPT_PROFILE` (`default`) |
-| `-ip-` | The same rewrite on the pro tier (a reasoning model, slower) | OpenRouter | `PROMPT_PRO_PROFILE`, else `PROMPT_PROFILE` |
-| `-if-` | The same rewrite; a form picks model, effort, tokens and timeout | OpenRouter | as `-ip-` |
-| `-iok-` | `-i-`, sent once despite a flagged label, ID, email or IBAN | OpenRouter | `PROMPT_PROFILE` |
-| `-il-` | General prompt improvement, fully local | Ollama | `general` |
-| `-ilm-` | General prompt improvement, fully local | LM Studio | `general` |
-| `-ic-` | General improvement through Claude (commented out by default) | Anthropic | `general` |
-| `-p-` | An empty golden template to fill in, opening with your persona | — | — |
-| `-risk-` | An enterprise-risk analysis prompt scaffold | — | — |
+| Trigger | What it does | Provider | Key | Leaves the machine | Profile |
+|---------|--------------|----------|-----|--------------------|---------|
+| `-i-` | Rewrites the clipboard into the golden template | OpenRouter | `OPENROUTER_API_KEY` | Yes, [gated](privacy.md#the-data-protection-gate) | `PROMPT_PROFILE` (`default`) |
+| `-ip-` | The same rewrite on the pro tier (a reasoning model, slower) | OpenRouter | `OPENROUTER_API_KEY` | Yes, [gated](privacy.md#the-data-protection-gate) | `PROMPT_PRO_PROFILE`, else `PROMPT_PROFILE` |
+| `-if-` | The same rewrite; a [form](#the--if--form) picks model, effort, tokens and timeout | OpenRouter | `OPENROUTER_API_KEY` | Yes, [gated](privacy.md#the-data-protection-gate) | as `-ip-` |
+| `-iok-` | `-i-`, sent once despite a flagged label, ID, email or IBAN ([overriding a block](privacy.md#overriding-a-block)) | OpenRouter | `OPENROUTER_API_KEY` | Yes, gated, flagged soft findings let through | `PROMPT_PROFILE` |
+| `-il-` | General prompt improvement, fully local | Ollama | — | No (see below) | `general` |
+| `-ilm-` | General prompt improvement, fully local | LM Studio | — | No (see below) | `general` |
+| `-ic-` | General improvement through Claude (commented out by default) | Anthropic | `ANTHROPIC_API_KEY` | Yes, [gated](privacy.md#the-data-protection-gate) | `general` |
+| `-p-` | An empty golden template to fill in, opening with your persona | — | — | No | — |
+| `-risk-` | A static risk-analysis prompt scaffold to fill in | — | — | No | — |
 
 `PROMPT_PRO_PROFILE` is empty by default, so `-ip-` and `-if-` use `PROMPT_PROFILE` too. In
 `-if-`, a model other than `OPENROUTER_PRO_MODEL` always gets `PROMPT_PROFILE`. The local
 triggers always use `general`. See [Profiles](profiles.md) for what each profile does.
+
+"Gated" means the [data-protection gate](privacy.md#the-data-protection-gate) scans the draft
+first and blocks keys, tokens, passwords, cards, IDs, confidentiality labels and your own
+patterns. `-iok-` lets one draft through when every finding is a label, an ID, an email
+address or an IBAN; keys, tokens, passwords, cards and your own patterns stay blocked.
+`ALLOW_CLOUD_OVERRIDE=true` turns the gate off for every call, so prefer `-iok-`. `-il-` and
+`-ilm-` keep the draft on your machine only while their base URL is loopback and the Ollama
+model has no `cloud` tag; otherwise the draft leaves it and the gate runs as for a cloud call
+(see [Local only](privacy.md#local-only)).
 
 One rule decides which triggers a deploy turns on: a trigger is active unless it needs a key
 you opt into. So `-il-` and `-ilm-` are always active, even with no Ollama or LM Studio
@@ -141,7 +150,7 @@ Three things to know:
 
 | Field | Choices |
 |-------|---------|
-| Model | `model@endpoint`: the OpenRouter slug plus its endpoint pin; `@auto` leaves routing to OpenRouter |
+| Model | `model@endpoint`: the OpenRouter slug plus its endpoint pin; `@auto` leaves routing to OpenRouter. Shipped: `openai/gpt-6-luna@openai`, `openai/gpt-6-luna@auto`, `google/gemini-3.8-flash@google-ai-studio`, `google/gemini-3.5-flash-lite@google-ai-studio/flex` |
 | Effort | `none`, `minimal`, `low`, `medium`, `high` |
 | Max tokens | `2400`, `4000`, `8000`, `16000` |
 | Timeout (s) | `30`, `60`, `120` |
@@ -150,6 +159,12 @@ Every list starts with, and defaults to, `default`, which keeps the pro-tier set
 `OPENROUTER_PRO_MODEL` with its `OPENROUTER_PRO_PROVIDER` pin, `OPENROUTER_PRO_REASONING_EFFORT`,
 `OPENROUTER_PRO_MAX_TOKENS` (or `OPENROUTER_MAX_TOKENS` while that is empty, as it is by
 default) and `PROMPT_PRO_TIMEOUT_SECONDS`.
+
+The four picks reach the CLI as `--model`, `--effort`, `--max-tokens` and `--timeout`, each
+one whole argument, on top of `--tier pro`. In `--model`, the part before `@` is the model and
+the part after it replaces the `OPENROUTER_PRO_PROVIDER` pin for this call, so
+`google/gemini-3.5-flash-lite@google-ai-studio/flex` runs that model on Google AI Studio's
+flex endpoint.
 
 - Many reasoning models count thinking tokens against the max-tokens cap, so pair `high`
   effort with `8000` or more, or the rewrite can come back cut short.
