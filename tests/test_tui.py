@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from textual.pilot import Pilot
 from textual.widgets import Button, Input, OptionList, Select, Static, TabbedContent
+from textual.worker import WorkerCancelled
 
 from promptmend import config, config_store, deploy, doctor, history, smoke
 from promptmend import profiles as profile_service
@@ -85,7 +86,12 @@ async def settle(pilot: Pilot[int]) -> None:
     """Let every worker (the state load, an action) and what it set off finish."""
     for _ in range(4):
         await pilot.pause()
-        await pilot.app.workers.wait_for_complete()
+        # A newer state load cancels an older one (exclusive group "load"), as a deploy's
+        # early reload and _done()'s do on a slow runner (#215): that one never completes.
+        waits = [worker.wait() for worker in pilot.app.workers]
+        for result in await asyncio.gather(*waits, return_exceptions=True):
+            if isinstance(result, BaseException) and not isinstance(result, WorkerCancelled):
+                raise result
     await pilot.pause()
 
 
