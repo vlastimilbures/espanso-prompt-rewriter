@@ -385,6 +385,10 @@ def _health(**changes: Any) -> Health:
         (True, {"lost_writes": 2, "tracking_incomplete": True}, "warn", "2 write(s) lost"),
         (True, {"writable": False, "tracking_incomplete": True}, "warn", "not writable"),
         (True, {"error": "corrupt"}, "warn", "corrupt"),
+        (True, {"lost_writes": 1, "tracking_incomplete": True}, "warn", "endpoint scanning"),
+        (True, {"spooled": 2}, "warn", "2 record(s) waiting in history.spool"),
+        (True, {"error": "locked", "spooled": 1}, "warn", "locked; 1 record(s) waiting"),
+        (True, {"tracking_incomplete": True}, "warn", "cannot be read"),
     ],
 )
 def test_history_check(

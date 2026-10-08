@@ -331,7 +331,11 @@ def test_locked_history_changes_nothing(cloud: None, fake_http: FakeHttp) -> Non
         assert _run(CLOUD) == "rewrite"
         other.execute("ROLLBACK")
     assert len(fake_http.requests) == 2
-    assert HistoryStore(path).health().lost_writes == 1
+    health = HistoryStore(path).health()
+    assert (health.lost_writes, health.spooled, health.operations) == (0, 1, 1)
+    # The next run stores the spooled record too (#213).
+    assert _run(CLOUD) == "rewrite"
+    assert HistoryStore(path).health().operations == 3
 
 
 def test_failing_history_changes_nothing(

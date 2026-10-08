@@ -18,10 +18,13 @@ import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from . import __version__, config, config_files, deploy, update_check
 from .config import ConfigLayers, secret_names
+
+if TYPE_CHECKING:
+    from .history import Health
 
 SCHEMA_VERSION = 1
 OK, WARN, FAIL, INFO = "ok", "warn", "fail", "info"
@@ -76,6 +79,7 @@ DATA_KEYS = {
         "tracking_incomplete",
         "writable",
         "error",
+        "spooled",
     ),
     "sqlite": ("version", "wal_reset_bug", "journal_mode"),
     "clipboard": ("read", "length", "concealed", "error"),
@@ -419,20 +423,48 @@ def _launcher_check(current: str | None, manifest: deploy.Manifest | None) -> Ch
     return Check("launcher", OK, f"the deployed matches call {', '.join(deployed)}{note}", data)
 
 
+def _history_problem(health: Health) -> str:
+    """What is wrong with the history, why, and what to do about it."""
+    if health.lost_writes:
+        problem = (
+            f"tracking incomplete: {health.lost_writes} write(s) lost, the last at "
+            f"{health.last_lost_utc or 'an unknown time'}. A write that takes longer than its "
+            "time budget (a slow first write, or antivirus or endpoint scanning of the data "
+            "folder) now waits in history.spool for the next call or `promptmend stats`; "
+            "`promptmend history reset` clears the count"
+        )
+    elif not health.writable:
+        problem = "tracking incomplete: not writable; check the data folder's permissions"
+    elif health.tracking_incomplete:
+        problem = "tracking incomplete: history.lost or history.spool cannot be read"
+    else:
+        problem = ""
+    if health.error:
+        problem = f"{health.error}{'; ' + problem if problem else ''}"
+    if health.spooled:
+        waiting = (
+            f"{health.spooled} record(s) waiting in history.spool: run `promptmend stats` "
+            "to store them, or `promptmend history reset` if the database is corrupt"
+        )
+        problem = f"{problem}; {waiting}" if problem else waiting
+    return problem
+
+
 def _history_checks(settings: config.Settings) -> tuple[Check, Check]:
     from .history import HistoryStore, wal_is_safe
 
-    health = HistoryStore.from_settings(settings).health()
+    store = HistoryStore.from_settings(settings)
+    if settings.history:
+        # Stores the records a write that missed its time budget left in the spool (#213).
+        store.replay()
+    health = store.health()
     data = {"enabled": settings.history, **vars(health)}
     data.pop("sqlite_version")
     journal = data.pop("journal_mode")
     if not settings.history:
         history = Check("history", INFO, "off (PROMPT_HISTORY=false)", data)
-    elif health.error or health.tracking_incomplete:
-        reason = health.error or (
-            f"{health.lost_writes} write(s) lost" if health.lost_writes else "not writable"
-        )
-        history = Check("history", WARN, f"tracking incomplete: {reason} ({health.path})", data)
+    elif health.error or health.tracking_incomplete or health.spooled:
+        history = Check("history", WARN, f"{_history_problem(health)} ({health.path})", data)
     else:
         count = health.operations if health.operations is not None else 0
         history = Check("history", OK, f"{count} call(s) recorded in {health.path}", data)

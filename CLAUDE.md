@@ -198,9 +198,18 @@ Rules for agents:
   cost leaves it `unknown`); a bad required one drops the record. `tests/test_history.py` holds the allowlist and fails on any other column; add a
   column only through a new `_MIGRATIONS` step (forward only, `PRAGMA user_version`). Money is
   exact decimal TEXT plus a unit, never REAL. `record()` never raises and returns within `_BUDGET`
-  (0.25 s) from its start: one `BEGIN IMMEDIATE` transaction within `_WRITE_BUDGET`, and a
-  dropped write bumps the `history.lost` sidecar (temp file + `os.replace` under a lock file
-  holding a nonce; a stale one is broken by renaming it first). The services (`stats`, `export`, `prune`,
+  (0.25 s) from its start: one `BEGIN IMMEDIATE` transaction within `_WRITE_BUDGET`. A write
+  that fails (budget, lock, corrupt; #213) goes to the `history.spool` sidecar
+  (`_spool_or_mark()`: the validated rows as `{column: value}` of the two allowlists only,
+  at most `_SPOOL_LIMIT` 100 records / `_SPOOL_BYTES`), and an invalid record, a full or
+  unwritable spool bumps `history.lost` (both: temp file + `os.replace` under one lock file
+  holding a nonce; a stale one is broken by renaming it first). The next `record()` (in its
+  own transaction), `stats()`, `export()` and doctor (`replay()`) validate each spooled entry
+  again (`_from_spool()`: the same row functions, so shapes and `_looks_secret()` apply) and
+  store it; `_settle_spool()` then drops the stored and invalid entries under the lock, the
+  invalid ones (a non-spool file once) counted in `history.lost`. `health().spooled` counts
+  what waits; `reset()` deletes the spool. `_CREATE_EXTRA` also applies while the database
+  is under 8 KiB (no schema yet). The services (`stats`, `export`, `prune`,
   `reset`) raise `HistoryError`; `reset()` deletes the file only on `UnusableHistory` (corrupt
   or newer schema), never when it is merely locked. `health()` never raises and sets
   `tracking_incomplete` when writes were lost or the files cannot be written. The write that creates the
@@ -556,7 +565,9 @@ Rules for agents:
 - `doctor.py` — `run()` returns a `Report` of the fixed `CHECK_IDS` (JSON `schema_version` 1:
   only add ids/keys). Read-only: `espanso path config`/`espanso status` and the launcher lookup
   via `run_command`; keys as set/not set; the clipboard only as a length (never read when
-  concealed). Match files `stale`/`missing` or a deployed launcher that is gone fail (exit 4).
+  concealed); the one write: with history on, the `history` check first `replay()`s the
+  spool (#213), and its WARN names the reason and the fix (`_history_problem()`, data
+  `spooled`). Match files `stale`/`missing` or a deployed launcher that is gone fail (exit 4).
   The `persona` check (shared with `config validate` via `persona_problem()`) runs
   `redaction.scan()` (no `bare_token`) with `PROMPT_EXTRA_PATTERNS` over `PROMPT_PERSONA`, which
   the gate never scans, and warns by finding name only (#29), only when a configured profile's

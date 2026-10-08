@@ -54,7 +54,8 @@ def migrate_folders(environ: Mapping[str, str] = os.environ) -> list[str]:
 
 
 # Files that belong to another one and move with it, all or none: SQLite's journals next to
-# history.sqlite3, and history.py's lock, temporary and stale-lock files next to history.lost.
+# history.sqlite3, and history.py's lock, temporary and stale-lock files next to history.lost
+# (history.spool's temporary file too).
 # A -wal moved next to someone else's database would corrupt it.
 _COMPANION = re.compile(r"(-wal|-shm|-journal|\.lock(\.[0-9a-f]+\.stale)?|\.\d+\.tmp)$")
 

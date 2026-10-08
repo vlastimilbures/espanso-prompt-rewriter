@@ -266,16 +266,21 @@ def seed_history(monkeypatch: pytest.MonkeyPatch) -> SeedHistory:
     ) -> HistoryStore:
         store = store or history.HistoryStore(history.history_path())
         errors: list[BaseException | None] = []
-        mark_lost = store._mark_lost
+        mark_lost, spool_or_mark = store._mark_lost, store._spool_or_mark
 
         def capture(*args: Any, **kwargs: Any) -> bool:
             errors.append(sys.exception())  # record() calls it inside its except block
             return mark_lost(*args, **kwargs)
 
+        def capture_spool(*args: Any, **kwargs: Any) -> bool:
+            errors.append(sys.exception())
+            return spool_or_mark(*args, **kwargs)
+
         with monkeypatch.context() as patch:
             patch.setattr(history, "_BUDGET", 60.0)
             patch.setattr(history, "_WRITE_BUDGET", 30.0)
             patch.setattr(store, "_mark_lost", capture)
+            patch.setattr(store, "_spool_or_mark", capture_spool)
             stored = store.record(operation, attempts)
         if not stored:
             marker = store.lost_path.read_text("utf-8") if store.lost_path.is_file() else None

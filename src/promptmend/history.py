@@ -7,8 +7,10 @@ be a known enum or a short identifier with no spaces, so prose cannot get in.
 
 Writes (HistoryStore.record) are fail-open: a locked, read-only, full or corrupt database
 never raises to the caller, and a write gives up within a fixed time budget (a little more for
-the one write that creates the database). A dropped write
-bumps a small sidecar marker, which health() reports, so lost tracking stays visible.
+the one write that creates the database). A write that misses its budget is kept in a small
+spool file of the same allowlisted columns, which the next record(), stats(), export() or
+replay() stores (#213). A record that is truly dropped (the spool is full or cannot be
+written) bumps a small sidecar marker, which health() reports, so lost tracking stays visible.
 
 sqlite3, tomllib, csv and decimal are imported inside the functions that use them, so
 importing this module (for the paths) costs nothing on the trigger path.
@@ -42,6 +44,18 @@ if TYPE_CHECKING:
 DB_NAME = "history.sqlite3"
 # Sidecar marker of dropped writes, next to the database (JSON: count and last time).
 LOST_NAME = "history.lost"
+# Records whose write missed its budget, next to the database, until a later write stores them
+# (JSON: {"version": 1, "records": [{"operation": {column: value}, "attempts": [...]}]}).
+SPOOL_NAME = "history.spool"
+_SPOOL_VERSION = 1
+# Most records the spool holds; a record past it is dropped and counted as lost.
+_SPOOL_LIMIT = 100
+# Largest spool file read or written; a larger one counts as corrupt.
+_SPOOL_BYTES = 512 * 1024
+# A database file smaller than this has no schema yet (one with both tables is ~24 KiB), so the
+# write that finally creates it still gets _CREATE_EXTRA: a first write that ran out of time
+# can leave an empty file behind.
+_NO_SCHEMA_BYTES = 8192
 # The optional user price table for estimated costs, in the config dir (D-HIST-1).
 PRICES_NAME = "prices.toml"
 
@@ -225,6 +239,10 @@ class UnusableHistory(HistoryError):
 
 class InvalidRecord(ValueError):
     """A record value is not on the allowlist; the whole record is dropped."""
+
+
+# One record as database rows: the operation row and its attempt rows.
+_Spooled = tuple[tuple[object, ...], list[tuple[object, ...]]]
 
 
 def wal_is_safe(version: str) -> bool:
@@ -499,6 +517,8 @@ class Health:
     error: str | None = None
     # The database's journal mode ("wal", "delete", ...), None while there is no database.
     journal_mode: str | None = None
+    # Records waiting in the spool for a later write to store them (0 when it cannot be read).
+    spooled: int = 0
 
 
 @dataclass(frozen=True)
@@ -543,6 +563,7 @@ class HistoryStore:
         # in record(), so an invalid one drops the write instead of raising.
         self.extra_patterns = extra_patterns
         self.lost_path = path.with_name(LOST_NAME)
+        self.spool_path = path.with_name(SPOOL_NAME)
         self._prices: PriceTable | None = None
         self._prices_loaded = False
 
@@ -565,10 +586,12 @@ class HistoryStore:
         *,
         prune: bool = False,
     ) -> bool:
-        """Store one operation and its attempts in one short transaction. True when stored
-        (or already stored: a retried write is keyed by (operation_id, seq) and never
-        duplicates a row) or when history is off; False when dropped, which bumps the
-        lost-write marker. Never raises.
+        """Store one operation and its attempts in one short transaction, together with any
+        records waiting in the spool. True when stored (or already stored: a retried write is
+        keyed by (operation_id, seq) and never duplicates a row) or when history is off; False
+        when not stored now: a write that missed its budget is kept in the spool for a later
+        write, and an invalid record (or one the full or unwritable spool cannot take) bumps
+        the lost-write marker. Never raises.
 
         ``prune`` then also deletes up to _PRUNE_BATCH operations older than the retention, in
         a second short transaction after the record committed and only while the budget
@@ -578,9 +601,11 @@ class HistoryStore:
         if not self.enabled:
             return True
         start = time.monotonic()
-        extra_time = 0.0
+        extra_time = _CREATE_EXTRA
         with contextlib.suppress(Exception):
-            extra_time = 0.0 if self.path.is_file() else _CREATE_EXTRA
+            if self.path.stat().st_size >= _NO_SCHEMA_BYTES:
+                extra_time = 0.0
+        sidecar_deadline = start + _BUDGET + extra_time - _MARGIN
         try:
             extra = compile_extra(self.extra_patterns)
             op_id, op = _operation_row(operation, extra)
@@ -589,11 +614,38 @@ class HistoryStore:
                 for seq, at in enumerate(attempts, start=1)
             ]
             cutoff = self._cutoff(timedelta(days=self.retention_days)) if prune else None
-            self._write(op, rows, start + _WRITE_BUDGET + extra_time, cutoff)
         except Exception:
-            self._mark_lost(start + _BUDGET + extra_time - _MARGIN)
+            self._mark_lost(sidecar_deadline)
             return False
+        spooled, pending = self._replayable(extra)
+        try:
+            self._write(op, rows, start + _WRITE_BUDGET + extra_time, cutoff, spooled=spooled)
+        except Exception:
+            self._spool_or_mark(op, rows, sidecar_deadline)
+            return False
+        if pending:
+            self._settle_spool({row[0] for row, _ in spooled}, extra, sidecar_deadline)
         return True
+
+    def replay(self) -> int:
+        """Store the records waiting in the spool now, with a management command's time
+        (stats, export and doctor call it first). Each is validated again; one that is not
+        valid is dropped and counted as lost. Returns how many were stored; never raises."""
+        try:
+            extra = compile_extra(self.extra_patterns)
+            spooled, pending = self._replayable(extra)
+            if not pending:
+                return 0
+            if spooled:
+                op, rows = spooled[0]
+                deadline = time.monotonic() + _SERVICE_TIMEOUT
+                self._write(op, rows, deadline, spooled=spooled[1:])
+            self._settle_spool(
+                {op[0] for op, _ in spooled}, extra, time.monotonic() + _SERVICE_TIMEOUT
+            )
+        except Exception:
+            return 0
+        return len(spooled)
 
     @staticmethod
     def _cutoff(age: timedelta) -> str:
@@ -616,6 +668,8 @@ class HistoryStore:
         rows: list[tuple[object, ...]],
         deadline: float,
         prune_before: str | None = None,
+        *,
+        spooled: Sequence[_Spooled] = (),
     ) -> None:
         import sqlite3
 
@@ -643,12 +697,16 @@ class HistoryStore:
             try:
                 _migrate(conn)
                 remaining_ms()
+                records = [*spooled, (op, rows)]
                 placeholders = ", ".join("?" * len(OPERATION_COLUMNS))
-                conn.execute(f"INSERT OR IGNORE INTO operations VALUES ({placeholders})", op)  # noqa: S608
+                conn.executemany(
+                    f"INSERT OR IGNORE INTO operations VALUES ({placeholders})",  # noqa: S608
+                    [record[0] for record in records],
+                )
                 placeholders = ", ".join("?" * len(ATTEMPT_COLUMNS))
                 conn.executemany(
                     f"INSERT OR IGNORE INTO attempts VALUES ({placeholders})",  # noqa: S608
-                    rows,
+                    [row for record in records for row in record[1]],
                 )
                 conn.execute("COMMIT")
             except BaseException:
@@ -687,14 +745,153 @@ class HistoryStore:
         Never raises."""
         try:
             with self._sidecar_lock(deadline or time.monotonic() + _BUDGET - _WRITE_BUDGET):
+                self._count_lost(1)
+        except Exception:
+            return False
+        return True
+
+    def _count_lost(self, dropped: int) -> None:
+        """Add ``dropped`` to the marker; the caller holds the sidecar lock."""
+        try:
+            count = self._read_lost()[0]
+        except ValueError:
+            count = 0
+        payload = json.dumps({"lost_writes": count + dropped, "last_lost_utc": _now()})
+        temp = self.lost_path.with_name(f"{LOST_NAME}.{os.getpid()}.tmp")
+        temp.write_text(payload, encoding="utf-8")
+        os.replace(temp, self.lost_path)
+
+    # -- spool -----------------------------------------------------------------------------
+
+    def _load_spool(self) -> list[object]:
+        """The spool's entries as written, [] with no spool; OSError when it cannot be read,
+        ValueError when it is not a valid spool (too large, not JSON, unknown version)."""
+        try:
+            with self.spool_path.open("rb") as handle:
+                data = handle.read(_SPOOL_BYTES + 1)
+        except FileNotFoundError:
+            return []
+        if len(data) > _SPOOL_BYTES:
+            raise ValueError("history spool is too large")
+        spool = json.loads(data)
+        if not isinstance(spool, dict) or spool.get("version") != _SPOOL_VERSION:
+            raise ValueError("not a history spool")
+        records = spool.get("records")
+        if not isinstance(records, list):
+            raise ValueError("not a history spool")
+        return records
+
+    def _save_spool(self, records: list[object]) -> None:
+        """Replace the spool with ``records`` (temp file + os.replace), or remove it when
+        there are none; the caller holds the sidecar lock. ValueError when it would be larger
+        than _SPOOL_BYTES."""
+        if not records:
+            self.spool_path.unlink(missing_ok=True)
+            return
+        payload = json.dumps({"version": _SPOOL_VERSION, "records": records})
+        if len(payload.encode("utf-8")) > _SPOOL_BYTES:
+            raise ValueError("history spool is full")
+        temp = self.spool_path.with_name(f"{SPOOL_NAME}.{os.getpid()}.tmp")
+        temp.write_text(payload, encoding="utf-8")
+        os.replace(temp, self.spool_path)
+
+    def _from_spool(self, entry: object, extra: tuple[re.Pattern[str], ...]) -> _Spooled:
+        """One spool entry as database rows, validated again exactly as record() validates a
+        new record (shapes, enums, _looks_secret()); InvalidRecord (or another error) when it
+        is not valid. Only allowlisted keys are read. An estimate is priced again from the
+        current price table."""
+        if not isinstance(entry, dict):
+            raise InvalidRecord("not a spool entry")
+        operation, attempts = entry.get("operation"), entry.get("attempts")
+        if not isinstance(operation, dict) or not isinstance(attempts, list):
+            raise InvalidRecord("not a spool entry")
+        occurred = operation.get("occurred_at_utc")
+        if not isinstance(occurred, str):
+            raise InvalidRecord("occurred_at_utc must be a time")
+        try:
+            when = datetime.strptime(occurred, _TIME_FORMAT).replace(tzinfo=UTC)
+        except ValueError:
+            raise InvalidRecord("occurred_at_utc must be a time") from None
+        op = {name: operation.get(name) for name in OPERATION_COLUMNS}
+        op_id, op_row = _operation_row({**op, "occurred_at_utc": when}, extra)
+        rows = []
+        for seq, attempt in enumerate(attempts, start=1):
+            if not isinstance(attempt, dict):
+                raise InvalidRecord("not a spool entry")
+            at = {name: attempt.get(name) for name in ATTEMPT_COLUMNS}
+            rows.append(_attempt_row(op_id, seq, at, self._price_table(), extra))
+        return op_row, rows
+
+    def _replayable(self, extra: tuple[re.Pattern[str], ...]) -> tuple[list[_Spooled], bool]:
+        """The valid spooled records (at most _SPOOL_LIMIT), and whether the spool has
+        anything to settle (a record, an invalid entry, or a file that is not a spool). An
+        unreadable spool is left for later. Never raises."""
+        try:
+            entries = self._load_spool()
+        except ValueError:
+            return [], True
+        except Exception:
+            return [], False
+        records = []
+        for entry in entries[:_SPOOL_LIMIT]:
+            with contextlib.suppress(Exception):
+                records.append(self._from_spool(entry, extra))
+        return records, bool(entries)
+
+    def _settle_spool(
+        self, stored: set[object], extra: tuple[re.Pattern[str], ...], deadline: float
+    ) -> None:
+        """After a commit: drop the spooled records now in the database (``stored``, their
+        ids) and every entry that is not valid, which counts as lost (a file that is not a
+        spool counts once). Read again under the lock, so an entry another process added
+        since is kept. Gives up at ``deadline`` (the records then replay again later, which
+        INSERT OR IGNORE makes harmless). Never raises."""
+        with contextlib.suppress(Exception), self._sidecar_lock(deadline):
+            try:
+                entries = self._load_spool()
+            except ValueError:
+                entries, dropped = [], 1
+            else:
+                dropped = 0
+            kept = []
+            for entry in entries:
                 try:
-                    count = self._read_lost()[0]
-                except ValueError:
-                    count = 0
-                payload = json.dumps({"lost_writes": count + 1, "last_lost_utc": _now()})
-                temp = self.lost_path.with_name(f"{LOST_NAME}.{os.getpid()}.tmp")
-                temp.write_text(payload, encoding="utf-8")
-                os.replace(temp, self.lost_path)
+                    op_id = self._from_spool(entry, extra)[0][0]
+                except Exception:
+                    dropped += 1
+                    continue
+                if op_id not in stored:
+                    kept.append(entry)
+            self._save_spool(kept[:_SPOOL_LIMIT])
+            dropped += max(0, len(kept) - _SPOOL_LIMIT)
+            if dropped:
+                self._count_lost(dropped)
+
+    def _spool_or_mark(
+        self, op: tuple[object, ...], rows: list[tuple[object, ...]], deadline: float
+    ) -> bool:
+        """Keep a record whose write failed in the spool, for a later write to store: only
+        the allowlisted columns of the rows record() already validated. When the spool is full
+        or cannot be written, count it as lost instead. A spool that is not valid is replaced
+        (and counted once). Gives up at ``deadline``. True when spooled; never raises."""
+        try:
+            with self._sidecar_lock(deadline):
+                try:
+                    try:
+                        entries = self._load_spool()
+                    except ValueError:
+                        self._count_lost(1)
+                        entries = []
+                    if len(entries) >= _SPOOL_LIMIT:
+                        raise ValueError("history spool is full")
+                    entry = {
+                        "operation": dict(zip(OPERATION_COLUMNS, op, strict=True)),
+                        "attempts": [dict(zip(ATTEMPT_COLUMNS, row, strict=True)) for row in rows],
+                    }
+                    self._save_spool([*entries, entry])
+                except Exception:
+                    self._count_lost(1)
+                    return False
         except Exception:
             return False
         return True
@@ -755,7 +952,9 @@ class HistoryStore:
             if not directory.is_dir() or not os.access(directory, os.W_OK | os.X_OK):
                 return False
             return all(
-                os.access(path, os.W_OK) for path in (self.path, self.lost_path) if path.exists()
+                os.access(path, os.W_OK)
+                for path in (self.path, self.lost_path, self.spool_path)
+                if path.exists()
             )
         except Exception:
             return False
@@ -763,11 +962,13 @@ class HistoryStore:
     # -- services --------------------------------------------------------------------------
 
     def health(self) -> Health:
-        """Path, schema version, row counts, the lost-write marker, whether a write could
+        """Path, schema version, row counts, the lost-write marker, the spooled records,
+        whether a write could
         succeed, the SQLite library version and the database's journal mode (WAL had a rare
         reset bug before 3.51.3, so older libraries use the rollback journal).
         ``tracking_incomplete`` is set when writes were lost, the marker cannot be read or the
         files cannot be written, so a store whose database and sidecar both fail still shows.
+        Spooled records are not lost: they show in ``spooled``.
         Never raises; never creates the database."""
         info: dict[str, Any] = {
             "path": str(self.path),
@@ -789,6 +990,7 @@ class HistoryStore:
             info["error"] = "no sqlite3"
         try:
             info["lost_writes"], info["last_lost_utc"] = self._read_lost()
+            info["spooled"] = len(self._load_spool())
             sidecar_ok = True
         except Exception:
             sidecar_ok = False
@@ -823,6 +1025,7 @@ class HistoryStore:
 
         if group_by not in GROUP_BY:
             raise ValueError(f"group_by must be one of {', '.join(GROUP_BY)}")
+        self.replay()
         ops, attempts = self._read_all()
         by_op: dict[str, list[dict[str, Any]]] = {}
         for at in attempts:
@@ -884,6 +1087,7 @@ class HistoryStore:
         "operations", "attempts"}, CSV as one row per attempt joined with its operation (an
         operation without attempts gets one row). Money stays exact text with its unit.
         Returns the number of operations."""
+        self.replay()
         ops, attempts = self._read_all()
         if fmt == "json":
             json.dump(
@@ -930,7 +1134,8 @@ class HistoryStore:
         return int(deleted)
 
     def reset(self) -> None:
-        """Delete every record, compact the file and clear the lost-write marker. Rows are
+        """Delete every record (spooled ones too), compact the file and clear the lost-write
+        marker. Rows are
         deleted rather than the file, so a writer holding it open (or Windows, which cannot
         delete an open file) does not stop it."""
         if self.path.is_file():
@@ -952,9 +1157,10 @@ class HistoryStore:
                         raise HistoryError(f"cannot delete {self.path}{suffix}") from exc
         try:
             with self._sidecar_lock(time.monotonic() + _SERVICE_TIMEOUT):
+                self.spool_path.unlink(missing_ok=True)
                 self.lost_path.unlink(missing_ok=True)
         except (OSError, TimeoutError) as exc:
-            raise HistoryError(f"cannot clear {self.lost_path}") from exc
+            raise HistoryError(f"cannot clear {self.spool_path} or {self.lost_path}") from exc
 
     @contextlib.contextmanager
     def _service(self) -> Iterator[sqlite3.Connection]:

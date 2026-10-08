@@ -317,9 +317,15 @@ usage of a reply that then failed (rejected content, a clipboard error) is still
 never breaks a trigger and delays it by about 0.25 s at most (1 s once, for the write that
 creates the file).
 
-A write that cannot finish in that time (a locked, read-only, full or
-corrupt file) is dropped, and a small `history.lost` file next to it counts the dropped writes.
-Only a disk the operating system itself stalls (a hung network drive) can hold it up longer.
+A write that cannot finish in that time (a slow disk, antivirus or endpoint scanning, a
+locked, read-only or corrupt file) is kept in a small `history.spool` file next to the
+database, in the same [data folder](configuration.md#files-and-folders). It holds exactly the
+columns above, nothing else, and each record is checked again before it is stored. The next
+recorded run, `promptmend stats`, `promptmend history export` and `promptmend doctor` move its
+records into the database. It holds at most 100 records; a record that does not fit (or a
+spool that cannot be written) is dropped, and a small `history.lost` file counts the dropped
+writes. `promptmend history reset` deletes the spool too. Only a disk the operating system
+itself stalls (a hung network drive) can hold a write up longer.
 
 Costs are kept only as the provider reported them; an unknown cost is shown as unknown, never
 as 0. For an estimate where a provider reports no cost (Anthropic), create `prices.toml` in the
