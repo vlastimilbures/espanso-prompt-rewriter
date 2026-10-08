@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## 0.24.0 - 2026-10-08
+
 ### Added
 - `promptmend setup` in a terminal now opens a full-screen setup, one step at a time:
   welcome, earlier settings (only when there is a `.env` or an earlier checkout install),
