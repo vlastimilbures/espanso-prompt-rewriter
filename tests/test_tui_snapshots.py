@@ -33,7 +33,7 @@ from promptmend.tui import app as app_module
 from promptmend.tui import brand, home
 from promptmend.tui.app import HIGH_CONTRAST, ManageApp
 from promptmend.tui.console import CommandLine
-from promptmend.tui.setup_wizard import SetupOptions
+from promptmend.tui.setup_wizard import SetupOptions, SetupScreen
 from promptmend.tui.state import State
 
 pytestmark = pytest.mark.skipif(
@@ -272,7 +272,11 @@ def _shoot(
                     await pilot.pause()
                     await app.workers.wait_for_complete()
             for _ in range(setup or 0):
-                app.screen.query_one("#setup-next-step", Button).press()
+                # The action, not Button.press(): a pressed button keeps its active style
+                # for a moment, so a shot would depend on the runner's speed.
+                wizard = app.screen
+                assert isinstance(wizard, SetupScreen)
+                wizard.action_next()
                 for _ in range(3):
                     await pilot.pause()
                     await app.workers.wait_for_complete()
