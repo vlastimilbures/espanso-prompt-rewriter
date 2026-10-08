@@ -184,7 +184,9 @@ def test_config_show_provenance_and_masking(
     assert str(tmp_path / ".env") in line
     assert KEY not in result.output
     assert PERSONA not in result.output
-    assert f"<set, {len(KEY)} chars>" in result.stdout
+    assert "<set>" in result.stdout
+    # Not even a key's length (#222).
+    assert f"{len(KEY)} chars" not in result.stdout
 
 
 def test_config_get_never_prints_a_secret(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1137,7 +1139,7 @@ def test_a_key_under_a_setting_name_is_never_shown(monkeypatch: pytest.MonkeyPat
     monkeypatch.setenv("OPENROUTER_MODEL", KEY)
     show = _run("config", "show")
     assert KEY not in show.output
-    assert f"<set, {len(KEY)} chars>" in show.stdout
+    assert "<set>" in show.stdout
     get = _run("config", "get", "OPENROUTER_MODEL")
     assert get.exit_code == 1
     assert KEY not in get.output

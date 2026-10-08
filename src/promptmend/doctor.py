@@ -356,6 +356,18 @@ def _match_check(target: Path, launcher: str | None, manifest: deploy.Manifest |
     return Check("match_files", OK, "every match file is in sync", data)
 
 
+def _same_launcher(deployed: str, current: str | None) -> bool:
+    """The same path however it is spelled: the match files hold Windows paths with `/` (#212),
+    and Windows paths ignore case. A launcher never holds a backslash elsewhere."""
+    if current is None:
+        return False
+
+    def norm(path: str) -> str:
+        return os.path.normcase(os.path.normpath(path.replace("\\", "/")))
+
+    return norm(deployed) == norm(current)
+
+
 def _launcher_check(current: str | None, manifest: deploy.Manifest | None) -> Check:
     # An entry whose file is gone (a deleted folder, another Espanso config folder) calls
     # nothing, so only live entries are judged; the next deploy forgets the others.
@@ -363,7 +375,7 @@ def _launcher_check(current: str | None, manifest: deploy.Manifest | None) -> Ch
     orphans = sorted(e.target for e in entries if deploy.is_gone(e))
     deployed = sorted({e.launcher for e in entries if not deploy.is_gone(e)})
     missing = [p for p in deployed if not Path(p).is_file()]
-    drift = bool(current) and any(p != current for p in deployed)
+    drift = bool(current) and any(not _same_launcher(p, current) for p in deployed)
     data = {
         "current": current,
         "deployed": deployed,
