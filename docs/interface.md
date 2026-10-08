@@ -43,7 +43,7 @@ retire the old `.env`. See [From a checkout install](install.md#from-a-checkout-
 | `1` | Home | Whether you are ready, the most urgent problem, the session log and the command line |
 | `2` | Settings | Every setting and key in one list: switch, pick, edit or reset a setting, set or remove a key, migrate a `.env`, run the Test call (see [Settings tab](#settings-tab)) |
 | `3` | Profiles | Built-in and your own profiles; pick the default profile, edit a profile in `$VISUAL` or `$EDITOR`, copy a checkout's profiles |
-| `4` | Triggers | The match files and their states, the diff, deploy and detach |
+| `4` | Triggers | The match files and their states (refreshed as soon as a deploy or detach has written the files), the diff, deploy and detach |
 | `5` | History | Usage statistics by trigger, provider, model or day; export, prune, reset |
 | `6` | Diagnostics | Each provider's model, base URL, key and whether the draft leaves this machine; every setting's source; the `doctor` checks, and an import-time check of the CLI |
 | `7` | Try | Rewrite a typed draft against a stub or a confirmed provider |
@@ -117,7 +117,7 @@ The list has the focus when the tab opens. Its keys:
 | Up, Down, `j`, `k` | Move |
 | Space | Switch a true/false setting, saved at once |
 | Enter | Switch a true/false setting; pick from a list (the current value marked); type a value (prefilled, the persona too), checked as the CLI reads it: a rejected value or one that looks like a key stays in the dialog with the reason, and nothing is saved. On a key's row, the Set key dialog |
-| `r` | Back to the default (`config unset`). On a key's row, the Remove key dialog. Only while the list has the focus: elsewhere `r` reloads |
+| `u` | Back to the default (`config unset`). On a key's row, the Remove key dialog. Only while the list has the focus |
 | `/` | Filter by name or group; Escape clears it and goes back to the list |
 
 Every change is saved in `config.toml` as `promptmend config set` saves it (keys in the secret
@@ -174,7 +174,8 @@ models, never a made-up 0.
 | `1`-`7` | Switch tabs |
 | `c` | Open Home's command line |
 | `a` | About: version, whether a newer release exists and the command to update, install channel, folders and licence |
-| `r` | Reload (in the Settings list: reset the setting) |
+| `r` | Reload |
+| `u` | In the Settings list: back to the default (`config unset`) |
 | `t` | Switch to the high-contrast theme |
 | `q` | Quit |
 | Escape | Leave the command line or the Try tab's draft, so the tab keys work again; clear the Settings filter |

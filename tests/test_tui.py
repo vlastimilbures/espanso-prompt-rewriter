@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from textual.pilot import Pilot
 from textual.widgets import Button, Input, OptionList, Select, Static, TabbedContent
+from textual.worker import WorkerCancelled
 
 from promptmend import config, config_store, deploy, doctor, history, smoke
 from promptmend import profiles as profile_service
@@ -85,7 +86,12 @@ async def settle(pilot: Pilot[int]) -> None:
     """Let every worker (the state load, an action) and what it set off finish."""
     for _ in range(4):
         await pilot.pause()
-        await pilot.app.workers.wait_for_complete()
+        # A newer state load cancels an older one (exclusive group "load"), as a deploy's
+        # early reload and _done()'s do on a slow runner (#215): that one never completes.
+        waits = [worker.wait() for worker in pilot.app.workers]
+        for result in await asyncio.gather(*waits, return_exceptions=True):
+            if isinstance(result, BaseException) and not isinstance(result, WorkerCancelled):
+                raise result
     await pilot.pause()
 
 
@@ -444,7 +450,7 @@ def test_settings_refuse_an_empty_key_and_legacy_mode(espanso: FakeRunner) -> No
         message = pane(app, "settings").last_message
         assert message.startswith("error: PROMPTMEND_ENV is set")
         assert KEY not in message
-        await pilot.press("r")
+        await pilot.press("u")
         await settle(pilot)
         assert "PROMPTMEND_ENV is set" in pane(app, "settings").last_message
 
@@ -455,15 +461,15 @@ def test_settings_remove_a_key_after_confirming(saved: Path, espanso: FakeRunner
     config_store.save_secret("ANTHROPIC_API_KEY", KEY)
 
     async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
-        # r on a key's row is Remove key (never Reload), with that key picked.
-        await on_row(app, pilot, "ANTHROPIC_API_KEY", "r")
+        # u on a key's row is Remove key, with that key picked.
+        await on_row(app, pilot, "ANTHROPIC_API_KEY", "u")
         assert isinstance(app.screen, FormModal)
         assert app.screen.query_one("#key-name", Select).value == "ANTHROPIC_API_KEY"
         await press(app, pilot, "#submit")
         assert isinstance(app.screen, ConfirmModal)
         await press(app, pilot, "#cancel")
         assert config_store.saved_secret_names() == ("ANTHROPIC_API_KEY",)
-        await pilot.press("r")
+        await pilot.press("u")
         await settle(pilot)
         await fill(app, pilot)
         await pilot.press("y")
@@ -473,7 +479,7 @@ def test_settings_remove_a_key_after_confirming(saved: Path, espanso: FakeRunner
         )
         assert app.session[-1].command == "promptmend secrets remove ANTHROPIC_API_KEY"
         assert settings_rows(app)["ANTHROPIC_API_KEY"].value == "not set"
-        await pilot.press("r")
+        await pilot.press("u")
         await settle(pilot)
         assert "holds no key" in pane(app, "settings").last_message
 
@@ -488,7 +494,7 @@ def test_settings_remove_a_key_still_set_elsewhere(
     monkeypatch.setenv("OPENROUTER_API_KEY", KEY)
 
     async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
-        await on_row(app, pilot, "OPENROUTER_API_KEY", "r")
+        await on_row(app, pilot, "OPENROUTER_API_KEY", "u")
         await fill(app, pilot)
         await press(app, pilot, "#confirm")
         assert pane(app, "settings").last_message.endswith("it is still set, from environment.")
@@ -553,7 +559,7 @@ def test_settings_space_toggles_history(saved: Path, espanso: FakeRunner) -> Non
     assert "PROMPT_HISTORY = true" in (saved / "config.toml").read_text("utf-8")
 
 
-def test_settings_enter_picks_the_output_and_r_resets_it(saved: Path, espanso: FakeRunner) -> None:
+def test_settings_enter_picks_the_output_and_u_resets_it(saved: Path, espanso: FakeRunner) -> None:
     async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
         await on_row(app, pilot, "PROMPT_OUTPUT", "enter")
         screen = app.screen
@@ -575,19 +581,39 @@ def test_settings_enter_picks_the_output_and_r_resets_it(saved: Path, espanso: F
             "copy to the clipboard",
             "change: 2 Settings",
         )
-        # r resets it (config unset): back to the default, logged as its command.
-        await pilot.press("r")
+        # u resets it (config unset): back to the default, logged as its command.
+        await pilot.press("u")
         await settle(pilot)
         assert _state(app).settings.output == "paste"
         assert app.session[-1].command == "promptmend config unset PROMPT_OUTPUT"
         assert "removed from" in pane(app, "settings").last_message
         assert settings_rows(app)["PROMPT_OUTPUT"].on is False
-        await pilot.press("r")
+        await pilot.press("u")
         await settle(pilot)
         assert "nothing to do" in pane(app, "settings").last_message
 
     drive(scenario)
     assert "PROMPT_OUTPUT" not in (saved / "config.toml").read_text("utf-8")
+
+
+def test_settings_r_reloads_and_never_resets(saved: Path, espanso: FakeRunner) -> None:
+    """#215: `r` is Reload on every tab, the Settings list too; reset is `u`."""
+    calls: list[str] = []
+
+    def loader(group_by: str) -> State:
+        calls.append(group_by)
+        return gather(group_by)
+
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        await pick(app, pilot, "PROMPT_OUTPUT", "clipboard")
+        loads = len(calls)
+        await on_row(app, pilot, "PROMPT_OUTPUT", "r")
+        assert len(calls) == loads + 1
+        assert _state(app).settings.output == "clipboard"
+        assert app.session[-1].command == "promptmend config set PROMPT_OUTPUT clipboard"
+
+    drive(scenario, loader=loader)
+    assert 'PROMPT_OUTPUT = "clipboard"' in (saved / "config.toml").read_text("utf-8")
 
 
 def test_settings_ignore_a_second_change_until_the_first_is_read_back(
@@ -616,7 +642,7 @@ def test_settings_ignore_a_second_change_until_the_first_is_read_back(
             real_notify(message, **kwargs)
 
         app.notify = notify  # type: ignore[method-assign]
-        await pilot.press("space", "space", "enter", "r")
+        await pilot.press("space", "space", "enter", "u")
         await pilot.pause()
         assert [e.command for e in app.session] == ["promptmend config set PROMPT_HISTORY false"]
         assert notices.count("Still reading back the last change; try again.") == 3
@@ -670,7 +696,7 @@ def test_settings_reset_says_where_a_value_comes_from(
     monkeypatch.setenv("PROMPT_TIMEOUT_SECONDS", "40")
 
     async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
-        await on_row(app, pilot, "PROMPT_TIMEOUT_SECONDS", "r")
+        await on_row(app, pilot, "PROMPT_TIMEOUT_SECONDS", "u")
         message = pane(app, "settings").last_message
         assert message.endswith("nothing to do. It comes from environment.")
 
@@ -813,7 +839,7 @@ def test_settings_keys_act_only_on_their_tab(espanso: FakeRunner) -> None:
         await pilot.press("1")
         await settle(pilot)
         assert app.focused is None
-        # r is Reload again, and Space nothing.
+        # r is Reload, as on every tab, and Space nothing.
         await pilot.press("r", "space")
         await settle(pilot)
         assert app.session == []
@@ -826,7 +852,7 @@ def test_settings_keys_act_only_on_their_tab(espanso: FakeRunner) -> None:
     ("name", "key", "modal"),
     [
         ("OPENROUTER_API_KEY", "enter", FormModal),
-        ("OPENROUTER_API_KEY", "r", FormModal),
+        ("OPENROUTER_API_KEY", "u", FormModal),
         ("PROMPT_PROVIDER", "enter", PickModal),
         ("PROMPT_PRO_PROFILE", "enter", PickModal),
         ("OLLAMA_MODEL", "enter", EditModal),
@@ -1245,6 +1271,57 @@ def test_triggers_detach_after_confirming(espanso: FakeRunner) -> None:
     drive(scenario)
     left = sorted(p.name for p in (espanso.root / "match").iterdir())
     assert left == ["prompts-core.yml"]  # --keep-static: the static snippets stay
+
+
+def test_triggers_refresh_before_espanso_restarts(
+    espanso: FakeRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#215: the table shows the written files without `r`, even while the restart after a
+    deploy or detach still runs (it can take seconds, on Windows it hung)."""
+    import threading
+
+    restarted = threading.Event()
+    released = threading.Event()
+
+    def runner(argv: list[str]) -> str | deploy.CommandFailure | None:
+        if argv == ["espanso", "restart"]:
+            restarted.set()
+            released.wait(timeout=10)
+        return espanso(argv)
+
+    monkeypatch.setattr(deploy, "run_command", runner)
+
+    async def states(app: ManageApp, pilot: Pilot[int], want: set[str]) -> None:
+        """Wait for the rows' states without settle(): the action worker is still blocked."""
+        for _ in range(200):
+            await pilot.pause(0.02)
+            if {row[4] for row in table_rows(app, "triggers", "#triggers").values()} == want:
+                return
+        pytest.fail(f"the rows never showed {want}")
+
+    async def submit_and_check(app: ManageApp, pilot: Pilot[int], want: set[str]) -> None:
+        restarted.clear()
+        released.clear()
+        app.screen.query_one("#submit", Button).press()
+        await states(app, pilot, want)
+        assert restarted.is_set()
+        assert not released.is_set()  # still restarting
+        assert pane(app, "triggers").busy
+        released.set()
+        await settle(pilot)
+        assert not pane(app, "triggers").busy
+
+    async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
+        await pilot.press("4")
+        await press(app, pilot, "#deploy")
+        await submit_and_check(app, pilot, {"in sync", "commented out"})
+        assert pane(app, "triggers").last_message.endswith("The match files are up to date.")
+        await press(app, pilot, "#detach")
+        # keep-static: the CLI's match files go, the static snippets stay.
+        await submit_and_check(app, pilot, {"missing", "in sync", "commented out"})
+        assert "removed" in pane(app, "triggers").last_message
+
+    drive(scenario)
 
 
 def test_triggers_report_failures(espanso: FakeRunner, monkeypatch: pytest.MonkeyPatch) -> None:

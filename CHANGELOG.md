@@ -9,12 +9,18 @@ All notable changes to this project are documented here. The format follows
 ### Changed
 - `config show` and the other commands that list settings show a key only as `<set>` or
   `<not set>`, no longer with its length (#222).
+- Interface: in the Settings list, `u` (as `config unset`) puts a setting back to its default
+  or opens Remove key; `r` now reloads there too, as on every other tab, so a reload can no
+  longer undo a setting (#215).
 
 ### Fixed
 - `doctor` no longer warns about the launcher on Windows when the match files call the same
   path written with `/` (or in another case) as this install (#212).
 - The deployed `prompts-template.yml` no longer has the CLI path pasted into its header
   comment (#214).
+- Interface: the Triggers tab shows the new states (`in sync`, or `missing` after a detach)
+  as soon as a deploy or detach has written the files, without pressing `r` and without
+  waiting for Espanso's restart (#215).
 
 ## 0.22.0 - 2026-10-07
 

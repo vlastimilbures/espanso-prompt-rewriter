@@ -409,10 +409,10 @@ Rules for agents:
   disabled options, the `▶` cursor re-rendered on highlight) binds j/k, Space (bool: save at
   once), Enter (`PickModal(selected=)`, current marked; `EditModal`, prefilled, which keeps a
   value `settings_model.parse()` rejects or that looks like a key in the dialog with the
-  reason; a key row's `set_key()`), `r` (`settings_cmd.unset_setting()`, shared with `config
+  reason; a key row's `set_key()`), `u` (`settings_cmd.unset_setting()`, shared with `config
   unset`; a key row's `remove_key()`) and `/` (`FilterInput`: Escape clears and returns, Enter
   or Down returns). Its keys act only while it has the focus: `MainScreen` focuses it when the
-  tab opens and drops the focus when another tab opens, so `r` is Reload elsewhere. Saves go
+  tab opens and drops the focus when another tab opens; `r` is Reload on every tab (#215). Saves go
   through `save_setting()`; each logs `teach.for_setting()` (from `teach.SETTING_ACTIONS`,
   which the drift test parses; the persona's value as `<value withheld>`). The provider
   overview (`show_routes()`: `PROMPT_LOCAL_ONLY`/`PROMPT_PROVIDER` sentence and routes table)

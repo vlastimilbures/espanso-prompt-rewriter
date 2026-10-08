@@ -60,9 +60,9 @@ BUTTONS: dict[str, tuple[tuple[str, ...], ...]] = {
 # The Settings tab's list (#199): each action of its keys -> the command it is in a terminal.
 SETTING_ACTIONS: dict[str, tuple[str, ...]] = {
     "set": ("config", "set", "<NAME>", "<VALUE>"),  # Space toggles, Enter picks or edits
-    "reset": ("config", "unset", "<NAME>"),  # r on a setting
+    "reset": ("config", "unset", "<NAME>"),  # u on a setting
     "set-key": ("secrets", "set", "<NAME>"),  # Enter on a key
-    "remove-key": ("secrets", "remove", "<NAME>"),  # r on a key
+    "remove-key": ("secrets", "remove", "<NAME>"),  # u on a key
 }
 # What a button's command does not cover, said in its tooltip.
 NOTES = {

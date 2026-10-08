@@ -140,7 +140,7 @@ class MainScreen(Screen[None]):
     @on(TabbedContent.TabActivated)
     def _tab_shown(self, event: TabbedContent.TabActivated) -> None:
         """The Settings list takes the focus as its tab opens (#199), so the arrows move in it
-        at once; leaving the tab drops it, so its keys (`r`, Space) never act unseen."""
+        at once; leaving the tab drops it, so its keys (`u`, Space) never act unseen."""
         settings = self.query_one("#settings-pane")
         if event.pane.id == "settings":
             self.call_after_refresh(settings.query_one("#settings-list").focus)
