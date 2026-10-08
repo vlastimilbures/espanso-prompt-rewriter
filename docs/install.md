@@ -266,6 +266,12 @@ it up to date.
 On Windows, a deploy is needed after upgrading from 0.20.0 or earlier: those match files ran
 the CLI through PowerShell, which fails on every trigger (#18).
 
+`prompt-workflow` is installed next to `promptmend`, even on a fresh install: it is the
+command's name before 0.19.0, kept as a deprecated alias so match files, scripts and shortcuts
+written for it keep working ([the alias](commands.md#the-prompt-workflow-alias), #169). It
+runs the same CLI, prints a deprecation note before a management command, and goes away in
+1.0.0; run `promptmend espanso deploy` once so your match files call `promptmend`.
+
 ## Switch channel
 
 To move from one channel to another (say from uv to Homebrew):
@@ -306,6 +312,8 @@ Espanso's rendering error.
      `winget uninstall --id astral-sh.uv -e` removes it if winget installed it.
    - Homebrew: `brew uninstall promptmend`, and `brew untap vlastimilbures/tap` if nothing
      else from the tap is installed.
+
+   Either removes the `prompt-workflow` alias with `promptmend` (see [Update](#update)).
 
 If the CLI is already broken or gone, install it again, then detach. Or clean up by hand:
 `espanso-manifest.json` in the data folder lists each deployed file as `target` with its

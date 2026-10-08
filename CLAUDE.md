@@ -318,7 +318,7 @@ Rules for agents:
   (`espanso path config`, `espanso restart`/`start`, `uv tool dir`, `brew --prefix`) goes
   through `run_command`, which `tests/conftest.py` replaces with a refusal.
 - `commands/` — the management commands (#92): `setup`, `config show|get|set|unset|validate|
-  migrate|rollback`, `secrets set|status|remove`, `profiles list|migrate`, `stats`,
+  migrate|rollback`, `secrets set|status|remove`, `profiles list|migrate`, `stats` (`--verbose` adds the disclosure and notes, #222),
   `history export|prune|reset`, `doctor` (plus `espanso` in `cli.py`, which gained
   `deploy --dry-run`). `commands/shell.py` (#183) is `promptmend shell`: a prompt_toolkit
   REPL (imported only once it opens; `prompt_toolkit` and `promptmend.console` are in
@@ -379,7 +379,8 @@ Rules for agents:
   Textual honours `NO_COLOR`; exit is `sys.exit(app.return_code or 0)`. `tui/previous.py`'s
   `PreviousInstallScreen` (#110) opens by itself once per session when `State.previous`
   (`previous_install.detect()`) has a candidate or an unskipped pending copy, and from Home's
-  "Previous install…": four steps (copy via `plan_migration(source=)`, profiles via
+  "Previous install…" (shown only with a candidate, a pending copy or `previous_error`, #222;
+  tests open it with `app.open_previous()`): four steps (copy via `plan_migration(source=)`, profiles via
   `panes.copy_profiles()`, deploy via `TriggersPane.start_deploy()`, retire via
   `plan_retire()` in a worker, enabled only once no launcher points into the checkout and
   refused without `espanso path config`'s answer), none opening while `TriggersPane.busy`;
@@ -407,7 +408,8 @@ Rules for agents:
   (display only; headless `config show` keeps `source_label()`). The Settings tab (#199) is
   `panes.SettingsPane` over `tui/settings_model.py` (pure, no Textual;
   `tests/test_tui_settings_model.py`): `SETTINGS` gives every `env_names()` key exactly once
-  a group (`GROUPS`: Output, Keys, Privacy, Models, History, Interface), a kind (`bool`,
+  a group (`GROUPS`: Output, Keys, Privacy, Models, History, Interface; `PROMPT_PROVIDER` is in
+  Models, its help naming a bare `improve` and the Try tab, #217), a kind (`bool`,
   `choice`, `int`, `text`, `key` for `secret_names()`), choices from the code (`OUTPUTS`,
   `PROVIDER_NAMES`, `""` + `EFFORTS`/`DATA_COLLECTION`, `PROFILE_CHOICES` filled by
   `choices()` with the built-in and the user's added profiles) and a one-line help; `rows()`
@@ -501,7 +503,8 @@ Rules for agents:
   `Recorder`, no session-log entry (its command would call the real provider). Real: a
   `ConfirmModal`
   (provider, model and base URL via `common.shown_value()`, whether it is recorded), then a
-  `recorder.Recorder("improve")` (origin `direct`, no trigger) whose `attempts` list is the
+  `recorder.Recorder("improve")` (origin `direct`, trigger `recorder.TRY_TAB` `-try-`, which
+  `stats` lists apart from a bare `improve`'s `no trigger (direct call)`, #222) whose `attempts` list is the
   observer's, outcome via `cli._failure()`, `finish()` in a `finally` after the result is
   shown (a failed hand-off still records the call); it logs
   `teach.equivalent("improve", …, "--text", "<draft withheld>")` (`--profile` only when one
@@ -593,6 +596,22 @@ Rules for agents:
   child uses `-P` too) and reports its time, module count and any `HEAVY_MODULES` it loaded;
   in a frozen build it starts nothing and returns `FROZEN_IMPORT` (not applicable). The `cli`
   check's data has `frozen`.
+  `deployed_triggers(espanso_dir)` parses the managed match files Espanso has
+  (`assets.triggers_in()`, the shipped parser with any launcher as the first arg; regular
+  files only), else the packaged `assets.triggers()` (deployed False). The `keys` check
+  (#217) names the active `improve` triggers per missing key (`factory.routes()`, refused
+  providers skipped): FAIL when deployed, WARN before a deploy; PROMPT_PROVIDER alone (a bare
+  `improve`, the Try tab) only WARNs; data adds `triggers`. `local_servers` (#220, INFO only,
+  last in CHECK_IDS) asks `local_probe.answers()` for each local provider those triggers use:
+  `local_probe.py` (FORBIDDEN on the trigger path, in `HEAVY_MODULES`) GETs a loopback
+  `OLLAMA_BASE_URL/api/tags` or `LMSTUDIO_BASE_URL/models` (`TIMEOUT` 0.5 s, own
+  `HTTPTransport`, any HTTP answer is True), never another host (None); conftest stubs
+  `_get` to refuse, `tests/test_local_probe.py` restores `REAL_GET` under `fake_http`. The
+  Triggers tab reads that check's data (`panes._servers_down()`, no second probe) and shows
+  `needs Ollama`/`needs LM Studio` as State for a deployed active local trigger (`missing`
+  stays). The deploy never changes for it: `-il-`/`-ilm-` stay active, `-ic-` commented out.
+  The `cli` check shows `<argv0>.exe` on Windows when argv[0] has no suffix and the exe
+  exists; `history` says `no calls yet` while the file does not exist (#222).
   The `folders` check (#169) WARNs while a legacy folder is still in use, naming why (a
   symlink, the named `.env` inside it, a file holding the new name, else a failed move; doctor
   runs after the move) or holds conflicts left behind; data `config_dir`, `data_dir`,

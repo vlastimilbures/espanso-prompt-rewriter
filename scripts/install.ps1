@@ -201,7 +201,8 @@ function Invoke-PromptMendInstall {
     }
 
     Write-Step 'Installed. Next steps (this script runs neither):'
-    Write-Host '  promptmend setup             # settings, API key, a test call and the deploy'
+    Write-Host '  promptmend                   # the interface: settings, key, test call, deploy'
+Write-Host '  promptmend setup             # settings, API key, a test call and the deploy'
     Write-Host '  promptmend espanso deploy    # or only write the Espanso match files'
     Write-Host 'Open a new terminal first if promptmend is not found there.'
     Write-Host "Update: run the same install command again. Uninstall: see $Repo/blob/main/docs/install.md#uninstall"

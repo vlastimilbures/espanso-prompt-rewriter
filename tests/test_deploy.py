@@ -1080,6 +1080,9 @@ def test_cli_status_diff_and_legacy(espanso: Path, fake_run: FakeRunner) -> None
     result = _cli("status", "--diff", *_where(espanso))
     assert result.exit_code == 0
     assert "+# promptmend" in result.stdout
+    # Nothing deployed yet: the header says so instead of "on disk" (#222).
+    assert "prompts-llm.yml (missing)" in result.stdout
+    assert "(on disk)" not in result.stdout
     assert "legacy    base.yml" in result.stdout
     assert fake_run.calls == []  # status never restarts or writes
     assert (espanso / "match" / "base.yml").exists()
@@ -1629,3 +1632,11 @@ def test_crlf_file_an_old_windows_script_wrote_is_stale(
     assert _states(espanso)["prompts-llm.yml"] == deploy.STALE
     target.write_bytes(("\ufeff" + rendered).encode("utf-8"))
     assert _states(espanso)["prompts-llm.yml"] == deploy.STALE
+
+
+def test_triggers_in_reads_a_deployed_file() -> None:
+    """The deployed text has the launcher where the shipped one has the placeholder (#217)."""
+    text = deploy.render(assets.read_match("prompts-llm.yml"), "/opt/bin/promptmend")
+    assert assets.triggers_in(text, "prompts-llm.yml") == [
+        t for t in assets.triggers() if t.file == "prompts-llm.yml"
+    ]

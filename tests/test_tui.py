@@ -367,8 +367,13 @@ def test_home_shows_doctor_and_checks_again(espanso: FakeRunner) -> None:
         rows = {row.label: row for row in home.rows}
         assert rows["Triggers"].text.endswith("Espanso running")
         assert (rows["Rewrites"].status, rows["Rewrites"].detail) == ("fail", "key not set")
-        assert rows["Checks"].problem == (
-            "keys: PROMPT_PROVIDER is openrouter but OPENROUTER_API_KEY is not set"
+        # Nothing deployed yet: the missing files fail; the key names the triggers (#217).
+        assert rows["Checks"].problem.startswith("match_files: prompts-core.yml: missing")
+        assert app.state is not None
+        keys = next(c for c in app.state.report.checks if c.id == "keys")
+        assert keys.message == (
+            "-i-, -iok-, -ip-, -if- will use OpenRouter once deployed, "
+            "but OPENROUTER_API_KEY is not set"
         )
         shown = _rendered(home, "#home-headline") + _rendered(home, "#home-rows")
         assert "Not ready: OPENROUTER_API_KEY is not set, so -i- cannot rewrite." in shown
@@ -1203,8 +1208,11 @@ def test_triggers_show_fixed_providers_and_deploy(espanso: FakeRunner) -> None:
         await press(app, pilot, "#deploy")
         await press(app, pilot, "#submit")
         assert pane(app, "triggers").last_message.endswith("The match files are up to date.")
-        states = {row[4] for row in table_rows(app, "triggers", "#triggers").values()}
-        assert states == {"in sync", "commented out"}
+        rows = table_rows(app, "triggers", "#triggers")
+        # Tests never reach a local model server, so the local triggers need one (#220).
+        assert (rows["-il-"][4], rows["-ilm-"][4]) == ("needs Ollama", "needs LM Studio")
+        states = {row[4] for row in rows.values()}
+        assert states == {"in sync", "commented out", "needs Ollama", "needs LM Studio"}
         await press(app, pilot, "#deploy")
         assert pane(app, "triggers").last_message == "Nothing to do: every match file is in sync."
         await press(app, pilot, "#show-diff")
@@ -1314,7 +1322,8 @@ def test_triggers_refresh_before_espanso_restarts(
     async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
         await pilot.press("4")
         await press(app, pilot, "#deploy")
-        await submit_and_check(app, pilot, {"in sync", "commented out"})
+        deployed = {"in sync", "commented out", "needs Ollama", "needs LM Studio"}
+        await submit_and_check(app, pilot, deployed)
         assert pane(app, "triggers").last_message.endswith("The match files are up to date.")
         await press(app, pilot, "#detach")
         # keep-static: the CLI's match files go, the static snippets stay.
@@ -2107,7 +2116,10 @@ def test_previous_install_shown_once_skip_and_home_reopens(previous: Path) -> No
 
     async def second(app: ManageApp, pilot: Pilot[int]) -> None:
         assert not isinstance(app.screen, PreviousInstallScreen)
-        await press(app, pilot, "#home-previous")
+        # Nothing left to offer: Home hides the button (#222).
+        assert not app.main.query_one("#home-previous", Button).display
+        app.open_previous()
+        await settle(pilot)
         assert "No previous install found" in _found(app)
         assert _disabled(app, "skip")
 
@@ -2126,7 +2138,9 @@ def test_previous_install_entered_path(
 
     async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
         assert not isinstance(app.screen, PreviousInstallScreen)
-        await press(app, pilot, "#home-previous")
+        assert not app.main.query_one("#home-previous", Button).display
+        app.open_previous()
+        await settle(pilot)
         assert "No previous install found" in _found(app)
         await press(app, pilot, "#previous-enter")
         await fill(app, pilot, previous_path=str(root))
@@ -2214,7 +2228,8 @@ def test_previous_install_entered_path_that_is_no_checkout(
     elsewhere.mkdir()
 
     async def scenario(app: ManageApp, pilot: Pilot[int]) -> None:
-        await press(app, pilot, "#home-previous")
+        app.open_previous()  # Home hides its button: nothing was found
+        await settle(pilot)
         await press(app, pilot, "#previous-enter")
         await fill(app, pilot, previous_path=str(elsewhere))
         assert _previous_screen(app).last_message.startswith(f"{elsewhere} is not a checkout")

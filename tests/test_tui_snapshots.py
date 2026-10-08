@@ -68,12 +68,23 @@ _MESSAGES = {
     "clipboard": (doctor.INFO, "skipped (--no-clipboard)"),
     "profiles": (doctor.OK, "PROMPT_PROFILE default resolves"),
     "previous_install": (doctor.OK, "settings are in place; nothing to look for"),
+    "local_servers": (
+        doctor.INFO,
+        "-il- needs Ollama: no answer at OLLAMA_BASE_URL; LM Studio answers (-ilm-)",
+    ),
 }
 _DATA: dict[str, dict[str, Any]] = {
     "install": {"channel": "uv", "launcher": LAUNCHER, "editable": False},
     "espanso": {"found": True, "running": True, "query_failed": False},
     "history": {"lost_writes": 0, "last_lost_utc": None, "tracking_incomplete": False},
     "sqlite": {"version": "3.51.3", "wal_reset_bug": False, "journal_mode": "wal"},
+    "local_servers": {
+        "servers": {
+            "ollama": {"answers": False, "triggers": ["-il-"]},
+            "lmstudio": {"answers": True, "triggers": ["-ilm-"]},
+        },
+        "deployed": True,
+    },
 }
 _STATES = {
     "prompts-core.yml": deploy.IN_SYNC,

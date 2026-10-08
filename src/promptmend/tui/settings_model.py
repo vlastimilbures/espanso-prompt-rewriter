@@ -68,13 +68,6 @@ SETTINGS: tuple[Meta, ...] = (
     ),
     _m(
         _OUT,
-        "PROMPT_PROVIDER",
-        CHOICE,
-        "The provider of a bare `improve`; each trigger names its own.",
-        PROVIDER_NAMES,
-    ),
-    _m(
-        _OUT,
         "PROMPT_PROFILE",
         CHOICE,
         "The profile (system prompt) a rewrite uses.",
@@ -96,6 +89,13 @@ SETTINGS: tuple[Meta, ...] = (
         CHOICE,
         "deny: only endpoints that never store the request; empty sends no field.",
         ("", *DATA_COLLECTION),
+    ),
+    _m(
+        _MOD,
+        "PROMPT_PROVIDER",
+        CHOICE,
+        "Provider of a bare `promptmend improve` and the Try tab; triggers name their own.",
+        PROVIDER_NAMES,
     ),
     _m(_MOD, "OPENROUTER_MODEL", TEXT, "OpenRouter's model for -i-."),
     _m(_MOD, "OPENROUTER_BASE_URL", TEXT, "OpenRouter's API address (https)."),

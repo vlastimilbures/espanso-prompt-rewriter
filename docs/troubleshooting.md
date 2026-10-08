@@ -26,6 +26,12 @@ promptmend config validate   # the settings alone, as a trigger reads them
 issue: it never shows a key, your persona or clipboard text. The interface's Diagnostics tab
 shows the same checks.
 
+`doctor` also asks pypi.org whether a newer release exists, at most once a day, and keeps the
+answer in `update-check.json` in the data folder (see
+[Files and folders](configuration.md#files-and-folders)); `PROMPT_UPDATE_CHECK=false` turns
+that off. It asks a loopback Ollama or LM Studio whether it answers, once per run, only when a
+deployed trigger uses it.
+
 ## Triggers and Espanso
 
 | Symptom | Fix |

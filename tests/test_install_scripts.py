@@ -140,6 +140,7 @@ def test_never_deploys() -> None:
     for word in ("setup", "deploy", "espanso", "detach"):
         assert word not in code.lower(), word
     printed = INSTALL.read_text("utf-8")
+    assert "Write-Host '  promptmend                   # the interface" in printed
     assert "promptmend setup" in printed
     assert "promptmend espanso deploy" in printed
 

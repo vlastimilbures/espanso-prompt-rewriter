@@ -34,6 +34,14 @@ match files it writes into Espanso. Read it after [installing](install.md) and r
 `-if-`, a model other than `OPENROUTER_PRO_MODEL` always gets `PROMPT_PROFILE`. The local
 triggers always use `general`. See [Profiles](profiles.md) for what each profile does.
 
+One rule decides which triggers a deploy turns on: a trigger is active unless it needs a key
+you opt into. So `-il-` and `-ilm-` are always active, even with no Ollama or LM Studio
+installed, and `-ic-` ships commented out (uncomment it once `ANTHROPIC_API_KEY` is set). A
+local trigger whose server does not answer pastes an error marker. `promptmend doctor`
+(`local_servers`) and the interface's Triggers tab (State `needs Ollama`, `needs LM Studio`)
+say so; they ask only a server on this machine, with one short request, never a trigger.
+`doctor`'s `keys` check names the deployed triggers that need each missing key.
+
 For a draft that pastes an email, a thread or a document to work on, use `-ip-`. The pro
 tier copies the pasted material into `INPUTS` word for word (up to about 60 lines), while
 `-i-`'s faster model often summarises a short pasted email instead (CONTRIBUTING, "Known gaps

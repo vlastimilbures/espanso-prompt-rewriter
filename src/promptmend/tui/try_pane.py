@@ -134,7 +134,7 @@ class TryPane(Pane):
             "Type a draft and rewrite it as a trigger would. The clipboard is never read. "
             "Local stub answers on 127.0.0.1 and calls no provider; a real provider asks "
             "first, goes through the data-protection gate and is recorded in the usage "
-            "history as a direct call.",
+            "history as -try-.",
             classes="note",
             markup=False,
         )
@@ -228,7 +228,7 @@ class TryPane(Pane):
         model = _model_setting(provider, tier)
         url = f"{provider.upper()}_BASE_URL"
         recorded = (
-            "It is recorded in the usage history as a direct call (no trigger)."
+            "It is recorded in the usage history as -try- (a direct call, no trigger)."
             if cfg.history
             else "PROMPT_HISTORY is off: nothing is recorded."
         )
@@ -264,6 +264,7 @@ class TryPane(Pane):
         rec: recorder.Recorder | None = None
         if command is not None:
             rec = recorder.Recorder("improve")
+            rec.trigger = recorder.TRY_TAB
             rec.track(cfg)
             # Collected whether or not the history is on: the usage line shows them.
             rec.attempts = attempts

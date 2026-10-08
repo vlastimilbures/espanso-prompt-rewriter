@@ -624,7 +624,7 @@ def test_doctor_json_schema_is_stable(
     checks = data["checks"]
     for check_id, check in checks.items():
         assert tuple(check["data"]) == doctor.DATA_KEYS[check_id]
-    assert set(checks["keys"]["data"]) == {"keys", "provider"}
+    assert set(checks["keys"]["data"]) == {"keys", "provider", "triggers"}
     assert set(checks["espanso"]["data"]) == {
         "found",
         "config_dir",
@@ -848,7 +848,13 @@ def record_ops(seed_history: SeedHistory) -> Callable[..., None]:
 def test_stats_text_states_the_caveats_and_the_history(
     monkeypatch: pytest.MonkeyPatch, record_ops: Callable[..., None]
 ) -> None:
+    # Plain stats: one line on the history, then the numbers (#222).
     result = _run("stats")
+    assert result.exit_code == 0
+    assert "Note:" not in result.stdout
+    assert str(history.history_path()) in result.stdout
+    assert "`promptmend stats --verbose`" in result.stdout
+    result = _run("stats", "--verbose")
     assert result.exit_code == 0
     for caveat in (
         "not provider billing",
@@ -872,6 +878,24 @@ def test_stats_help_states_the_caveats(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "not provider billing" in out
     assert "rendered does not mean pasted" in out
     assert "ignore PROMPT_PROVIDER" in out
+
+
+def test_stats_name_calls_without_a_trigger(seed_history: Callable[..., None]) -> None:
+    for trigger in (None, "-try-"):
+        op = {
+            "id": history.new_operation_id(),
+            "origin": "direct",
+            "trigger_id": trigger,
+            "kind": "improve",
+            "profile_id": "default",
+            "outcome": "ok",
+            "latency_ms": 10.0,
+        }
+        seed_history(op, [])
+    out = _run("stats").stdout
+    assert "no trigger (direct call): 1 call(s)" in out
+    assert "-try-: 1 call(s)" in out
+    assert "(none)" not in out
 
 
 def test_stats_json(record_ops: Callable[..., None]) -> None:

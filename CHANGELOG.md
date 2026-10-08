@@ -18,6 +18,23 @@ All notable changes to this project are documented here. The format follows
   clipboard (149 modules up to the call instead of 221).
 - The install scripts (`install.ps1`, `install_windows.ps1`, `install_macos.sh`) compile the
   bytecode at install, so the first run after an install is no longer the slow one (#216).
+- `doctor`'s `keys` check names the triggers that need a missing key, read from the match
+  files Espanso has (or, before a deploy, the ones a deploy would write): `-i-, -iok-, -ip-,
+  -if- use OpenRouter, but OPENROUTER_API_KEY is not set`. `PROMPT_PROVIDER` only counts for a
+  bare `promptmend improve` and the Try tab, and alone it is a warning; its data gains
+  `triggers` (#217).
+- Interface: `PROMPT_PROVIDER` moved from Output to the Models group of the Settings tab, and
+  its help says what it affects (a bare `promptmend improve` and the Try tab) (#217).
+- `doctor`'s new `local_servers` check (information only) and the Triggers tab's State column
+  say `needs Ollama` / `needs LM Studio` when a deployed local trigger's server does not
+  answer. It asks only a server on this machine, with one short request; the deploy is
+  unchanged: `-il-` and `-ilm-` stay active, `-ic-` stays commented out (#220).
+- `promptmend stats` prints one line on the history before the numbers; the full explanation
+  and the notes moved to `--verbose` (the JSON is unchanged). A real Try tab run is listed as
+  trigger `-try-`, and a bare `promptmend improve` as `no trigger (direct call)` instead of
+  `(none)` (#222).
+- Interface: Home shows "Previous install…" only while there is one to offer (#222).
+- `install.ps1`'s next steps name `promptmend` (the interface) too (#222).
 
 ### Fixed
 - `doctor` no longer warns about the launcher on Windows when the match files call the same
@@ -33,10 +50,20 @@ All notable changes to this project are documented here. The format follows
   `promptmend stats`, `promptmend history export` or `promptmend doctor` stores it.
   `history.lost` now counts only records that could not be kept at all. doctor's `history`
   warning says why and what to do, and its data gains `spooled` (#213).
+- `doctor`'s `cli` check names the `.exe` on Windows, as the `install` check does (#222).
+- `doctor` says `no calls yet` instead of `0 call(s) recorded in …` while the history file
+  does not exist (#222).
+- The deploy diff (`espanso status --diff`, Triggers "Show diff") says `(missing)` instead of
+  `(on disk)` for a file that is not there yet (#222).
 
 ### Documentation
 - Troubleshooting: slow start on Windows, with bytecode, an antivirus exclusion or a Dev
   Drive for uv's folders (`UV_TOOL_DIR`, `UV_PYTHON_INSTALL_DIR`) (#223, #216).
+- Usage: the rule for which triggers a deploy turns on, and what a local trigger needs (#220).
+- Install: why `prompt-workflow` is installed next to `promptmend`, and that it goes in 1.0.0
+  ("Update", "Uninstall"; #221).
+- Troubleshooting: `doctor`'s daily update check (`update-check.json`,
+  `PROMPT_UPDATE_CHECK=false`) and its local server check (#222).
 
 ## 0.22.0 - 2026-10-07
 

@@ -33,7 +33,7 @@ call button, which runs `improve` against a stub on `127.0.0.1` with a placehold
 a Try tab run you confirm.
 
 When it finds an earlier checkout install, it opens a "Previous install" checklist once per
-session (also on Home's "Previous install…"): copy the settings, copy the profiles, deploy,
+session (also on Home's "Previous install…", shown only while there is one): copy the settings, copy the profiles, deploy,
 retire the old `.env`. See [From a checkout install](install.md#from-a-checkout-install).
 
 ## Tabs
@@ -43,7 +43,7 @@ retire the old `.env`. See [From a checkout install](install.md#from-a-checkout-
 | `1` | Home | Whether you are ready, the most urgent problem, the session log and the command line |
 | `2` | Settings | Every setting and key in one list: switch, pick, edit or reset a setting, set or remove a key, migrate a `.env`, run the Test call (see [Settings tab](#settings-tab)) |
 | `3` | Profiles | Built-in and your own profiles; pick the default profile, edit a profile in `$VISUAL` or `$EDITOR`, copy a checkout's profiles |
-| `4` | Triggers | The match files and their states (refreshed as soon as a deploy or detach has written the files), the diff, deploy and detach |
+| `4` | Triggers | The match files and their states (refreshed as soon as a deploy or detach has written the files; `needs Ollama` or `needs LM Studio` when a local trigger's server does not answer), the diff, deploy and detach |
 | `5` | History | Usage statistics by trigger, provider, model or day; export, prune, reset |
 | `6` | Diagnostics | Each provider's model, base URL, key and whether the draft leaves this machine; every setting's source; the `doctor` checks, and an import-time check of the CLI |
 | `7` | Try | Rewrite a typed draft against a stub or a confirmed provider |
@@ -152,7 +152,8 @@ result before a trigger pastes one.
   called and nothing is recorded.
 - **Real provider** first asks, naming the provider, model and base URL. A confirmed call may
   be charged and is recorded in the [usage history](privacy.md#usage-history) as a direct
-  call (no trigger), like `promptmend improve` typed in a terminal. Home's session log shows it
+  call with the trigger `-try-`, so `stats` tells it from `promptmend improve` typed in a
+  terminal. Home's session log shows it
   with the draft withheld.
 
 The clipboard is never read or written, and the draft never goes into a command line. The

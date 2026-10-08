@@ -19,7 +19,8 @@ from ..redaction import safe_repr
 from . import common
 from .common import guard
 
-# Stated in `stats --help` and in every stats output, text or JSON (#92).
+# Stated in `stats --help`, the JSON and `stats --verbose` (#92; the plain text names
+# --verbose instead, #222).
 CAVEATS = (
     "These are local observations on this device, not provider billing.",
     "A call counts once the CLI rendered its output; rendered does not mean pasted.",
@@ -38,6 +39,22 @@ history_app = typer.Typer(
 
 def store(settings: Settings) -> history.HistoryStore:
     return history.HistoryStore.from_settings(settings)
+
+
+def summary(settings: Settings) -> str:
+    """One line on the history for plain `stats`: on or off, where, and how to read more."""
+    path = history.history_path()
+    if not settings.history:
+        return f"Usage history is off (PROMPT_HISTORY=false); nothing is recorded. File: {path}"
+    return (
+        f"Usage history: metadata only, on this device ({path}). "
+        "`promptmend stats --verbose` says what is recorded and how to switch it off."
+    )
+
+
+# How a call recorded with no trigger is listed: a bare `promptmend improve`, or a match
+# that named a trigger id not on the list.
+NO_TRIGGER = "no trigger (direct call)"
 
 
 def disclosure(settings: Settings) -> list[str]:
@@ -81,7 +98,7 @@ def _row_text(row: history.StatsRow) -> list[str]:
     if row.not_applicable_attempts:
         cost.append(f"{row.not_applicable_attempts} local (no cost)")
     return [
-        f"{row.key or '(none)'}: {row.operations} call(s), {row.attempts} request(s), last "
+        f"{row.key or NO_TRIGGER}: {row.operations} call(s), {row.attempts} request(s), last "
         f"{row.last_used_utc[:19]}Z",
         f"    latency p50 {_ms(row.latency_p50_ms)} ms, p95 {_ms(row.latency_p95_ms)} ms; tokens "
         f"in {'-' if tokens_in is None else tokens_in}, out "
@@ -109,6 +126,9 @@ def stats(
         "trigger", "--by", help=f"Group by {', '.join(history.GROUP_BY)}", show_default=True
     ),
     as_json: bool = typer.Option(False, "--json", help="Print JSON instead of text"),
+    verbose: bool = typer.Option(
+        False, "--verbose", help="Also say what the history records and how to read the numbers"
+    ),
 ) -> None:
     if by not in history.GROUP_BY:
         raise typer.BadParameter(
@@ -132,11 +152,14 @@ def stats(
             }
         )
         return
-    for line in disclosure(settings):
-        typer.echo(line)
-    typer.echo("")
-    for caveat in CAVEATS:
-        typer.echo(f"Note: {caveat}")
+    if verbose:
+        for line in disclosure(settings):
+            typer.echo(line)
+        typer.echo("")
+        for caveat in CAVEATS:
+            typer.echo(f"Note: {caveat}")
+    else:
+        typer.echo(summary(settings))
     typer.echo("")
     if not rows:
         typer.echo("No usage recorded yet.")
