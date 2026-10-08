@@ -138,7 +138,7 @@ No code path builds a provider that can reach another machine without the gate.
   distribute*, and Vietnamese *tài liệu/văn bản/thông tin mật*, *tối mật*, *lưu hành nội bộ*.
   The words in prose ("output restricted to 5 bullets", "confidential information", *bảo mật*,
   *mật độ*, *mật khẩu*) are not flagged.
-- Vietnamese national IDs: a 12-digit CCCD with a valid province and century code (not digits
+- National ID numbers, in Vietnamese formats only today: a 12-digit CCCD with a valid province and century code (not digits
   inside an AWS ARN), and a 9-digit number next to CMND, CCCD, CMT, *chứng minh nhân dân/thư*,
   *căn cước*, *hộ chiếu*, *passport*, *national ID* or *ID card*.
 - Your own patterns from `PROMPT_EXTRA_PATTERNS` (below).
@@ -170,7 +170,7 @@ fixed count (`CUST-\d{6}`) or a bounded repeat (`\w{1,20}`).
 A blocked draft pastes `[promptmend: Blocked cloud call. Sensitive content detected: …]`
 instead of calling the API.
 
-- When every finding is a label, a Vietnamese ID, an email address or an IBAN, you can send
+- When every finding is a label, a national ID number, an email address or an IBAN, you can send
   that one draft with `-iok-` (`--allow-flagged`). The paste then starts with
   `[promptmend: sent despite: …]`, and the next draft is checked as usual.
 - Keys, tokens, passwords, cards, private keys, a bare token and your own

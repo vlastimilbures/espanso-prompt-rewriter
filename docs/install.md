@@ -101,6 +101,31 @@ If a new terminal does not find `promptmend`, run `uv tool update-shell` once.
 
 ## Windows
 
+### Espanso on Windows
+
+Install Espanso before PromptMend, either from [espanso.org](https://espanso.org/install/) or
+with `winget install -e --id Espanso.Espanso`. Either way, it is not ready yet:
+
+1. Open Espanso once from the Start menu and accept its first-run wizard, which adds Espanso to
+   PATH and starts it with Windows. Until then, `espanso` is not on PATH and Espanso is not
+   running.
+2. Close every Windows Terminal window, or sign out and in again. A new tab or window keeps
+   the environment Windows Terminal started with, so it does not see a PATH that an install
+   (Espanso, uv, or uv's `update-shell`) changed since. Do the same after installing
+   PromptMend, before the first `promptmend` command.
+
+A portable Espanso (the zip, unpacked to a folder of your choice) keeps its configuration in
+the `.espanso` folder next to `espansod.exe`; an installed one uses `%APPDATA%\espanso`.
+PromptMend deploys to the portable folder while that Espanso is the one running, so start it
+before `promptmend setup` or `promptmend espanso deploy`. `promptmend espanso status` names
+the folder PromptMend uses; `espanso path config`, run from the portable folder, shows
+Espanso's own answer.
+
+Keep only one Espanso. A portable copy usually starts from its own `espanso.lnk` in your
+Startup folder (`shell:startup`), and the installed one's wizard adds autostart of its own, so
+two Espanso instances, each with its own configuration folder, can start at sign-in. Delete
+one of the two shortcuts, or remove the portable folder once the installed Espanso works.
+
 ### One command (recommended)
 
 Paste this into PowerShell or a Command Prompt. It needs no Python or uv first:
@@ -119,7 +144,8 @@ It prints each command before running it, and:
    installer where there is no winget);
 2. installs the wheel attached to that same Release with its `constraints.txt`, with
    `--force` (PyPI is not used);
-3. runs `uv tool update-shell`, so a new terminal finds `promptmend`;
+3. runs `uv tool update-shell`, so a new terminal finds `promptmend` (in Windows Terminal,
+   only once every window was closed);
 4. runs `promptmend doctor --no-clipboard`, which lists what [Set up](#set-up) still has to do.
 
 It never runs `promptmend setup` or `promptmend espanso deploy`: it only names them as the
@@ -141,7 +167,8 @@ uv tool install promptmend -c https://github.com/vlastimilbures/promptmend/relea
 uv tool update-shell
 ```
 
-Open a new terminal afterwards, so it finds `promptmend`.
+Then close every Windows Terminal window and open a new one, so it finds `promptmend` (see
+[Espanso on Windows](#espanso-on-windows)).
 
 ### Portable zip (preview)
 
@@ -224,7 +251,8 @@ promptmend setup --non-interactive --api-key-stdin --deploy < key.txt
 ```
 
 Without `--deploy`, the deploy stays a preview. Then copy a rough draft, type `-i-` in any
-text field and wait without typing or switching windows (see [Usage](usage.md)).
+text field and wait without typing or switching windows (see [Usage](usage.md), and the
+[list of triggers](usage.md#triggers) for what each one does and sends).
 
 ## Update
 
